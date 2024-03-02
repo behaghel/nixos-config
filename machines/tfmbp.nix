@@ -50,7 +50,7 @@
       };
       firefox = {
         enable = true;
-        # package = pkgs.nivApps.Firefox;
+        package = pkgs.nivApps.Firefox;
         profiles =
           let settings = {
                 "app.update.auto" = true;

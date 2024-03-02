@@ -10,7 +10,6 @@
           # ./starship.nix
           ./git
           # ./dropbox
-          ./zsh
           # ./emacs.nix
           ./mail
         ];
