@@ -11,7 +11,7 @@
           ./git
           ./dropbox
           ./zsh
-          ./emacs.nix
+          # ./emacs.nix
           ./mail
         ];
       };

@@ -2,6 +2,7 @@
   inputs = {
     # Principle inputs (updated by `nix run .#update`)
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nur.url = "github:nix-community/NUR";
     nix-darwin.url = "github:lnl7/nix-darwin/master";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     home-manager.url = "github:nix-community/home-manager";
@@ -84,7 +85,7 @@
         ];
         packages.default = self'.packages.activate;
         devShells.default = pkgs.mkShell {
-          inputsFrom = [ config.treefmt.build.devShell ];
+          # inputsFrom = [ config.treefmt.build.devShell ];
           packages = [
             pkgs.sops
             pkgs.ssh-to-age
