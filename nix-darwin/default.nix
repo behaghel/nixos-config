@@ -23,7 +23,12 @@
           nixpkgs.overlays = [
             (import ./pkgs/overlay.nix)
             (let
-              inherit (self.inputs) nivSources;
+              nivSources = let
+                f = "${self}/nix-darwin/nivApps/sources.nix";
+              in
+                if builtins.pathExists f
+                then import f
+                else {};
               hm = pkgs.callPackage "${self.inputs.home-manager}/modules/files.nix" {
                 lib = pkgs.lib // self.inputs.home-manager.lib;
               };

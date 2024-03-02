@@ -1,0 +1,63 @@
+{
+    "Anki": {
+        "sha256": "11hkxpa74szx31b4sdmh20zp6y75b1nkxbmkcb8vw22819jmcidh",
+        "type": "file",
+        "url": "https://github.com/ankitects/anki/releases/download/2.1.49/anki-2.1.49-mac.dmg",
+        "url_template": "https://github.com/ankitects/anki/releases/download/<version>/anki-<version>-mac.dmg",
+        "version": "2.1.66"
+    },
+    "Dropbox": {
+        "sha256": "4151769b1a3780c78f5c8fddf54df4a075120beeb16dc63cccd8b749ae63a358",
+        "type": "file",
+        "url": "https://dl-web.dropbox.com/installer?build_no=165.4.4300&plat=mac",
+        "url_template": "https://dl-web.dropbox.com/installer?build_no=<version>&plat=mac",
+        "version": "165.4.4300"
+    },
+    "Firefox": {
+        "sha256": "1l0d3wq6ky706znm0rmdljslw35qw2v3hxrba1y3irhwchdwc2c1",
+        "type": "file",
+        "url": "https://download-installer.cdn.mozilla.net/pub/firefox/releases/95.0/mac/en-GB/Firefox%2095.0.dmg",
+        "url_template": "https://download-installer.cdn.mozilla.net/pub/firefox/releases/<version>/mac/en-GB/Firefox%20<version>.dmg",
+        "version": "116.0.3"
+    },
+    "Kindle": {
+        "sha256": "12ssvxdsc6ixqfvpmszb7jggqc8ny3cxlpk01i0n5kpqg7780ljx",
+        "type": "file",
+        "url": "https://kindleformac.s3.amazonaws.com/65301/KindleForMac-installer-1.39.65301.dmg",
+        "url_template": "https://kindleformac.s3.amazonaws.com/65301/KindleForMac-installer-<version>.dmg",
+        "version": "1.40.1"
+    },
+    "VLC": {
+        "sha256": "002jcljzgbp2pgyfq6xy4jc9cz6vzf6r891lmb5mi1y8c2k7ivnd",
+        "type": "file",
+        "url": "https://get.videolan.org/vlc/3.0.17.3/macosx/vlc-3.0.17.3-arm64.dmg",
+        "url_template": "https://get.videolan.org/vlc/<version>/macosx/vlc-<version>-arm64.dmg",
+        "version": "3.0.18"
+    },
+    "Zotero": {
+        "sha256": "0gcav9ihm54l3hik2h83yyyrr3gzkp263m072yfy7csr78vqhfi6",
+        "type": "file",
+        "url": "https://www.zotero.org/download/client/dl?channel=release&platform=mac&version=6.0.18&ignore=.dmg",
+        "url_template": "https://www.zotero.org/download/client/dl?channel=release&platform=mac&version=<version>",
+        "version": "6.0.26"
+    },
+    "Amethyst": {
+        "sha256": "02cwh9pixzs6vz5z3p2i6m17k88629lj1bc4qmzyfb43h2z2p2hr",
+        "type": "file",
+        "url": "https://github.com/ianyh/Amethyst/releases/download/v0.20.0/Amethyst.zip",
+        "url_template": "https://github.com/ianyh/Amethyst/releases/download/v<version>/Amethyst.zip",
+        "version": "0.20.0"
+    },
+    "niv": {
+        "branch": "master",
+        "description": "Easy dependency management for Nix projects",
+        "homepage": "https://github.com/nmattia/niv",
+        "owner": "nmattia",
+        "repo": "niv",
+        "rev": "5830a4dd348d77e39a0f3c4c762ff2663b602d4c",
+        "sha256": "1d3lsrqvci4qz2hwjrcnd8h5vfkg8aypq3sjd4g3izbc8frwz5sm",
+        "type": "tarball",
+        "url": "https://github.com/nmattia/niv/archive/5830a4dd348d77e39a0f3c4c762ff2663b602d4c.tar.gz",
+        "url_template": "https://github.com/<owner>/<repo>/archive/<rev>.tar.gz"
+    }
+}
