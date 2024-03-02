@@ -2,7 +2,7 @@
 { flake, pkgs, lib, ... }:
 
 {
-  # Login via SSH with mmy SSH key
+  # Login via SSH with my SSH key
   users.users =
     let
       people = flake.config.people;

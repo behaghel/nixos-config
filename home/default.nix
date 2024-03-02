@@ -3,13 +3,13 @@
   flake = {
     homeModules = {
       common = {
-        home.stateVersion = "22.11";
+        home.stateVersion = "23.11";
         imports = [
           ./shell
           ./zsh
           # ./starship.nix
           ./git
-          ./dropbox
+          # ./dropbox
           ./zsh
           # ./emacs.nix
           ./mail

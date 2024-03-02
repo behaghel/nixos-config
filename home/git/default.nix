@@ -30,6 +30,6 @@ in {
     home.packages = with pkgs; [
       gh              # TODO: condition this to github option above
     ];
-    xdg.configFile."pass-git-helper/git-pass-mapping.ini".source = .config/pass-git-helper/git-pass-mapping.ini;
+    # xdg.configFile."pass-git-helper/git-pass-mapping.ini".source = .config/pass-git-helper/git-pass-mapping.ini;
   };
 }

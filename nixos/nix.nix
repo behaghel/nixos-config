@@ -8,7 +8,7 @@
       allowUnfree = true;
     };
     overlays = [
-      flake.inputs.nur.nixosModules.nur
+      # flake.inputs.nur.nixosModules.nur
       # flake.inputs.nuenv.overlays.nuenv
       # flake.inputs.nixd.overlays.default
       # flake.inputs.nuenv.overlays.default

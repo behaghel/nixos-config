@@ -2,7 +2,7 @@
   inputs = {
     # Principle inputs (updated by `nix run .#update`)
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    nur.url = "github:nix-community/NUR";
+    # nur.url = "github:nix-community/NUR";
     nix-darwin.url = "github:lnl7/nix-darwin/master";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     home-manager.url = "github:nix-community/home-manager";
@@ -27,51 +27,46 @@
         ./nix-darwin
       ];
 
-      flake =
-        let
-          # TODO: Change username
-          myUserName = "hub";
-        in
-          {
-            # Configurations for macOS machines
-            darwinConfigurations = {
-              tfmbp = self.nixos-flake.lib.mkMacosSystem ./machines/tfmbp.nix;
-            };
+      flake = {
+        # Configurations for macOS machines
+        darwinConfigurations = {
+          tfmbp = self.nixos-flake.lib.mkMacosSystem ./machines/tfmbp.nix;
+        };
 
-            # Configurations for Linux (NixOS) machines
-            nixosConfigurations = {
-              linux-builder = self.nixos-flake.lib.mkLinuxSystem
-                ./systems/linux-builder.nix;
-              # nixosBase = self.nixos-flake.lib.mkLinuxSystem {
-              #   nixpkgs.hostPlatform = "x86_64-linux";
-              #   imports = [
-              #     self.nixosModules.common # See below for "nixosModules"!
-              #     self.nixosModules.linux
-              #     # Your machine's configuration.nix goes here
-              #     ({ pkgs, ... }: {
-              #       # TODO: Put your /etc/nixos/hardware-configuration.nix here
-              #       boot.loader.grub.device = "nodev";
-              #       fileSystems."/" = {
-              #         device = "/dev/disk/by-label/nixos";
-              #         fsType = "btrfs";
-              #       };
-              #       system.stateVersion = "23.05";
-              #     })
-              #     # Your home-manager configuration
-              #     self.nixosModules.home-manager
-              #     {
-              #       home-manager.users.${myUserName} = {
-              #         imports = [
-              #           self.homeModules.common # See below for "homeModules"!
-              #           self.homeModules.linux
-              #         ];
-              #         home.stateVersion = "22.11";
-              #       };
-              #     }
-              #   ];
-              # };
-            };
-          };
+        # Configurations for Linux (NixOS) machines
+        nixosConfigurations = {
+          linux-builder = self.nixos-flake.lib.mkLinuxSystem
+            ./systems/linux-builder.nix;
+          # nixosBase = self.nixos-flake.lib.mkLinuxSystem {
+          #   nixpkgs.hostPlatform = "x86_64-linux";
+          #   imports = [
+          #     self.nixosModules.common # See below for "nixosModules"!
+          #     self.nixosModules.linux
+          #     # Your machine's configuration.nix goes here
+          #     ({ pkgs, ... }: {
+          #       # TODO: Put your /etc/nixos/hardware-configuration.nix here
+          #       boot.loader.grub.device = "nodev";
+          #       fileSystems."/" = {
+          #         device = "/dev/disk/by-label/nixos";
+          #         fsType = "btrfs";
+          #       };
+          #       system.stateVersion = "23.05";
+          #     })
+          #     # Your home-manager configuration
+          #     self.nixosModules.home-manager
+          #     {
+          #       home-manager.users.${myUserName} = {
+          #         imports = [
+          #           self.homeModules.common # See below for "homeModules"!
+          #           self.homeModules.linux
+          #         ];
+          #         home.stateVersion = "22.11";
+          #       };
+          #     }
+          #   ];
+          # };
+        };
+      };
 
       perSystem = { self', system, pkgs, lib, config, inputs', ... }: {
         # Flake inputs we want to update periodically

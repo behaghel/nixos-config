@@ -18,7 +18,7 @@
     hub = {
       git.enable = true;
       zsh.enable = true;
-      dropbox.enable = true;
+      # dropbox.enable = true;
       mail.enable = true;
     };
 
