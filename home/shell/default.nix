@@ -58,21 +58,31 @@ in {
         my-aspell
       ];
 
-      programs = {
-        # nix-index = {
-        #   enable = true;
-        #   enableZshIntegration = true;
-        # };
-        # nix-index-database.comma.enable = true;
-        lsd = {
-          enable = true;
-          enableAliases = true;
-        };
-        bat.enable = true;
-        zoxide.enable = true;
-        fzf.enable = true;
-        jq.enable = true;
-        htop.enable = true;
+    programs = {
+      # nix-index = {
+      #   enable = true;
+      #   enableZshIntegration = true;
+      # };
+      # nix-index-database.comma.enable = true;
+      lsd = {
+        enable = true;
+        enableAliases = true;
       };
+      bat.enable = true;
+      zoxide.enable = true;
+      fzf.enable = true;
+      jq.enable = true;
+      htop.enable = true;
+    };
+    home.activation = {
+      myHomeDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  $DRY_RUN_CMD mkdir -p $HOME/.local/share $HOME/tmp $HOME/ws;  sudo ln -sfn ${pkgs.mu}/share/emacs $HOME/.local/share
+                '';
+      # link emacs, vim and password-store: git submodules don't work with home.file (they are empty)
+      linkHomeConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+                  $DRY_RUN_CMD ln -sf .dotfiles/vim/.vim; ln -sf .dotfiles/emacs/.emacs.d; ln -sf .dotfiles/pass/.password-store
+      '';
+    };
+
   };
 }

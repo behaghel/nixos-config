@@ -22,6 +22,15 @@
         ({ pkgs, ... }: {
           nixpkgs.overlays = [
             (import ./pkgs/overlay.nix)
+            (let
+              inherit (self.inputs) nivSources;
+              hm = pkgs.callPackage "${self.inputs.home-manager}/modules/files.nix" {
+                lib = pkgs.lib // self.inputs.home-manager.lib;
+              };
+              hdiutil = hm.config.lib.file.mkOutOfStoreSymlink "/usr/bin/hdiutil";
+            in (import ./niv-managed-dmg-apps.nix {
+              inherit nivSources hdiutil;
+            }))
             self.inputs.darwin-emacs.overlays.emacs
           ];
         })

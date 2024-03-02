@@ -1,4 +1,4 @@
-{ self, inputs, ... }:
+{ self, ... }:
 {
   flake = {
     homeModules = {
@@ -24,6 +24,7 @@
         imports = [
           self.homeModules.common
           # ./kitty.nix
+          ./nix-darwin/bepo.nix
         ];
       };
     };
