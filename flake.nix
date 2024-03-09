@@ -36,7 +36,7 @@
         # Configurations for Linux (NixOS) machines
         nixosConfigurations = {
           linux-builder = self.nixos-flake.lib.mkLinuxSystem
-            ./systems/linux-builder.nix;
+            ./systems/linux-builder;
           # nixosBase = self.nixos-flake.lib.mkLinuxSystem {
           #   nixpkgs.hostPlatform = "x86_64-linux";
           #   imports = [

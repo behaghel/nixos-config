@@ -76,7 +76,7 @@ in {
     };
     home.activation = {
       myHomeDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  $DRY_RUN_CMD mkdir -p $HOME/.local/share $HOME/tmp $HOME/ws;  sudo ln -sfn ${pkgs.mu}/share/emacs $HOME/.local/share
+                  $DRY_RUN_CMD mkdir -p $HOME/.local/share $HOME/tmp $HOME/ws;  ln -sfn ${pkgs.mu}/share/emacs $HOME/.local/share
                 '';
       # link emacs, vim and password-store: git submodules don't work with home.file (they are empty)
       linkHomeConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''

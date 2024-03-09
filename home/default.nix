@@ -24,6 +24,7 @@
           self.homeModules.common
           # ./kitty.nix
           ./nix-darwin/bepo.nix
+          ./nix-darwin/niv-apps.nix
         ];
       };
     };

@@ -20,6 +20,7 @@
       zsh.enable = true;
       # dropbox.enable = true;
       mail.enable = true;
+      niv-apps.enable = true;
     };
 
     home.packages = with pkgs;
@@ -27,8 +28,6 @@
         terminal-notifier
         coreutils
 
-        # dmg through niv
-        niv # Broken on darwin: https://github.com/NixOS/nixpkgs/issues/140774
         glaxnimate
         #nivApps.Dropbox
         nivApps.Anki
@@ -36,7 +35,6 @@
         nivApps.Zotero
         nivApps.Kindle
       ];
-    # home.file.".config/foo".text = "bar";
 
     programs = {
       dircolors = {
@@ -143,9 +141,6 @@
       };
 
     };
-    home.file.".config/sketchybar/sketchybarrc".source = ../nix-darwin/sketchybar/sketchybarrc;
-    home.file.".config/sketchybar/sketchybarrc".executable = true;
-
     # Emacs
     programs.emacs = {
       enable = true;
