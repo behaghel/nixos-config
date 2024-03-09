@@ -1,3 +1,3 @@
 (self: super: {
-  sketchybar = super.callPackage ./sketchybar { };
+  # sketchybar = super.callPackage ./sketchybar { };
 })

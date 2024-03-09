@@ -119,15 +119,15 @@
         settings = {
           # to make Option (alt) work on macOS
           window.option_as_alt = "OnlyRight";
-          mouse_bindings = [{ mouse = "Middle"; action = "PasteSelection";}];
+          mouse.bindings = [{ mouse = "Middle"; action = "PasteSelection";}];
           # default config isn't bépo friendly: all AltGr shortcuts
           # need to be redeclared explicitly here.
           # alacritty --print-events to detect what to put below
-          key_bindings = [
-            {key = "Minus"; mods ="Alt"; chars = "_";}
-            {key = "Grave"; mods ="Alt"; chars = "~";}
-            {key = "Backslash"; mods ="Alt"; chars = "|";}
-            {key = "Key7"; mods ="Alt"; chars = "&";}
+          keyboard.bindings = [
+            {key = "Space"; mods ="Alt"; chars = "_";}
+            {key = "k"; mods ="Alt"; chars = "~";}
+            {key = "b"; mods ="Alt"; chars = "|";}
+            {key = "e"; mods ="Alt"; chars = "&";}
           ];
           font = {
             size = 15; # 14 creates glitches on p10k prompt

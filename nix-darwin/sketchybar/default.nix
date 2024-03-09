@@ -4,9 +4,9 @@ let scripts = ./scripts;
 in {
   services.sketchybar = {
     enable = true;
-    package = pkgs.sketchybar;
+    # package = pkgs.sketchybar;
     extraPackages = [ pkgs.jq pkgs.gh ];
-    config = lib.replaceStrings [("\${" + "scripts" + "}")] ["${scripts}"] (lib.readFile ./sketchybarrc);
+    config = builtins.replaceStrings [("\${" + "scripts" + "}")] ["${scripts}"] (builtins.readFile ./sketchybarrc);
   };
   services.yabai.config.external_bar = "main:25:0";
   system.defaults.NSGlobalDomain._HIHideMenuBar = true;
