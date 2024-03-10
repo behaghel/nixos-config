@@ -31,6 +31,21 @@ in {
     xdg.configFile."profile.d/hub.profile".source = ./.config/profile.d/hub.profile;
     xdg.configFile."profile.d/zz_path.profile".source = ./.config/profile.d/zz_path.profile;
 
+    programs.bash.profileExtra = let
+      sysBin = "/nix/var/nix/profiles/default/bin";
+      usrBin =
+        "/etc/profiles/per-user/$USER/bin";
+      in ''
+        case :$PATH: in
+          *:${sysBin}:*)  ;;  # do nothing
+          *) PATH=${sysBin}:$PATH ;;
+        esac
+        case :$PATH: in
+          *:${usrBin}:*)  ;;  # do nothing
+          *) PATH=${usrBin}:$PATH ;;
+        esac
+        export PATH
+      '';
 
     programs.direnv = {
       enable = cfg.direnv;

@@ -49,7 +49,7 @@ yabai -m rule --add app='About This Mac' manage=off
 yabai -m rule --add app='System Information' manage=off
 yabai -m rule --add app='System Preferences' manage=off
 yabai -m rule --add app='zoom.us' manage=off topmost=on
-yabai -m rule --add app=alacritty border=off
+yabai -m rule --add app=Alacritty border=off
 yabai -m rule --add app=kitty border=off
 yabai -m rule --add app=emacs-27.2 manage=on space=2 border=off grid=1:10:5:0:5:1
 yabai -m rule --add label=emacs app=Emacs manage=on space=2 border=off grid=1:10:5:0:5:1

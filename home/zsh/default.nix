@@ -62,6 +62,7 @@ in {
         [[ ! -f ~/.p10k.zsh ]] || source ~/.p10k.zsh
 
         export -U PATH=~/.nix-profile/bin''${PATH:+:$PATH}
+        export -U PATH=/etc/profiles/per-user/$USER/bin''${PATH:+:$PATH}
       '';
     };
     xdg.configFile."zsh.d/gpg.zsh".source = ./.config/zsh.d/gpg.zsh;

@@ -128,6 +128,8 @@
             {key = "k"; mods ="Alt"; chars = "~";}
             {key = "b"; mods ="Alt"; chars = "|";}
             {key = "e"; mods ="Alt"; chars = "&";}
+            {key = "y"; mods ="Alt"; chars = "{";}
+            {key = "x"; mods ="Alt"; chars = "}";}
           ];
           font = {
             size = 15; # 14 creates glitches on p10k prompt

@@ -232,10 +232,6 @@ in
            , ...
            }: (nameValuePair "keyboard-${toString productId}" ({
             serviceConfig.ProgramArguments = [
-              # Use xpc_set_event_stream_handler to mark this event as "consumed",
-              # otherwise it the script will never stop being called (something
-              # like every 10 seconds).
-              "${xpc_set_event_stream_handler}/bin/xpc_set_event_stream_handler"
               "${pkgs.writeScriptBin "apply-keybindings" (
                 let intToHexString = value:
                   pkgs.runCommand "${toString value}-to-hex-string"
@@ -285,16 +281,7 @@ in
                 ''
                 )}/bin/apply-keybindings"
             ];
-            serviceConfig.LaunchEvents = {
-              "com.apple.iokit.matching" = {
-                "com.apple.usb.device" = {
-                  IOMatchLaunchStream = true;
-                  IOProviderClass = "IOUSBDevice";
-                  idProduct = productId;
-                  idVendor = vendorId;
-                };
-              };
-            };
+            serviceConfig.StartInterval = 15000;
             serviceConfig.RunAtLoad = true;
           })
           ))
