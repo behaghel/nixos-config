@@ -1,7 +1,7 @@
 { pkgs, ... }:
 {
   fonts = {
-    fonts = with pkgs; [
+    packages = with pkgs; [
       # fonts that many things (apps, websites) expect
       dejavu_fonts
       liberation_ttf
@@ -23,7 +23,5 @@
       })
       font-awesome
     ];
-    # the modern way in NixOS: fontDir.enable = true;
-    fontDir.enable = true;
   };
 }

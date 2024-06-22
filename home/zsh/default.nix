@@ -17,7 +17,7 @@ in {
       enable = true;
       dotDir = ".config/zsh";
       enableCompletion = true;
-      enableAutosuggestions = true;
+      autosuggestion.enable = true;
       plugins = [
         # update these in nix-shell -p nix-prefetch-github
         # $ nix-prefetch-github zsh-users zsh-syntax-highlighting

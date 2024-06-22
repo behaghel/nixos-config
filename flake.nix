@@ -11,7 +11,9 @@
     flake-parts.url = "github:hercules-ci/flake-parts";
     nixos-flake.url = "github:srid/nixos-flake";
     darwin-emacs = {
-      url = "github:c4710n/nix-darwin-emacs";
+      # breaks due to patch failure -- Sun Jun 23 16:28:53 CEST 2024
+      # url = "github:c4710n/nix-darwin-emacs";
+      url = "github:nix-community/emacs-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
   };

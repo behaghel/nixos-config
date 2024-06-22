@@ -6,7 +6,7 @@
   ];
   nixpkgs.hostPlatform = "aarch64-darwin";
 
-  environment.systemPackages = [ pkgs.jdk19_headless ]; # for languagetools from Emacs
+  environment.systemPackages = [ pkgs.jdk21_headless ]; # for languagetools from Emacs
 
   # For home-manager to work.
   users.users.${flake.config.people.myself} = {
