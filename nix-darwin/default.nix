@@ -48,9 +48,7 @@
         self.darwinModules.darwin-emacs
         ./keyboard
         ./system-defaults.nix
-        ./yabai.nix
         ./skhd
-        ./sketchybar
       ];
     };
   };
