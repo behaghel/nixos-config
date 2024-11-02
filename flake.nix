@@ -1,96 +1,48 @@
 {
   inputs = {
-    # Principle inputs (updated by `nix run .#update`)
+    # main inputs (updated by `nix run .#update`)
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
-    # nur.url = "github:nix-community/NUR";
-    nix-darwin.url = "github:lnl7/nix-darwin/master";
+    flake-parts.url = "github:hercules-ci/flake-parts";
+    nix-darwin.url = "github:LnL7/nix-darwin";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
     home-manager.url = "github:nix-community/home-manager";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
+    nixos-hardware.url = "github:NixOS/nixos-hardware";
+    nixos-unified.url = "github:srid/nixos-unified";
+    disko.url = "github:nix-community/disko";
+    disko.inputs.nixpkgs.follows = "nixpkgs";
+    nuenv.url = "github:hallettj/nuenv/writeShellApplication";
 
-    flake-parts.url = "github:hercules-ci/flake-parts";
-    nixos-flake.url = "github:srid/nixos-flake";
-    darwin-emacs = {
-      # breaks due to patch failure -- Sun Jun 23 16:28:53 CEST 2024
-      # url = "github:c4710n/nix-darwin-emacs";
+    # nur.url = "github:nix-community/NUR";
+    nix-index-database.url = "github:nix-community/nix-index-database";
+    omnix.url = "github:juspay/omnix";
+
+    emacs = {
       url = "github:nix-community/emacs-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
     };
+
+    # Devshell
+    treefmt-nix.url = "github:numtide/treefmt-nix";
   };
 
   outputs = inputs@{ self, ... }:
     inputs.flake-parts.lib.mkFlake { inherit inputs; } {
-      systems = [ "x86_64-linux" "aarch64-darwin" ];
-      imports = [
-        inputs.nixos-flake.flakeModule
-        ./users
-        ./home
-        ./nixos
-        ./nix-darwin
-      ];
+      systems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+      imports = (with builtins;
+        map
+          (fn: ./modules/flake-parts/${fn})
+          (attrNames (readDir ./modules/flake-parts)));
 
-      flake = {
-        # Configurations for macOS machines
-        darwinConfigurations = {
-          tfmbp = self.nixos-flake.lib.mkMacosSystem ./machines/tfmbp.nix;
-        };
-
-        # Configurations for Linux (NixOS) machines
-        nixosConfigurations = {
-          linux-builder = self.nixos-flake.lib.mkLinuxSystem
-            ./systems/linux-builder;
-          # nixosBase = self.nixos-flake.lib.mkLinuxSystem {
-          #   nixpkgs.hostPlatform = "x86_64-linux";
-          #   imports = [
-          #     self.nixosModules.common # See below for "nixosModules"!
-          #     self.nixosModules.linux
-          #     # Your machine's configuration.nix goes here
-          #     ({ pkgs, ... }: {
-          #       # TODO: Put your /etc/nixos/hardware-configuration.nix here
-          #       boot.loader.grub.device = "nodev";
-          #       fileSystems."/" = {
-          #         device = "/dev/disk/by-label/nixos";
-          #         fsType = "btrfs";
-          #       };
-          #       system.stateVersion = "23.05";
-          #     })
-          #     # Your home-manager configuration
-          #     self.nixosModules.home-manager
-          #     {
-          #       home-manager.users.${myUserName} = {
-          #         imports = [
-          #           self.homeModules.common # See below for "homeModules"!
-          #           self.homeModules.linux
-          #         ];
-          #         home.stateVersion = "22.11";
-          #       };
-          #     }
-          #   ];
-          # };
+      perSystem = { lib, system, ... }: {
+        # Make our overlay available to the devShell
+        # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
+        # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
+        _module.args.pkgs = import inputs.nixpkgs {
+          inherit system;
+          overlays = lib.attrValues self.overlays;
+          config.allowUnfree = true;
         };
       };
-
-      perSystem = { self', system, pkgs, lib, config, inputs', ... }: {
-        # Flake inputs we want to update periodically
-        # Run: `nix run .#update`.
-        nixos-flake.primary-inputs = [
-          "nixpkgs"
-          "home-manager"
-          "nix-darwin"
-          "nixos-flake"
-          "darwin-emacs"
-        ];
-        packages.default = self'.packages.activate;
-        devShells.default = pkgs.mkShell {
-          # inputsFrom = [ config.treefmt.build.devShell ];
-          packages = [
-            pkgs.sops
-            pkgs.ssh-to-age
-            pkgs.nixos-rebuild
-            pkgs.just
-          ];
-        };
-      };
-
     };
 }
