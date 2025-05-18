@@ -19,5 +19,7 @@
       projectRootFile = "flake.nix";
       programs.nixpkgs-fmt.enable = true;
     };
+
+    checks.formatting = config.treefmt.build.check;
   };
 }

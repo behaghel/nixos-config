@@ -15,7 +15,6 @@ let
 in
 {
   imports = [
-    (modulesPath + "/installer/scan/not-detected.nix")
     self.nixosModules.common
     ../../../modules/nixos/server/harden/basics.nix
     ./parallels-vm.nix
@@ -31,6 +30,14 @@ in
     swraid.mdadmConf = ''
       MAILADDR behaghel@gmail.com
     '';
+  };
+  fileSystems."/" = {
+    device = "/dev/disk/by-label/nixos";
+    fsType = "ext4";
+  };
+  fileSystems."/boot" = {
+    device = "/dev/disk/by-label/ESP";
+    fsType = "vfat";
   };
   # disko.devices = import ../../../modules/nixos/linux/disko/trivial.nix { device = "/dev/sda"; };
   networking = {
