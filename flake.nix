@@ -34,7 +34,7 @@
           (fn: ./modules/flake-parts/${fn})
           (attrNames (readDir ./modules/flake-parts)));
 
-      perSystem = { lib, system, ... }: {
+      perSystem = { lib, system, config, ... }: {
         # Make our overlay available to the devShell
         # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
         # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
@@ -43,6 +43,9 @@
           overlays = lib.attrValues self.overlays;
           config.allowUnfree = true;
         };
+
+        checks.linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
+        checks.formatting = config.treefmt.build.check;
       };
     };
 }
