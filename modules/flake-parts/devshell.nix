@@ -17,7 +17,7 @@
 
     treefmt.config = {
       projectRootFile = "flake.nix";
-      programs.nixpkgs-fmt.enable = true;
+      programs.alejandra.enable = true;
     };
 
     checks.formatting = config.treefmt.build.check;
