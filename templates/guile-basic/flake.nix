@@ -20,7 +20,6 @@
         ];
         
         devTools = with nixpkgs.legacyPackages.x86_64-linux; [
-          guile-lint
           pkg-config
           texinfo
           automake

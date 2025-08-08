@@ -67,8 +67,8 @@ guile -L .
 # Compile to bytecode
 guild compile -L . main.scm
 
-# Lint source code
-guild lint main.scm
+# Check compilation warnings and errors
+guild compile -Warity-mismatch -Wformat main.scm
 
 # Interactive development in REPL
 guile -L .
