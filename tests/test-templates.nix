@@ -48,6 +48,14 @@ pkgs.stdenv.mkDerivation {
     # Initialize flake lock file to avoid network issues during testing
     nix flake lock --accept-flake-config 2>/dev/null || true
     
+    # Test that we can actually enter the development shell (this catches undefined variables)
+    echo "Testing nix develop shell entry..."
+    if ! nix develop --command echo "Development shell test successful" 2>/dev/null; then
+      echo "ERROR: Failed to enter development shell - this usually indicates undefined variables in flake.nix"
+      exit 1
+    fi
+    echo "✓ Development shell can be entered successfully"
+    
     # Check that flake.nix is valid syntax
     nix flake check --no-build 2>/dev/null || {
       echo "✓ Flake syntax validation (skipped due to network restrictions)"
