@@ -87,6 +87,10 @@
               inherit pkgs lib;
             };
           };
+
+          lib = {
+            templateUtils = import ./lib/template-utils.nix { inherit pkgs lib; };
+          };
         };
     };
 }
