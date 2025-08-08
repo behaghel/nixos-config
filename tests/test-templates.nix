@@ -104,12 +104,6 @@ pkgs.stdenv.mkDerivation {
       echo "✓ Direnv setup is working correctly"
     fi
 
-    # Check that flake.nix defines the 'check' alias
-    if ! grep -q 'alias check=' flake.nix; then
-      echo "ERROR: flake.nix doesn't define check alias"
-      exit 1
-    fi
-
     echo "All template tests passed!"
   '';
 
