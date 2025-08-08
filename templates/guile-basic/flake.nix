@@ -88,6 +88,9 @@
             echo "✅ Bytecode compiled successfully!"
           '';
 
+          # Enable phases for nix develop --check, --build, --install
+          enablePhases = [ "check" "build" "install" ];
+
           shellHook = ''
             echo "🐧 Guile Development Environment"
             echo "=================================="

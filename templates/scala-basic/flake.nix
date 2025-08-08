@@ -88,6 +88,9 @@
             echo "✅ Packages built successfully!"
           '';
 
+          # Enable phases for nix develop --check, --build, --install
+          enablePhases = [ "check" "build" "install" ];
+
           shellHook = ''
             echo "⚡ Scala Development Environment"
             echo "=================================="
