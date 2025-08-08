@@ -29,6 +29,3 @@ lazy val root = (project in file("."))
     Test / testOptions += Tests.Argument(TestFrameworks.ScalaTest, "-oD"),
     Test / parallelExecution := false
   )
-
-// Add assembly plugin
-addSbtPlugin("com.eed3si9n" % "sbt-assembly" % "2.1.3")
