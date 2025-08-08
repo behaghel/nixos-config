@@ -1,5 +1,5 @@
 
-{ lib }:
+{ }:
 
 rec {
   # Standard phases configuration
@@ -16,9 +16,6 @@ rec {
     echo "  nix develop --build    - Install dependencies and setup project"
     echo "  nix develop --check    - Run test suite"
     echo "  nix develop --install  - Build distribution packages"
-    echo ""
-    echo "Additional commands:"
-    ${lib.concatStringsSep "\n    " (map (cmd: "echo \"  ${cmd}\"") commands)}
     echo ""
     echo "Environment ready! Run 'nix develop --build' to get started."
   '';

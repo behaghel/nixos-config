@@ -49,6 +49,7 @@
             description = "Modern Guile (GNU Scheme) development environment with guild, testing, and REPL tools";
           };
         };
+        lib = import ./lib/template-utils.nix {};
       };
 
       perSystem = { lib, system, config, ... }:
@@ -64,7 +65,6 @@
           # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
           _module.args.pkgs = pkgs;
           # Expose templateUtils at the flake level
-          templateUtils = import ./lib/template-utils.nix { inherit lib; };
           checks = lib.optionalAttrs (system == "aarch64-darwin")
             {
               linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
