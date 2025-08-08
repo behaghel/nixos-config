@@ -15,12 +15,12 @@
       in
       {
         apps = {
-          run = utils.mkApp "sbt run \"$@\"";
-          test = utils.mkApp "sbt test \"$@\"";
-          compile = utils.mkApp "sbt compile \"$@\"";
-          package = utils.mkApp "sbt assembly \"$@\"";
-          console = utils.mkApp "sbt console \"$@\"";
-          clean = utils.mkApp "sbt clean \"$@\"";
+          run = utils.mkApp "sbt run \"$@\"" pkgs;
+          test = utils.mkApp "sbt test \"$@\"" pkgs;
+          compile = utils.mkApp "sbt compile \"$@\"" pkgs;
+          package = utils.mkApp "sbt assembly \"$@\"" pkgs;
+          console = utils.mkApp "sbt console \"$@\"" pkgs;
+          clean = utils.mkApp "sbt clean \"$@\"" pkgs;
         };
 
         devShells.default = utils.mkDevShell {
@@ -66,6 +66,6 @@
           extraShellHook = ''
             export JAVA_HOME=${javaVersion}
           '';
-        };
+        } pkgs;
       });
 }

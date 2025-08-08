@@ -15,11 +15,11 @@
       in
       {
         apps = {
-          run = utils.mkApp "${pkgs.uv}/bin/uv run \"$@\"";
-          test = utils.mkApp "${pkgs.uv}/bin/uv run pytest \"$@\"";
-          build = utils.mkApp "${pkgs.uv}/bin/uv build \"$@\"";
-          sync = utils.mkApp "${pkgs.uv}/bin/uv sync \"$@\"";
-          lock = utils.mkApp "${pkgs.uv}/bin/uv lock \"$@\"";
+          run = utils.mkApp "${pkgs.uv}/bin/uv run \"$@\"" pkgs;
+          test = utils.mkApp "${pkgs.uv}/bin/uv run pytest \"$@\"" pkgs;
+          build = utils.mkApp "${pkgs.uv}/bin/uv build \"$@\"" pkgs;
+          sync = utils.mkApp "${pkgs.uv}/bin/uv sync \"$@\"" pkgs;
+          lock = utils.mkApp "${pkgs.uv}/bin/uv lock \"$@\"" pkgs;
         };
 
         devShells.default = utils.mkDevShell {
@@ -70,6 +70,6 @@
               uv init --no-readme
             fi
           '';
-        };
+        } pkgs;
       });
 }

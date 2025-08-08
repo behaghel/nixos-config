@@ -15,11 +15,11 @@
       in
       {
         apps = {
-          run = utils.mkApp "${guileVersion}/bin/guile -L . -s main.scm \"$@\"";
-          test = utils.mkApp "${guileVersion}/bin/guile -L . -s tests/test-runner.scm \"$@\"";
-          repl = utils.mkApp "${guileVersion}/bin/guile -L . \"$@\"";
-          compile = utils.mkApp "${guileVersion}/bin/guild compile -L . main.scm \"$@\"";
-          check = utils.mkApp "${guileVersion}/bin/guild compile -Warity-mismatch -Wformat -Wmacro-use-before-definition -Wunused-variable -L . main.scm \"$@\"";
+          run = utils.mkApp "${guileVersion}/bin/guile -L . -s main.scm \"$@\"" pkgs;
+          test = utils.mkApp "${guileVersion}/bin/guile -L . -s tests/test-runner.scm \"$@\"" pkgs;
+          repl = utils.mkApp "${guileVersion}/bin/guile -L . \"$@\"" pkgs;
+          compile = utils.mkApp "${guileVersion}/bin/guild compile -L . main.scm \"$@\"" pkgs;
+          check = utils.mkApp "${guileVersion}/bin/guild compile -Warity-mismatch -Wformat -Wmacro-use-before-definition -Wunused-variable -L . main.scm \"$@\"" pkgs;
         };
 
         devShells.default = utils.mkDevShell {
@@ -67,6 +67,6 @@
             export GUILE_LOAD_PATH=".:$GUILE_LOAD_PATH"
             export GUILE_LOAD_COMPILED_PATH=".:$GUILE_LOAD_COMPILED_PATH"
           '';
-        };
+        } pkgs;
       });
 }
