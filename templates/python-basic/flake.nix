@@ -41,6 +41,7 @@ Available commands:
   build      - Install dependencies and prepare project
   test       - Run test suite with pytest
   package    - Build distribution packages
+  run        - Execute the main application (auto-detects main.py)
   update     - Update dependencies
   update-env - Update nix development environment
 
