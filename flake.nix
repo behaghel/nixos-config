@@ -60,12 +60,11 @@
           };
         in
         {
-          # Make our overlay available to the devShell
           # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
           # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
           _module.args.pkgs = pkgs;
           # Expose templateUtils at the flake level
-          templateUtils = import ./lib/template-utils.nix { inherit pkgs lib; };
+          lib = import ./lib/template-utils.nix { inherit pkgs lib; };
           checks = lib.optionalAttrs (system == "aarch64-darwin")
             {
               linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
