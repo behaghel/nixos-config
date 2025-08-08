@@ -50,8 +50,8 @@ pkgs.stdenv.mkDerivation {
     
     # Test that we can actually enter the development shell (this catches undefined variables)
     echo "Testing nix develop shell entry..."
-    if ! nix develop --command echo "Development shell test successful" 2>/dev/null; then
-      echo "ERROR: Failed to enter development shell - this usually indicates undefined variables in flake.nix"
+    if ! nix develop --command echo "Development shell test successful" 2>&1; then
+      echo "ERROR: Failed to enter development shell - see error output above"
       exit 1
     fi
     echo "✓ Development shell can be entered successfully"
