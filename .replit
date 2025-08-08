@@ -1,0 +1,8 @@
+modules = ["python-3.12", "nix", "bash"]
+run = "nix flake check"
+
+[nix]
+channel = "stable-25_05"
+
+[deployment]
+run = ["sh", "-c", "nix flake check"]
