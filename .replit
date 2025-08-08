@@ -1,5 +1,5 @@
 modules = ["python-3.12", "nix", "bash"]
-run = "nix flake check"
+run = "nix flake check --systems x86_64-linux"
 
 [nix]
 channel = "stable-25_05"
