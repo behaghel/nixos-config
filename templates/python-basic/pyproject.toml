@@ -52,5 +52,5 @@ python_classes = ["Test*"]
 python_functions = ["test_*"]
 addopts = "-v --tb=short"
 
-[tool.uv.scripts]
-default = "python $(find src -name 'main.py' | head -1)"
+[project.scripts]
+python-basic = "python_basic.main:main"
