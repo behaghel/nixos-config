@@ -1,13 +1,13 @@
 { inputs, ... }:
 {
-  imports = [
-    inputs.treefmt-nix.flakeModule
-  ];
+  # imports = [
+  #   inputs.treefmt-nix.flakeModule
+  # ];
   perSystem = { inputs', config, pkgs, ... }: {
     devShells.default = pkgs.mkShell {
       name = "nixos-config-shell";
       meta.description = "Dev environment for nixos-config";
-      inputsFrom = [ config.treefmt.build.devShell ];
+      # inputsFrom = [ config.treefmt.build.devShell ];
       packages = with pkgs; [
         just
         colmena
@@ -15,9 +15,9 @@
       ];
     };
 
-    treefmt.config = {
-      projectRootFile = "flake.nix";
-      programs.alejandra.enable = true;
-    };
+    # treefmt.config = {
+    #   projectRootFile = "flake.nix";
+    #   programs.alejandra.enable = true;
+    # };
   };
 }
