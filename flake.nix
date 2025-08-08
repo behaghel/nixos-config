@@ -44,6 +44,10 @@
             path = ./templates/scala-basic;
             description = "Modern Scala development environment with sbt, testing, and code quality tools";
           };
+          guile-basic = {
+            path = ./templates/guile-basic;
+            description = "Modern Guile (GNU Scheme) development environment with guild, testing, and REPL tools";
+          };
         };
       };
 
