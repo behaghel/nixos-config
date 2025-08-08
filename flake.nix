@@ -43,67 +43,67 @@
         };
       };
 
-      perSystem = { pkgs, ... }: {
-        apps = {
-          # Python project commands via uv
-          run = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-run" ''
-              exec ${pkgs.uv}/bin/uv run "$@"
-            ''}";
+      perSystem = { lib, system, config, ... }:
+        let
+          pkgs = import inputs.nixpkgs {
+            inherit system;
+            overlays = lib.attrValues self.overlays;
+            config.allowUnfree = true;
           };
-          
-          test = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-test" ''
-              exec ${pkgs.uv}/bin/uv run pytest "$@"
-            ''}";
-          };
-          
-          build = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-build" ''
-              exec ${pkgs.uv}/bin/uv build "$@"
-            ''}";
-          };
-          
-          sync = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-sync" ''
-              exec ${pkgs.uv}/bin/uv sync "$@"
-            ''}";
-          };
-          
-          lock = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-lock" ''
-              exec ${pkgs.uv}/bin/uv lock "$@"
-            ''}";
-          };
-        };
-      };
+        in
+        {
+          # Make our overlay available to the devShell
+          # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
+          # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
+          _module.args.pkgs = pkgs;
 
-      perSystem = { lib, system, config, ... }: {
-        # Make our overlay available to the devShell
-        # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
-        # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
-        _module.args.pkgs = import inputs.nixpkgs {
-          inherit system;
-          overlays = lib.attrValues self.overlays;
-          config.allowUnfree = true;
-        };
-
-        checks = lib.optionalAttrs (system == "aarch64-darwin") {
-          linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
-        } // {
-          # formatting = config.treefmt.build.check;
-          templates = import ./tests/test-templates.nix {
-            pkgs = import inputs.nixpkgs {
-              inherit system;
+          apps = {
+            # Python project commands via uv
+            run = {
+              type = "app";
+              program = "${pkgs.writeShellScript "uv-run" ''
+                exec ${pkgs.uv}/bin/uv run "$@"
+              ''}";
             };
-            inherit lib;
+
+            test = {
+              type = "app";
+              program = "${pkgs.writeShellScript "uv-test" ''
+                exec ${pkgs.uv}/bin/uv run pytest "$@"
+              ''}";
+            };
+
+            build = {
+              type = "app";
+              program = "${pkgs.writeShellScript "uv-build" ''
+                exec ${pkgs.uv}/bin/uv build "$@"
+              ''}";
+            };
+
+            sync = {
+              type = "app";
+              program = "${pkgs.writeShellScript "uv-sync" ''
+                exec ${pkgs.uv}/bin/uv sync "$@"
+              ''}";
+            };
+
+            lock = {
+              type = "app";
+              program = "${pkgs.writeShellScript "uv-lock" ''
+                exec ${pkgs.uv}/bin/uv lock "$@"
+              ''}";
+            };
+          };
+
+          checks = lib.optionalAttrs (system == "aarch64-darwin")
+            {
+              linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
+            } // {
+            # formatting = config.treefmt.build.check;
+            templates = import ./tests/test-templates.nix {
+              inherit pkgs lib;
+            };
           };
         };
-      };
     };
 }
