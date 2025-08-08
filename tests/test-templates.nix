@@ -82,6 +82,24 @@ pkgs.stdenv.mkDerivation {
     fi
     echo "✓ Project configuration is correct"
     
+    # Test direnv setup
+    if ! command -v direnv >/dev/null 2>&1; then
+      echo "✓ Direnv validation (skipped - direnv not available in build environment)"
+    else
+      # Check that .envrc exists and has expected content
+      if ! grep -q "use flake" .envrc; then
+        echo "ERROR: .envrc doesn't contain 'use flake'"
+        exit 1
+      fi
+      
+      # Test that direnv can evaluate the environment (without actually loading it)
+      if ! direnv show_dump . >/dev/null 2>&1; then
+        echo "ERROR: direnv cannot evaluate the environment"
+        exit 1
+      fi
+      echo "✓ Direnv setup is working correctly"
+    fi
+    
     echo "All template tests passed!"
   '';
   
