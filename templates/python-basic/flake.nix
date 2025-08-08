@@ -15,7 +15,7 @@
       in
       {
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
+          packages = with pkgs; [
             # Python and uv
             pythonEnv
             uv
@@ -40,7 +40,6 @@
             echo "  build      - Install dependencies and prepare project"
             echo "  test       - Run test suite with pytest"
             echo "  package    - Build distribution packages"
-            echo "  run <task> - Execute project tasks"
             echo "  update     - Update dependencies"
             echo "  update-env - Update nix development environment"
             echo ""
@@ -51,17 +50,14 @@
               echo "Initializing uv project..."
               uv init --no-readme
             fi
+            
+            # Set up aliases
+            alias build="uv sync && uv run pre-commit install"
+            alias test="uv run pytest"
+            alias package="uv build"
+            alias update="uv lock --upgrade"
+            alias update-env="nix flake update"
           '';
-
-          # Shell aliases
-          shellAliases = {
-            build = "uv sync && uv run pre-commit install";
-            test = "uv run pytest";
-            package = "uv build";
-            # run = "uv run";
-            update = "uv lock --upgrade";
-            update-env = "nix flake update";
-          };
         };
       });
 }
