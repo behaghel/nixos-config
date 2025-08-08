@@ -45,12 +45,10 @@ pkgs.stdenv.mkDerivation {
     done
     echo "✓ All required files present"
     
-    # Initialize flake lock file to avoid network issues during testing
-    nix flake lock --accept-flake-config 2>/dev/null || true
-    
     # Test that we can actually enter the development shell (this catches undefined variables)
-    echo "Testing nix develop shell entry..."
-    if ! nix develop --command echo "Development shell test successful" 2>&1; then
+    # Skip flake lock to avoid SSL issues, but this means we test with potentially stale inputs
+    echo "Testing nix develop shell entry without network dependencies..."
+    if ! nix develop --offline --command echo "Development shell test successful" 2>&1; then
       echo "ERROR: Failed to enter development shell - see error output above"
       exit 1
     fi
