@@ -24,7 +24,7 @@
             ruff
             black
             mypy
-            pytest
+            python312Packages.pytest
             pre-commit
             
             # Build tools
@@ -58,7 +58,7 @@
             build = "uv sync && uv run pre-commit install";
             test = "uv run pytest";
             package = "uv build";
-            run = "uv run";
+            # run = "uv run";
             update = "uv lock --upgrade";
             update-env = "nix flake update";
           };
