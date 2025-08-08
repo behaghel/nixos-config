@@ -1,4 +1,3 @@
-
 {
   description = "Python development environment with uv";
 
@@ -11,104 +10,59 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        pythonEnv = pkgs.python312;
+        utils = import ../shared/template-utils.nix { inherit pkgs; lib = nixpkgs.lib; };
       in
       {
         apps = {
-          # Python project commands via uv
-          run = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-run" ''
-              exec ${pkgs.uv}/bin/uv run "$@"
-            ''}";
-          };
-          
-          test = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-test" ''
-              exec ${pkgs.uv}/bin/uv run pytest "$@"
-            ''}";
-          };
-          
-          build = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-build" ''
-              exec ${pkgs.uv}/bin/uv build "$@"
-            ''}";
-          };
-          
-          sync = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-sync" ''
-              exec ${pkgs.uv}/bin/uv sync "$@"
-            ''}";
-          };
-          
-          lock = {
-            type = "app";
-            program = "${pkgs.writeShellScript "uv-lock" ''
-              exec ${pkgs.uv}/bin/uv lock "$@"
-            ''}";
-          };
+          run = utils.mkApp "${pkgs.uv}/bin/uv run \"$@\"";
+          test = utils.mkApp "${pkgs.uv}/bin/uv run pytest \"$@\"";
+          build = utils.mkApp "${pkgs.uv}/bin/uv build \"$@\"";
+          sync = utils.mkApp "${pkgs.uv}/bin/uv sync \"$@\"";
+          lock = utils.mkApp "${pkgs.uv}/bin/uv lock \"$@\"";
         };
 
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            # Python and uv
-            pythonEnv
-            uv
+        devShells.default = utils.mkDevShell {
+          language = "Python";
 
-            # Development tools
+          buildTools = with pkgs; [
+            python312
+            uv
+          ];
+
+          devTools = with pkgs; [
             ruff
             black
             mypy
             python312Packages.pytest
             pre-commit
-
-            # Build tools
-            git
-            just
           ];
 
-          # Standard Nix build phases for development
-          buildPhase = ''
-            echo "🔧 Installing dependencies and setting up project..."
-            uv sync
-            uv run pre-commit install
-            echo "✅ Project setup complete!"
-          '';
+          phases = {
+            build = ''
+              echo "🔧 Installing dependencies and setting up project..."
+              uv sync
+              uv run pre-commit install
+              echo "✅ Project setup complete!"
+            '';
+            check = ''
+              echo "🧪 Running test suite..."
+              uv run pytest
+              echo "✅ Tests completed!"
+            '';
+            install = ''
+              echo "📦 Building distribution packages..."
+              uv build
+              echo "✅ Packages built successfully!"
+            '';
+          };
 
-          checkPhase = ''
-            echo "🧪 Running test suite..."
-            uv run pytest
-            echo "✅ Tests completed!"
-          '';
+          shellHookCommands = [
+            "uv run <command>       - Execute commands in project environment"
+            "uv lock --upgrade      - Update dependencies"
+            "nix flake update       - Update nix development environment"
+          ];
 
-          installPhase = ''
-            echo "📦 Building distribution packages..."
-            uv build
-            echo "✅ Packages built successfully!"
-          '';
-
-          # Enable phases for nix develop --check, --build, --install
-          enablePhases = [ "check" "build" "install" ];
-
-          shellHook = ''
-            echo "🐍 Python Development Environment"
-            echo "=================================="
-            echo ""
-            echo "Standard Nix commands:"
-            echo "  nix develop --build    - Install dependencies and setup project"
-            echo "  nix develop --check    - Run test suite with pytest"
-            echo "  nix develop --install  - Build distribution packages"
-            echo ""
-            echo "Additional commands:"
-            echo "  uv run <command>       - Execute commands in project environment"
-            echo "  uv lock --upgrade      - Update dependencies"
-            echo "  nix flake update       - Update nix development environment"
-            echo ""
-            echo "Environment ready! Run 'nix develop --build' to get started."
-
+          extraShellHook = ''
             # Initialize uv project if not already done
             if [ ! -f "pyproject.toml" ]; then
               echo "Initializing uv project..."

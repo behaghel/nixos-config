@@ -1,4 +1,3 @@
-
 {
   description = "Scala development environment with sbt";
 
@@ -11,105 +10,61 @@
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
+        utils = import ../shared/template-utils.nix { inherit pkgs; lib = nixpkgs.lib; };
         javaVersion = pkgs.jdk17;
       in
       {
         apps = {
-          # Scala project commands via sbt
-          run = {
-            type = "app";
-            program = "${pkgs.writeShellScript "sbt-run" ''
-              exec ${pkgs.sbt}/bin/sbt run "$@"
-            ''}";
-          };
-          
-          test = {
-            type = "app";
-            program = "${pkgs.writeShellScript "sbt-test" ''
-              exec ${pkgs.sbt}/bin/sbt test "$@"
-            ''}";
-          };
-          
-          build = {
-            type = "app";
-            program = "${pkgs.writeShellScript "sbt-build" ''
-              exec ${pkgs.sbt}/bin/sbt compile "$@"
-            ''}";
-          };
-          
-          package = {
-            type = "app";
-            program = "${pkgs.writeShellScript "sbt-package" ''
-              exec ${pkgs.sbt}/bin/sbt assembly "$@"
-            ''}";
-          };
-          
-          console = {
-            type = "app";
-            program = "${pkgs.writeShellScript "sbt-console" ''
-              exec ${pkgs.sbt}/bin/sbt console "$@"
-            ''}";
-          };
+          run = utils.mkApp "${pkgs.sbt}/bin/sbt run \"$@\"";
+          test = utils.mkApp "${pkgs.sbt}/bin/sbt test \"$@\"";
+          build = utils.mkApp "${pkgs.sbt}/bin/sbt compile \"$@\"";
+          package = utils.mkApp "${pkgs.sbt}/bin/sbt assembly \"$@\"";
+          console = utils.mkApp "${pkgs.sbt}/bin/sbt console \"$@\"";
         };
 
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            # Java and Scala tooling
+        devShells.default = utils.mkDevShell {
+          language = "Scala";
+
+          buildTools = with pkgs; [
             javaVersion
             sbt
             scala_3
-            scalafmt
-
-            # Development tools
-            metals
-            coursier
-
-            # Build tools
-            git
-            just
           ];
 
-          # Standard Nix build phases for development
-          buildPhase = ''
-            echo "🔧 Installing dependencies and setting up project..."
-            sbt update
-            echo "✅ Project setup complete!"
-          '';
+          devTools = with pkgs; [
+            scalafmt
+            metals
+            coursier
+          ];
 
-          checkPhase = ''
-            echo "🧪 Running test suite..."
-            sbt test
-            echo "✅ Tests completed!"
-          '';
+          phases = {
+            build = ''
+              echo "🔧 Installing dependencies and setting up project..."
+              sbt update
+              echo "✅ Project setup complete!"
+            '';
+            check = ''
+              echo "🧪 Running test suite..."
+              sbt test
+              echo "✅ Tests completed!"
+            '';
+            install = ''
+              echo "📦 Building distribution packages..."
+              sbt assembly
+              echo "✅ Packages built successfully!"
+            '';
+          };
 
-          installPhase = ''
-            echo "📦 Building distribution packages..."
-            sbt assembly
-            echo "✅ Packages built successfully!"
-          '';
+          shellHookCommands = [
+            "sbt run                - Execute the main application"
+            "sbt console            - Start Scala REPL with project classpath"
+            "sbt compile            - Compile the project"
+            "sbt test               - Run tests"
+            "sbt assembly           - Create fat JAR"
+            "scalafmt               - Format code"
+          ];
 
-          # Enable phases for nix develop --check, --build, --install
-          enablePhases = [ "check" "build" "install" ];
-
-          shellHook = ''
-            echo "⚡ Scala Development Environment"
-            echo "=================================="
-            echo ""
-            echo "Standard Nix commands:"
-            echo "  nix develop --build    - Install dependencies and setup project"
-            echo "  nix develop --check    - Run test suite with ScalaTest"
-            echo "  nix develop --install  - Build distribution JAR"
-            echo ""
-            echo "Additional commands:"
-            echo "  sbt run                - Execute the main application"
-            echo "  sbt console            - Start Scala REPL with project classpath"
-            echo "  sbt compile            - Compile the project"
-            echo "  sbt test               - Run tests"
-            echo "  sbt assembly           - Create fat JAR"
-            echo "  scalafmt               - Format code"
-            echo ""
-            echo "Environment ready! Run 'nix develop --build' to get started."
-
+          extraShellHook = ''
             # Set JAVA_HOME for tools that need it
             export JAVA_HOME="${javaVersion}"
             export PATH="$JAVA_HOME/bin:$PATH"
