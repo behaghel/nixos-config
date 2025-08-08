@@ -49,19 +49,6 @@
             description = "Modern Guile (GNU Scheme) development environment with guild, testing, and REPL tools";
           };
         };
-
-        # Expose shared template utilities
-        lib = inputs.flake-utils.lib.eachDefaultSystem (system:
-          let
-            pkgs = import inputs.nixpkgs {
-              inherit system;
-              config.allowUnfree = true;
-            };
-            lib = inputs.nixpkgs.lib;
-          in
-          {
-            templateUtils = import ./lib/template-utils.nix { inherit pkgs lib; };
-          });
       };
 
       perSystem = { lib, system, config, ... }:
@@ -77,7 +64,8 @@
           # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
           # So we must do this manually; https://flake.parts/overlays#consuming-an-overlay
           _module.args.pkgs = pkgs;
-
+          # Expose templateUtils at the flake level
+          templateUtils = import ./lib/template-utils.nix { inherit pkgs lib; };
           checks = lib.optionalAttrs (system == "aarch64-darwin")
             {
               linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
@@ -86,10 +74,6 @@
             templates = import ./tests/test-templates.nix {
               inherit pkgs lib;
             };
-          };
-
-          lib = {
-            templateUtils = import ./lib/template-utils.nix { inherit pkgs lib; };
           };
         };
     };
