@@ -43,6 +43,46 @@
         };
       };
 
+      perSystem = { pkgs, ... }: {
+        apps = {
+          # Python project commands via uv
+          run = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-run" ''
+              exec ${pkgs.uv}/bin/uv run "$@"
+            ''}";
+          };
+          
+          test = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-test" ''
+              exec ${pkgs.uv}/bin/uv run pytest "$@"
+            ''}";
+          };
+          
+          build = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-build" ''
+              exec ${pkgs.uv}/bin/uv build "$@"
+            ''}";
+          };
+          
+          sync = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-sync" ''
+              exec ${pkgs.uv}/bin/uv sync "$@"
+            ''}";
+          };
+          
+          lock = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-lock" ''
+              exec ${pkgs.uv}/bin/uv lock "$@"
+            ''}";
+          };
+        };
+      };
+
       perSystem = { lib, system, config, ... }: {
         # Make our overlay available to the devShell
         # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
