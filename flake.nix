@@ -53,13 +53,16 @@
           config.allowUnfree = true;
         };
 
-        checks.linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
-        # checks.formatting = config.treefmt.build.check;
-        checks.templates = import ./tests/test-templates.nix {
-          pkgs = import inputs.nixpkgs {
-            inherit system;
+        checks = lib.optionalAttrs (system == "aarch64-darwin") {
+          linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
+        } // {
+          # formatting = config.treefmt.build.check;
+          templates = import ./tests/test-templates.nix {
+            pkgs = import inputs.nixpkgs {
+              inherit system;
+            };
+            inherit lib;
           };
-          inherit lib;
         };
       };
     };
