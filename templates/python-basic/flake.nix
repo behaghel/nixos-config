@@ -1,18 +1,17 @@
-
 {
   description = "Python development environment with uv";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    template-utils.url = "path:../shared";
+    template-utils.url = "github:behaghel/nixos-config";
   };
 
-  outputs = { self, nixpkgs, flake-utils, template-utils }:
+  outputs = { self, nixpkgs, flake-utils, nixos-config }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        utils = template-utils.lib.${system};
+        utils = nixos-config.lib.${system}.templateUtils;
       in
       {
         apps = {

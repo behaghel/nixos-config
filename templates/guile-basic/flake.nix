@@ -1,18 +1,17 @@
-
 {
   description = "Guile development environment with scheme tools";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    template-utils.url = "path:../shared";
+    nixos-config.url = "github:behaghel/nixos-config";
   };
 
-  outputs = { self, nixpkgs, flake-utils, template-utils }:
+  outputs = { self, nixpkgs, flake-utils, nixos-config }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        utils = template-utils.lib.${system};
+        utils = nixos-config.lib.${system}.templateUtils;
         guileVersion = pkgs.guile_3_0;
       in
       {

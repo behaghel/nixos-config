@@ -49,6 +49,19 @@
             description = "Modern Guile (GNU Scheme) development environment with guild, testing, and REPL tools";
           };
         };
+
+        # Expose shared template utilities
+        lib = inputs.flake-utils.lib.eachDefaultSystem (system:
+          let
+            pkgs = import inputs.nixpkgs {
+              inherit system;
+              config.allowUnfree = true;
+            };
+            lib = inputs.nixpkgs.lib;
+          in
+          {
+            templateUtils = import ./lib/template-utils.nix { inherit pkgs lib; };
+          });
       };
 
       perSystem = { lib, system, config, ... }:
