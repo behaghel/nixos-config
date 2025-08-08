@@ -23,54 +23,54 @@ This template provides a complete development environment with:
 
 2. **Build the project** (install dependencies and setup hooks):
    ```bash
-   build
+   nix develop --build
    ```
 
 3. **Run tests**:
    ```bash
-   check
+   nix develop --check
    ```
 
 4. **Run the hello world example**:
    ```bash
-   run python -m python_basic.main
+   uv run python -m python_basic.main
    ```
 
 ## Development Lifecycle
 
 ### Core Commands
 
-- **`build`** - Install dependencies and prepare the project for development
-- **`check`** - Run the full test suite with pytest
-- **`package`** - Build distribution packages (wheel and source)
-- **`run <command>`** - Execute commands in the project environment
-- **`update`** - Update Python dependencies to latest compatible versions
-- **`update-env`** - Update Nix flake inputs (development tools)
+- **`nix develop --build`** - Install dependencies and prepare the project for development
+- **`nix develop --check`** - Run the full test suite with pytest
+- **`nix develop --install`** - Build distribution packages (wheel and source)
+- **`uv run <command>`** - Execute commands in the project environment
+- **`uv lock --upgrade`** - Update Python dependencies to latest compatible versions
+- **`nix flake update`** - Update Nix flake inputs (development tools)
 
 ### Example Workflows
 
 ```bash
 # Start development
-build
+nix develop --build
 
 # Run tests continuously during development
-check
+nix develop --check
 
 # Run specific test file
-run pytest tests/test_main.py
+uv run pytest tests/test_main.py
 
 # Run the main application
-run python -m python_basic.main
+uv run python -m python_basic.main
 
 # Add new dependencies
 uv add requests
 uv add --dev pytest-cov  # Development dependency
 
 # Update dependencies
-update
+uv lock --upgrade
 
 # Build packages for distribution
-package
+nix develop --install
 ```
 
 ## Project Structure
@@ -126,7 +126,8 @@ This template uses Nix for reproducible development environments:
 
 ## Getting Help
 
-- Run any command to see available lifecycle commands in the shell prompt
+- Enter `nix develop` to see available lifecycle commands in the shell prompt
+- Use `nix develop --build`, `--check`, and `--install` for standard operations
 - Check `pyproject.toml` for project configuration
 - Review `flake.nix` for development environment setup
 - Examine `tests/` for testing examples

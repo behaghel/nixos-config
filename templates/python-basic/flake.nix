@@ -1,3 +1,4 @@
+
 {
   description = "Python development environment with uv";
 
@@ -31,35 +32,41 @@
             just
           ];
 
-          shellAliases = {
-            build = "uv sync && uv run pre-commit install";
-            check = "uv run pytest";
-            package = "uv build";
-            run = "uv run";
-            update = "uv lock --upgrade";
-            update-env = "nix flake update";
-            help = "echo '$WELCOME_MSG'";
-          };
+          # Standard Nix build phases for development
+          buildPhase = ''
+            echo "🔧 Installing dependencies and setting up project..."
+            uv sync
+            uv run pre-commit install
+            echo "✅ Project setup complete!"
+          '';
+
+          checkPhase = ''
+            echo "🧪 Running test suite..."
+            uv run pytest
+            echo "✅ Tests completed!"
+          '';
+
+          installPhase = ''
+            echo "📦 Building distribution packages..."
+            uv build
+            echo "✅ Packages built successfully!"
+          '';
 
           shellHook = ''
-            # Define welcome message for reuse
-            WELCOME_MSG=$(cat << 'EOF'
-🐍 Python Development Environment
-==================================
-
-Available commands:
-  build      - Install dependencies and prepare project
-  check      - Run test suite with pytest
-  package    - Build distribution packages
-  run        - Execute the main application (auto-detects main.py)
-  update     - Update dependencies
-  update-env - Update nix development environment
-
-Environment ready! Run 'build' to get started.
-EOF
-)
-
-            echo "$WELCOME_MSG"
+            echo "🐍 Python Development Environment"
+            echo "=================================="
+            echo ""
+            echo "Standard Nix commands:"
+            echo "  nix develop --build    - Install dependencies and setup project"
+            echo "  nix develop --check    - Run test suite with pytest"
+            echo "  nix develop --install  - Build distribution packages"
+            echo ""
+            echo "Additional commands:"
+            echo "  uv run <command>       - Execute commands in project environment"
+            echo "  uv lock --upgrade      - Update dependencies"
+            echo "  nix flake update       - Update nix development environment"
+            echo ""
+            echo "Environment ready! Run 'nix develop --build' to get started."
 
             # Initialize uv project if not already done
             if [ ! -f "pyproject.toml" ]; then

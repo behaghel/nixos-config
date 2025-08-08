@@ -35,13 +35,13 @@ After creating a project from a template:
 All templates in this repository follow these standards:
 
 - **Nix flake-based** development environments for reproducibility
-- **Standardized lifecycle commands**:
-  - `build` - Compile/prepare the project
-  - `check` - Run test suites
-  - `package` - Create distribution packages
-  - `run <target>` - Execute project tasks
-  - `update` - Update dependencies
-  - `update-env` - Update Nix development tools
+- **Standardized lifecycle commands** using idiomatic Nix phases:
+  - `nix develop --build` - Install dependencies and prepare project
+  - `nix develop --check` - Run test suites
+  - `nix develop --install` - Create distribution packages
+  - `uv run <command>` - Execute project tasks
+  - `uv lock --upgrade` - Update dependencies
+  - `nix flake update` - Update Nix development tools
 - **Code quality tools** with formatting and linting
 - **Pre-commit hooks** for automated quality checks
 - **EditorConfig** for consistent coding style
