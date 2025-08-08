@@ -3,17 +3,17 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    flake-utils.url = "github:numtide/flake-utils";
     template-utils.url = "github:behaghel/nixos-config";
   };
 
-  outputs = { self, nixpkgs, flake-utils, template-utils }:
-    flake-utils.lib.eachDefaultSystem (system:
-      let
-        pkgs = nixpkgs.legacyPackages.${system};
-        utils = template-utils.lib.${system}.templateUtils;
-      in
-      {
+  outputs = { self, nixpkgs, template-utils }:
+    {
+      perSystem = { system, ... }:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+          utils = template-utils.lib.templateUtils;
+        in
+        {
         apps = {
           run = utils.mkApp "${pkgs.uv}/bin/uv run \"$@\"" pkgs;
           test = utils.mkApp "${pkgs.uv}/bin/uv run pytest \"$@\"" pkgs;
@@ -71,5 +71,6 @@
             fi
           '';
         } pkgs;
-      });
+        };
+    };
 }
