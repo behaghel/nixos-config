@@ -1,25 +1,28 @@
+
 {
   description = "Scala development environment with sbt";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
+    template-utils.url = "path:../shared";
   };
 
-  outputs = { self, nixpkgs, flake-utils }:
+  outputs = { self, nixpkgs, flake-utils, template-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        utils = import ../shared/template-utils.nix { inherit pkgs; lib = nixpkgs.lib; };
+        utils = template-utils.lib.${system};
         javaVersion = pkgs.jdk17;
       in
       {
         apps = {
-          run = utils.mkApp "${pkgs.sbt}/bin/sbt run \"$@\"";
-          test = utils.mkApp "${pkgs.sbt}/bin/sbt test \"$@\"";
-          build = utils.mkApp "${pkgs.sbt}/bin/sbt compile \"$@\"";
-          package = utils.mkApp "${pkgs.sbt}/bin/sbt assembly \"$@\"";
-          console = utils.mkApp "${pkgs.sbt}/bin/sbt console \"$@\"";
+          run = utils.mkApp "sbt run \"$@\"";
+          test = utils.mkApp "sbt test \"$@\"";
+          compile = utils.mkApp "sbt compile \"$@\"";
+          package = utils.mkApp "sbt assembly \"$@\"";
+          console = utils.mkApp "sbt console \"$@\"";
+          clean = utils.mkApp "sbt clean \"$@\"";
         };
 
         devShells.default = utils.mkDevShell {
@@ -39,8 +42,8 @@
 
           phases = {
             build = ''
-              echo "🔧 Installing dependencies and setting up project..."
-              sbt update
+              echo "🔧 Compiling Scala project..."
+              sbt compile
               echo "✅ Project setup complete!"
             '';
             check = ''
@@ -49,25 +52,21 @@
               echo "✅ Tests completed!"
             '';
             install = ''
-              echo "📦 Building distribution packages..."
+              echo "📦 Building fat JAR..."
               sbt assembly
               echo "✅ Packages built successfully!"
             '';
           };
 
           shellHookCommands = [
-            "sbt run                - Execute the main application"
-            "sbt console            - Start Scala REPL with project classpath"
-            "sbt compile            - Compile the project"
-            "sbt test               - Run tests"
+            "sbt run                - Run the main application"
+            "sbt test               - Run test suite"
+            "sbt console            - Start Scala REPL"
             "sbt assembly           - Create fat JAR"
-            "scalafmt               - Format code"
           ];
 
           extraShellHook = ''
-            # Set JAVA_HOME for tools that need it
-            export JAVA_HOME="${javaVersion}"
-            export PATH="$JAVA_HOME/bin:$PATH"
+            export JAVA_HOME=${javaVersion}
           '';
         };
       });
