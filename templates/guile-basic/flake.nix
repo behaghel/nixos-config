@@ -8,7 +8,7 @@
 
   outputs = inputs@{ self, nixpkgs }:
     let
-      templateUtils = import ../../lib/template-utils.nix { inherit nixpkgs; };
+      templateUtils = import ./template-utils.nix { inherit nixpkgs; };
       guileVersion = nixpkgs.legacyPackages.x86_64-linux.guile_3_0;
       
       guileConfig = {

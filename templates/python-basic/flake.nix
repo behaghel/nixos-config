@@ -8,7 +8,7 @@
 
   outputs = inputs@{ self, nixpkgs }:
     let
-      templateUtils = import ../../lib/template-utils.nix { inherit nixpkgs; };
+      templateUtils = import ./template-utils.nix { inherit nixpkgs; };
       
       pythonConfig = {
         language = "Python";
