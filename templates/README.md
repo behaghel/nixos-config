@@ -37,7 +37,7 @@ All templates in this repository follow these standards:
 - **Nix flake-based** development environments for reproducibility
 - **Standardized lifecycle commands**:
   - `build` - Compile/prepare the project
-  - `test` - Run test suites
+  - `check` - Run test suites
   - `package` - Create distribution packages
   - `run <target>` - Execute project tasks
   - `update` - Update dependencies

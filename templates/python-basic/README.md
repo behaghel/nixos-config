@@ -28,7 +28,7 @@ This template provides a complete development environment with:
 
 3. **Run tests**:
    ```bash
-   test
+   check
    ```
 
 4. **Run the hello world example**:
@@ -41,7 +41,7 @@ This template provides a complete development environment with:
 ### Core Commands
 
 - **`build`** - Install dependencies and prepare the project for development
-- **`test`** - Run the full test suite with pytest
+- **`check`** - Run the full test suite with pytest
 - **`package`** - Build distribution packages (wheel and source)
 - **`run <command>`** - Execute commands in the project environment
 - **`update`** - Update Python dependencies to latest compatible versions
@@ -54,7 +54,7 @@ This template provides a complete development environment with:
 build
 
 # Run tests continuously during development
-test
+check
 
 # Run specific test file
 run pytest tests/test_main.py

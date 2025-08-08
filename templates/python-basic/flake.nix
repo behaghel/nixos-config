@@ -39,7 +39,7 @@
 
 Available commands:
   build      - Install dependencies and prepare project
-  test       - Run test suite with pytest
+  check      - Run test suite with pytest
   package    - Build distribution packages
   run        - Execute the main application (auto-detects main.py)
   update     - Update dependencies
@@ -59,8 +59,9 @@ EOF
 
             # Set up aliases
             alias build="uv sync && uv run pre-commit install"
-            alias test="uv run pytest"
+            alias check="uv run pytest"
             alias package="uv build"
+            alias run="uv run"
             alias update="uv lock --upgrade"
             alias update-env="nix flake update"
             alias help='echo "$WELCOME_MSG"'
