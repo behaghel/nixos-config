@@ -55,6 +55,7 @@
 
         checks.linux-builder = self.nixosConfigurations.linux-builder.config.system.build.toplevel;
         checks.formatting = config.treefmt.build.check;
+        checks.templates = import ./tests/test-templates.nix { inherit pkgs lib; };
       };
     };
 }
