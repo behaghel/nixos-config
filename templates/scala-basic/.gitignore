@@ -1,0 +1,28 @@
+
+# sbt
+target/
+project/target/
+project/metals.sbt
+.bloop/
+.metals/
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scala
+*.class
+*.log
+
+# Nix
+result
+result-*
+
+# direnv
+.direnv/

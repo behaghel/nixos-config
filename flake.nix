@@ -40,6 +40,10 @@
             path = ./templates/python-basic;
             description = "Modern Python development environment with uv, testing, and code quality tools";
           };
+          scala-basic = {
+            path = ./templates/scala-basic;
+            description = "Modern Scala development environment with sbt, testing, and code quality tools";
+          };
         };
       };
 
