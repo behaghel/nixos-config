@@ -6,23 +6,23 @@ let
   mkTemplate = templateConfig:
     { self, nixpkgs }:
     let
-      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+      supportedSystems = [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+      forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
     in
     {
-      perSystem = forAllSystems (system:
+      devShells = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
         {
-          apps = nixpkgs.lib.mapAttrs (name: command: {
-            type = "app";
-            program = "${pkgs.writeShellScript "${name}-script" ''
-              exec ${command}
-            ''}";
-          }) templateConfig.apps;
-
-          devShells.default = pkgs.mkShell ({
-            packages = templateConfig.buildTools ++ templateConfig.devTools ++ (with pkgs; [ git ]);
+          default = pkgs.mkShell {
+            packages = (if builtins.isFunction templateConfig.buildTools 
+                       then templateConfig.buildTools system 
+                       else templateConfig.buildTools) ++
+                      (if builtins.isFunction templateConfig.devTools
+                       then templateConfig.devTools system
+                       else templateConfig.devTools) ++ 
+                      (with pkgs; [ git ]);
 
             buildPhase = templateConfig.phases.build;
             checkPhase = templateConfig.phases.check;
@@ -37,13 +37,26 @@ let
               echo "  nix develop --check    - Run test suite"
               echo "  nix develop --install  - Build distribution packages"
               echo ""
-              ${templateConfig.extraShellHook or ""}
+              ${if builtins.isFunction (templateConfig.extraShellHook or "") 
+                then templateConfig.extraShellHook system 
+                else (templateConfig.extraShellHook or "")}
               echo "Environment ready! Run 'nix develop --build' to get started."
             '';
 
             enablePhases = [ "check" "build" "install" ];
-          });
+          };
         });
+
+      apps = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        nixpkgs.lib.mapAttrs (name: command: {
+          type = "app";
+          program = "${pkgs.writeShellScript "${name}-script" ''
+            exec ${command}
+          ''}";
+        }) templateConfig.apps);
     };
 in
 {

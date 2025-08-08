@@ -14,13 +14,13 @@
         language = "Scala";
         icon = "⚡";
         
-        buildTools = with nixpkgs.legacyPackages.x86_64-linux; [
+        buildTools = system: with nixpkgs.legacyPackages.${system}; [
           jdk17
           sbt
           scala_3
         ];
         
-        devTools = with nixpkgs.legacyPackages.x86_64-linux; [
+        devTools = system: with nixpkgs.legacyPackages.${system}; [
           scalafmt
           metals
           coursier
@@ -53,8 +53,8 @@
           '';
         };
         
-        extraShellHook = ''
-          export JAVA_HOME=${nixpkgs.legacyPackages.x86_64-linux.jdk17}
+        extraShellHook = system: ''
+          export JAVA_HOME=${nixpkgs.legacyPackages.${system}.jdk17}
           
           echo "Commands:"
           echo "  sbt run                - Run the main application"
