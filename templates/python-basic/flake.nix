@@ -7,11 +7,11 @@
     template-utils.url = "github:behaghel/nixos-config";
   };
 
-  outputs = { self, nixpkgs, flake-utils, nixos-config }:
+  outputs = { self, nixpkgs, flake-utils, template-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        utils = nixos-config.lib.${system}.templateUtils;
+        utils = template-utils.lib.${system}.templateUtils;
       in
       {
         apps = {

@@ -4,14 +4,14 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    nixos-config.url = "github:behaghel/nixos-config";
+    template-utils.url = "github:behaghel/nixos-config";
   };
 
-  outputs = { self, nixpkgs, flake-utils, nixos-config }:
+  outputs = { self, nixpkgs, flake-utils, template-utils }:
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
-        utils = nixos-config.lib.${system}.templateUtils;
+        utils = template-utils.lib.${system}.templateUtils;
         guileVersion = pkgs.guile_3_0;
       in
       {
