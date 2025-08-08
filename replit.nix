@@ -1,5 +1,5 @@
 
-{ pkgs }: {
+{ pkgs ? import <nixpkgs> {} }: {
   deps = [
     pkgs.nixFlakes
     pkgs.git
