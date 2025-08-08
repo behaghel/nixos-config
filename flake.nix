@@ -34,6 +34,15 @@
           (fn: ./modules/flake-parts/${fn})
           (attrNames (readDir ./modules/flake-parts)));
 
+      flake = {
+        templates = {
+          python-basic = {
+            path = ./templates/python-basic;
+            description = "Modern Python development environment with uv, testing, and code quality tools";
+          };
+        };
+      };
+
       perSystem = { lib, system, config, ... }: {
         # Make our overlay available to the devShell
         # "Flake parts does not yet come with an endorsed module that initializes the pkgs argument."
