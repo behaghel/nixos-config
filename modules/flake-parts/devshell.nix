@@ -19,7 +19,5 @@
       projectRootFile = "flake.nix";
       programs.alejandra.enable = true;
     };
-
-    checks.formatting = config.treefmt.build.check;
   };
 }

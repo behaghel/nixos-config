@@ -14,7 +14,7 @@ pkgs.stdenv.mkDerivation {
   buildPhase = ''
     # Set up a temporary directory for testing
     export HOME=$(mktemp -d)
-    export NIX_CONFIG="experimental-features = nix-command flakes"
+    export NIX_CONFIG="experimental-features = nix-command flakes read-only-local-store local-overlay-store"
     
     # Test python-basic template
     echo "Testing python-basic template..."
