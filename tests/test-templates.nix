@@ -20,7 +20,7 @@ pkgs.stdenv.mkDerivation {
     echo "Testing python-basic template..."
     
     # Create a test project from the template
-    nix flake new test-python-project --template ${./.}#python-basic
+    nix flake new test-python-project --template ${./..}#python-basic
     cd test-python-project
     
     # Check required files exist
