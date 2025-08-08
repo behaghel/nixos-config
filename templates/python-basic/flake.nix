@@ -14,6 +14,44 @@
         pythonEnv = pkgs.python312;
       in
       {
+        apps = {
+          # Python project commands via uv
+          run = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-run" ''
+              exec ${pkgs.uv}/bin/uv run "$@"
+            ''}";
+          };
+          
+          test = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-test" ''
+              exec ${pkgs.uv}/bin/uv run pytest "$@"
+            ''}";
+          };
+          
+          build = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-build" ''
+              exec ${pkgs.uv}/bin/uv build "$@"
+            ''}";
+          };
+          
+          sync = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-sync" ''
+              exec ${pkgs.uv}/bin/uv sync "$@"
+            ''}";
+          };
+          
+          lock = {
+            type = "app";
+            program = "${pkgs.writeShellScript "uv-lock" ''
+              exec ${pkgs.uv}/bin/uv lock "$@"
+            ''}";
+          };
+        };
+
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
             # Python and uv
