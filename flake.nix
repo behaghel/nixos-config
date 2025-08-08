@@ -49,7 +49,7 @@
             description = "Modern Guile (GNU Scheme) development environment with guild, testing, and REPL tools";
           };
         };
-        lib.templateUtils = import ./lib/template-utils.nix {};
+        lib.templateUtils = import ./lib/template-utils.nix { inherit nixpkgs; };
       };
 
       perSystem = { lib, system, config, ... }:

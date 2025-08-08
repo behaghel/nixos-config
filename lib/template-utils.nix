@@ -1,50 +1,51 @@
 
-{ }:
+{ nixpkgs }:
 
-rec {
-  # Standard phases configuration
-  standardPhases = {
-    enablePhases = [ "check" "build" "install" ];
-  };
+let
+  # Helper function to generate a complete flake output for a template
+  mkTemplate = templateConfig:
+    { self, nixpkgs }:
+    let
+      forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
+    in
+    {
+      perSystem = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        {
+          apps = nixpkgs.lib.mapAttrs (name: command: {
+            type = "app";
+            program = "${pkgs.writeShellScript "${name}-script" ''
+              exec ${command}
+            ''}";
+          }) templateConfig.apps;
 
-  # Common shell hook header - pure function
-  mkShellHook = { name, icon, commands }: ''
-    echo "${icon} ${name} Development Environment"
-    echo "=================================="
-    echo ""
-    echo "Standard Nix commands:"
-    echo "  nix develop --build    - Install dependencies and setup project"
-    echo "  nix develop --check    - Run test suite"
-    echo "  nix develop --install  - Build distribution packages"
-    echo ""
-    echo "Environment ready! Run 'nix develop --build' to get started."
-  '';
+          devShells.default = pkgs.mkShell ({
+            packages = templateConfig.buildTools ++ templateConfig.devTools ++ (with pkgs; [ git ]);
 
-  # Standard app builder - returns function that takes pkgs
-  mkApp = command: pkgs: {
-    type = "app";
-    program = "${pkgs.writeShellScript "app-script" ''
-      exec ${command}
-    ''}";
-  };
+            buildPhase = templateConfig.phases.build;
+            checkPhase = templateConfig.phases.check;
+            installPhase = templateConfig.phases.install;
 
-  # Common development shell builder - returns function that takes pkgs
-  mkDevShell = { language, buildTools, devTools, phases, shellHookCommands, extraShellHook ? "" }: pkgs:
-    pkgs.mkShell ({
-      packages = buildTools ++ devTools ++ (with pkgs; [ git just ]);
+            shellHook = ''
+              echo "${templateConfig.icon} ${templateConfig.language} Development Environment"
+              echo "=================================="
+              echo ""
+              echo "Standard Nix commands:"
+              echo "  nix develop --build    - Install dependencies and setup project"
+              echo "  nix develop --check    - Run test suite"
+              echo "  nix develop --install  - Build distribution packages"
+              echo ""
+              ${templateConfig.extraShellHook or ""}
+              echo "Environment ready! Run 'nix develop --build' to get started."
+            '';
 
-      buildPhase = phases.build;
-      checkPhase = phases.check;
-      installPhase = phases.install;
-
-      shellHook = mkShellHook {
-        name = language;
-        icon = {
-          Python = "🐍";
-          Scala = "⚡";
-          Guile = "🐧";
-        }.${language};
-        commands = shellHookCommands;
-      } + extraShellHook;
-    } // standardPhases);
+            enablePhases = [ "check" "build" "install" ];
+          });
+        });
+    };
+in
+{
+  inherit mkTemplate;
 }
