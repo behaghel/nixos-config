@@ -31,6 +31,16 @@
             just
           ];
 
+          shellAliases = {
+            build = "uv sync && uv run pre-commit install";
+            check = "uv run pytest";
+            package = "uv build";
+            run = "uv run";
+            update = "uv lock --upgrade";
+            update-env = "nix flake update";
+            help = "echo '$WELCOME_MSG'";
+          };
+
           shellHook = ''
             # Define welcome message for reuse
             WELCOME_MSG=$(cat << 'EOF'
@@ -56,15 +66,6 @@ EOF
               echo "Initializing uv project..."
               uv init --no-readme
             fi
-
-            # Set up aliases
-            alias build="uv sync && uv run pre-commit install"
-            alias check="uv run pytest"
-            alias package="uv build"
-            alias run="uv run"
-            alias update="uv lock --upgrade"
-            alias update-env="nix flake update"
-            alias help='echo "$WELCOME_MSG"'
           '';
         };
       });
