@@ -1,6 +1,6 @@
 { pkgs }: {
   deps = [
-    pkgs.nixVersions.stable
+    pkgs.nixVersions.latest
     pkgs.git
     pkgs.alejandra
     pkgs.treefmt
