@@ -3,25 +3,17 @@
 
 let
   # Helper function to generate a complete flake output for a template
-  mkTemplate = templateConfig:
-    { self, nixpkgs }:
+  mkTemplate = templateConfig: inputs:
     let
       forAllSystems = nixpkgs.lib.genAttrs [ "x86_64-linux" "aarch64-linux" "aarch64-darwin" ];
     in
     {
-      perSystem = forAllSystems (system:
+      devShells = forAllSystems (system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
         in
         {
-          apps = nixpkgs.lib.mapAttrs (name: command: {
-            type = "app";
-            program = "${pkgs.writeShellScript "${name}-script" ''
-              exec ${command}
-            ''}";
-          }) templateConfig.apps;
-
-          devShells.default = pkgs.mkShell ({
+          default = pkgs.mkShell {
             packages = templateConfig.buildTools ++ templateConfig.devTools ++ (with pkgs; [ git ]);
 
             buildPhase = templateConfig.phases.build;
@@ -42,8 +34,19 @@ let
             '';
 
             enablePhases = [ "check" "build" "install" ];
-          });
+          };
         });
+
+      apps = forAllSystems (system:
+        let
+          pkgs = nixpkgs.legacyPackages.${system};
+        in
+        nixpkgs.lib.mapAttrs (name: command: {
+          type = "app";
+          program = "${pkgs.writeShellScript "${name}-script" ''
+            exec ${command}
+          ''}";
+        }) templateConfig.apps);
     };
 in
 {
