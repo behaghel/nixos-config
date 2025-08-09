@@ -1,0 +1,42 @@
+
+# Hall-generated files
+/configure
+/Makefile
+/Makefile.in
+/aclocal.m4
+/autom4te.cache/
+/config.log
+/config.status
+/config.guess
+/config.sub
+/install-sh
+/missing
+/compile
+
+# Build artifacts
+*.go
+*.log
+.libs/
+*.la
+*.lo
+*.o
+
+# Distribution files
+*.tar.gz
+*.tar.xz
+
+# Editor files
+*~
+.#*
+\#*#
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Nix
+result
+result-*
+.direnv/

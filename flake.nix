@@ -48,6 +48,10 @@
             path = ./templates/guile-basic;
             description = "Modern Guile (GNU Scheme) development environment with guild, testing, and REPL tools";
           };
+          guile-hall = {
+            path = ./templates/guile-hall;
+            description = "Professional Guile development environment with guile-hall project management";
+          };
         };
       };
 

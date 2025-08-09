@@ -31,6 +31,7 @@ After creating a project from a template:
 | `python-basic` | Modern Python development environment | • Python 3.12 with `uv` package manager<br>• Black, Ruff, mypy, pytest for code quality<br>• Pre-commit hooks with automated formatting<br>• Hatchling build system<br>• Complete lifecycle commands (`build`, `test`, `package`, etc.) |
 | `scala-basic` | Modern Scala development environment | • Scala 3 with `sbt` build tool<br>• Scalafmt for formatting, ScalaTest for testing<br>• Metals language server support<br>• Assembly plugin for fat JAR creation<br>• Complete lifecycle commands (`build`, `test`, `package`, etc.) |
 | `guile-basic` | Modern Guile (GNU Scheme) development environment | • Guile 3.0 with module system support<br>• Guild compiler and linter for code quality<br>• SRFI-64 testing framework<br>• Interactive REPL development<br>• Complete lifecycle commands (`build`, `test`, `compile`, etc.) |
+| `guile-hall` | Professional Guile development with guile-hall | • Guile 3.0 with guile-hall project management<br>• Autotools integration for professional builds<br>• Project scaffolding and metadata management<br>• Integrated testing and distribution<br>• Complete lifecycle commands (`build`, `test`, `dist`, etc.) |
 
 ## Template Standards
 
