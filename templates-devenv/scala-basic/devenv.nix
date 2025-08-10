@@ -19,7 +19,7 @@
   ];
 
   scripts = {
-    install.exec = ''
+    dist.exec = ''
       echo "📦 Building fat JAR..."
       sbt assembly
       echo "✅ Packages built successfully!"
@@ -54,7 +54,7 @@
     echo ""
     echo "Available commands:"
     echo "  devenv test           - Run test suite"
-    echo "  devenv shell install  - Build fat JAR for distribution"
+    echo "  devenv shell dist     - Build fat JAR for distribution"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Scalafmt"
     echo "  devenv shell console  - Start Scala REPL"

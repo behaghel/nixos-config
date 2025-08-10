@@ -36,7 +36,7 @@ This template provides a complete development environment with:
 ### Core Commands
 
 - **`devenv test`** - Run the full test suite with pytest
-- **`devenv shell install`** - Build distribution packages (wheel and source)
+- **`devenv shell dist`** - Build distribution packages (wheel and source)
 - **`devenv shell run`** - Execute the main application
 - **`devenv shell format`** - Format code with Black and Ruff
 - **`devenv shell lint`** - Run linting with Ruff and mypy
@@ -68,7 +68,7 @@ uv add --dev pytest-cov  # Development dependency
 uv lock --upgrade
 
 # Build packages for distribution
-devenv shell install
+devenv shell dist
 
 # Format and lint code
 devenv shell format

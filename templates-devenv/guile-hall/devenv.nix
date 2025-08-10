@@ -23,7 +23,7 @@
       fi
     '';
 
-    install.exec = ''
+    dist.exec = ''
       echo "📦 Creating distribution..."
       hall dist "$@"
       echo "✅ Distribution created!"
@@ -52,7 +52,7 @@
     echo "Available commands:"
     echo "  devenv shell init     - Initialize Hall project (if needed)"
     echo "  devenv test           - Run test suite"
-    echo "  devenv shell install  - Create distribution"
+    echo "  devenv shell dist     - Create distribution"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell repl     - Start Guile REPL"
     echo "  devenv shell compile  - Compile with Hall"

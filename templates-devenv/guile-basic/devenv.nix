@@ -12,7 +12,7 @@
   ];
 
   scripts = {
-    install.exec = ''
+    dist.exec = ''
       echo "📦 Compiling to Guile bytecode..."
       guild compile -L . main.scm
       guild compile -L . guile-basic/hello.scm
@@ -41,7 +41,7 @@
     echo ""
     echo "Available commands:"
     echo "  devenv test           - Run test suite"
-    echo "  devenv shell install  - Compile to bytecode"
+    echo "  devenv shell dist     - Compile to bytecode"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell repl     - Start Guile REPL"
     echo "  devenv shell compile  - Compile with Guild"

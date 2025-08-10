@@ -40,7 +40,7 @@ All templates in this directory follow these standards:
 - **devenv-based** development environments for reproducible setups
 - **Essential lifecycle commands** using devenv:
   - `devenv test` - Run test suites
-  - `devenv shell install` - Create distribution packages
+  - `devenv shell dist` - Create distribution packages
   - Language-specific commands via devenv scripts
   - `devenv update` - Update dependencies
   - `nix flake update` - Update Nix development tools

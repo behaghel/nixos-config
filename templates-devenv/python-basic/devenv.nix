@@ -18,7 +18,7 @@
   ];
 
   scripts = {
-    install.exec = ''
+    dist.exec = ''
       echo "📦 Building distribution packages..."
       uv build
       echo "✅ Packages built successfully!"
@@ -50,7 +50,7 @@
     echo ""
     echo "Available commands:"
     echo "  devenv test           - Run test suite"
-    echo "  devenv shell install  - Build distribution packages"
+    echo "  devenv shell dist     - Build distribution packages"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Black and Ruff"
     echo "  devenv shell lint     - Run linting with Ruff and mypy"
