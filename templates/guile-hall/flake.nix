@@ -29,7 +29,7 @@
         ];
         
         apps = {
-          run = "${guileVersion}/bin/guile -L . -s main.scm \"$@\"";
+          run = "${guileVersion}/bin/guile -L . -s guile-hall-project.scm \"$@\"";
           test = "hall test \"$@\"";
           repl = "${guileVersion}/bin/guile -L . \"$@\"";
           compile = "hall compile \"$@\"";
@@ -45,9 +45,14 @@
             if [ ! -f "hall.scm" ]; then
               echo "Initializing new Hall project..."
               hall init guile-hall-project --author="Your Name" --email="your.email@example.com"
+              echo "✅ Hall project initialized!"
+            else
+              echo "Hall project already initialized."
             fi
-            hall build
-            echo "✅ Project setup complete!"
+            if [ -f "hall.scm" ]; then
+              hall build
+              echo "✅ Project built successfully!"
+            fi
           '';
           check = ''
             echo "🧪 Running test suite..."

@@ -1,4 +1,3 @@
-
 # Guile Hall Template
 
 A modern Guile (GNU Scheme) project template using guile-hall for project management and best practices.
@@ -59,8 +58,9 @@ hall dist               # Create distribution tarball
 hall compile            # Compile to bytecode
 
 # Development workflows
-guile -L . -s main.scm  # Run the main application
-guile -L .              # Start REPL with project modules
+echo "Development Commands:"
+          echo "  guile -L . -s guile-hall-project.scm - Run the main application"
+          echo "  guile -L .             - Start REPL with project modules"
 ```
 
 ### Example Workflows
