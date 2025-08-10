@@ -42,8 +42,9 @@ All templates in this repository follow these standards:
   - `nix develop --build` - Install dependencies and prepare project
   - `nix develop --check` - Run test suites
   - `nix develop --install` - Create distribution packages
-  - `uv run <command>` - Execute project tasks
-  - `uv lock --upgrade` - Update dependencies
+  - `nix run .#format` - Format source code
+  - `nix run .#lint` - Lint source code
+  - `nix run .#repl` - Start language REPL with project loaded
   - `nix flake update` - Update Nix development tools
 - **Code quality tools** with formatting and linting
 - **Pre-commit hooks** for automated quality checks

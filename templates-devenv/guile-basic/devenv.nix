@@ -24,8 +24,19 @@
       guile -L . -s main.scm "$@"
     '';
 
+    format.exec = ''
+      echo "📝 No standard Guile formatter available"
+      echo "💡 Consider using Emacs with geiser for consistent formatting"
+    '';
+
+    lint.exec = ''
+      echo "🔍 Linting with Guild compiler warnings..."
+      guild compile -Warity-mismatch -Wformat -L . guile-basic/hello.scm
+      echo "✅ Linting completed!"
+    '';
+
     repl.exec = ''
-      echo "🔍 Starting Guile REPL..."
+      echo "🐧 Starting Guile REPL..."
       guile -L . "$@"
     '';
 
@@ -85,8 +96,10 @@ EOF
     echo "  devenv test           - Run test suite"
     echo "  devenv shell dist     - Create distribution"
     echo "  devenv shell run      - Run the main application"
-    echo "  devenv shell compile  - Compile Guile modules"
+    echo "  devenv shell format   - Format code (manual for Guile)"
+    echo "  devenv shell lint     - Lint code with Guild warnings"
     echo "  devenv shell repl     - Start Guile REPL"
+    echo "  devenv shell compile  - Compile Guile modules"
     echo ""
     echo "Environment ready!"
   '';

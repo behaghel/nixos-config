@@ -36,8 +36,14 @@
       echo "✅ Code formatted!"
     '';
 
-    console.exec = ''
-      echo "🔍 Starting Scala REPL..."
+    lint.exec = ''
+      echo "🔍 Checking code format..."
+      sbt scalafmtCheck
+      echo "✅ Format check completed!"
+    '';
+
+    repl.exec = ''
+      echo "⚡ Starting Scala REPL..."
       sbt console
     '';
 
@@ -65,7 +71,8 @@
     echo "  devenv shell dist     - Build fat JAR for distribution"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Scalafmt"
-    echo "  devenv shell console  - Start Scala REPL"
+    echo "  devenv shell lint     - Check code formatting"
+    echo "  devenv shell repl     - Start Scala REPL"
     echo "  devenv shell clean    - Clean build artifacts"
     echo ""
     echo "Environment ready!"

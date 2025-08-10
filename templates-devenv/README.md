@@ -41,7 +41,9 @@ All templates in this directory follow these standards:
 - **Essential lifecycle commands** using devenv:
   - `devenv test` - Run test suites
   - `devenv shell dist` - Create distribution packages
-  - Language-specific commands via devenv scripts
+  - `devenv shell format` - Format source code
+  - `devenv shell lint` - Lint source code
+  - `devenv shell repl` - Start language REPL with project loaded
   - `devenv update` - Update dependencies
   - `nix flake update` - Update Nix development tools
 - **Code quality tools** with formatting and linting

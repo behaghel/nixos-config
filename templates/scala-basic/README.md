@@ -65,10 +65,13 @@ sbt run
 sbt compile
 
 # Start Scala REPL with project classpath
-sbt console
+nix run .#repl
 
 # Format code
-sbt scalafmt
+nix run .#format
+
+# Check formatting
+nix run .#lint
 
 # Create fat JAR
 sbt assembly
@@ -135,6 +138,52 @@ This template uses Nix for reproducible development environments:
 - Check `build.sbt` for project configuration
 - Review `flake.nix` for development environment setup
 - Examine `src/test/` for testing examples
+
+## Emacs Configuration
+
+To get consistent formatting and development experience in Emacs:
+
+### Scala Mode and Formatting
+```elisp
+;; Scala development
+(use-package scala-mode
+  :ensure t
+  :mode "\\.s\\(cala\\|bt\\)$")
+
+;; Scalafmt integration
+(use-package scalafmt
+  :ensure t
+  :hook (scala-mode . scalafmt-enable-on-save)
+  :config
+  (setq scalafmt-command "scalafmt"))
+```
+
+### Metals LSP Support
+```elisp
+;; Metals Language Server
+(use-package lsp-metals
+  :ensure t
+  :hook (scala-mode . lsp-deferred)
+  :config
+  (setq lsp-metals-server-args '("-J-Dmetals.allow-multiline-string-formatting=off")))
+
+;; SBT integration
+(use-package sbt-mode
+  :ensure t
+  :commands sbt-start sbt-command
+  :config
+  (substitute-key-definition 'minibuffer-complete-word
+                           'self-insert-command
+                           minibuffer-local-completion-map))
+```
+
+### REPL Integration
+```elisp
+;; Enhanced Scala REPL
+(use-package scala-repl
+  :ensure t
+  :hook (scala-mode . scala-repl-mode))
+```
 
 ## Customization
 

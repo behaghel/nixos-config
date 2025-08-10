@@ -62,7 +62,13 @@ guile -L . -s tests/test-runner.scm
 guile -L . -s main.scm
 
 # Start REPL with project modules loaded
-guile -L .
+nix run .#repl
+
+# Lint code with Guild
+nix run .#lint
+
+# Format code (manual for Guile)
+nix run .#format
 
 # Compile to bytecode
 guild compile -L . main.scm
@@ -153,6 +159,62 @@ Tests use SRFI-64 testing framework:
 - Start `guile -L .` for interactive development
 - Check the [Guile manual](https://www.gnu.org/software/guile/manual/) for language reference
 - Review `flake.nix` for development environment setup
+
+## Emacs Configuration
+
+To get the best Guile development experience in Emacs:
+
+### Scheme Mode and Geiser
+```elisp
+;; Enhanced Scheme support
+(use-package geiser
+  :ensure t
+  :config
+  (setq geiser-default-implementation 'guile
+        geiser-active-implementations '(guile)
+        geiser-guile-load-path '("./")))
+
+(use-package geiser-guile
+  :ensure t
+  :config
+  (setq geiser-guile-binary "guile"
+        geiser-guile-load-init-file-p t))
+```
+
+### Formatting and Indentation
+```elisp
+;; Scheme indentation rules
+(put 'test-begin 'scheme-indent-function 1)
+(put 'test-equal 'scheme-indent-function 2)
+(put 'test-assert 'scheme-indent-function 1)
+(put 'use-modules 'scheme-indent-function 0)
+(put 'define-module 'scheme-indent-function 1)
+
+;; Auto-formatting for Scheme
+(add-hook 'scheme-mode-hook
+          (lambda ()
+            (setq indent-tabs-mode nil
+                  tab-width 2
+                  scheme-indent-offset 2)))
+```
+
+### REPL Integration
+```elisp
+;; Enhanced REPL workflow
+(with-eval-after-load 'geiser-mode
+  (define-key geiser-mode-map (kbd "C-c C-a") 'geiser-mode-switch-to-repl-and-enter))
+```
+
+### Project Structure Support
+```elisp
+;; Guile module detection
+(add-hook 'scheme-mode-hook
+          (lambda ()
+            (when (string-match "\\.scm$" (buffer-file-name))
+              (setq geiser-guile-load-path
+                    (cons (file-name-directory (buffer-file-name))
+                          geiser-guile-load-path)))))
+```
 
 ## Customization
 

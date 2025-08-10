@@ -38,6 +38,11 @@
       echo "✅ Linting completed!"
     '';
 
+    repl.exec = ''
+      echo "🐍 Starting Python REPL..."
+      uv run python "$@"
+    '';
+
     run.exec = ''
       echo "🚀 Running application..."
       uv run python -m python_basic.main "$@"
@@ -62,7 +67,7 @@
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with black and ruff"
     echo "  devenv shell lint     - Lint code with ruff and mypy"
-    echo "  devenv shell clean    - Clean build artifacts"
+    echo "  devenv shell repl     - Start Python REPL"
     echo ""
     echo "Environment ready!"
   '';

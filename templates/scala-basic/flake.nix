@@ -31,7 +31,9 @@
           test = "sbt test \"$@\"";
           compile = "sbt compile \"$@\"";
           package = "sbt assembly \"$@\"";
-          console = "sbt console \"$@\"";
+          format = "sbt scalafmt \"$@\"";
+          lint = "sbt scalafmtCheck \"$@\"";
+          repl = "sbt console \"$@\"";
           clean = "sbt clean \"$@\"";
         };
         

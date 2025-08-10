@@ -62,6 +62,15 @@ uv run pytest tests/test_main.py
 # Run the main application
 uv run python -m python_basic.main
 
+# Format code
+nix run .#format
+
+# Lint code
+nix run .#lint
+
+# Start Python REPL with project loaded
+nix run .#repl
+
 # Add new dependencies
 uv add requests
 uv add --dev pytest-cov  # Development dependency
@@ -131,6 +140,50 @@ This template uses Nix for reproducible development environments:
 - Check `pyproject.toml` for project configuration
 - Review `flake.nix` for development environment setup
 - Examine `tests/` for testing examples
+
+## Emacs Configuration
+
+To get consistent formatting and linting in Emacs that matches the project's tools:
+
+### Formatting (Black + Ruff)
+Add to your Emacs configuration:
+
+```elisp
+;; Python formatting with Black
+(use-package blacken
+  :ensure t
+  :hook (python-mode . blacken-mode)
+  :config
+  (setq blacken-line-length 88))
+
+;; Python linting with Ruff via flymake
+(use-package flymake-ruff
+  :ensure t
+  :hook (python-mode . flymake-ruff-load))
+```
+
+### Type Checking (mypy)
+```elisp
+;; mypy integration
+(use-package flycheck
+  :ensure t
+  :hook (python-mode . flycheck-mode)
+  :config
+  (flycheck-add-next-checker 'python-flake8 'python-mypy))
+```
+
+### LSP Support
+For full IDE features, use `lsp-mode` or `eglot` with `pylsp`:
+
+```elisp
+(use-package lsp-mode
+  :ensure t
+  :hook (python-mode . lsp-deferred)
+  :config
+  (setq lsp-pylsp-plugins-black-enabled t
+        lsp-pylsp-plugins-ruff-enabled t
+        lsp-pylsp-plugins-mypy-enabled t))
+```
 
 ## Customization
 
