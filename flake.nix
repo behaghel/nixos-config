@@ -52,6 +52,22 @@
             path = ./templates/guile-hall;
             description = "Professional Guile development environment with guile-hall project management";
           };
+          python-basic-devenv = {
+            path = ./templates-devenv/python-basic;
+            description = "Modern Python development environment with devenv, uv, testing, and code quality tools";
+          };
+          scala-basic-devenv = {
+            path = ./templates-devenv/scala-basic;
+            description = "Modern Scala development environment with devenv, sbt, testing, and code quality tools";
+          };
+          guile-basic-devenv = {
+            path = ./templates-devenv/guile-basic;
+            description = "Modern Guile (GNU Scheme) development environment with devenv, guild, testing, and REPL tools";
+          };
+          guile-hall-devenv = {
+            path = ./templates-devenv/guile-hall;
+            description = "Professional Guile development environment with devenv and guile-hall project management";
+          };
         };
       };
 
