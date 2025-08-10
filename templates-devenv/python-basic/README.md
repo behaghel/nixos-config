@@ -1,4 +1,3 @@
-
 # Python Basic Template (devenv)
 
 A modern Python project template with best practices and tooling for rapid development using [devenv](https://github.com/cachix/devenv).
@@ -142,3 +141,61 @@ This template uses devenv for reproducible development environments:
 3. Add new modules in `src/python_basic/`
 4. Write tests in `tests/` using pytest
 5. Customize `devenv.nix` for additional tools or configuration
+
+## Emacs Configuration
+
+For consistent Python development using core Emacs functionality:
+
+### Built-in Language Server (eglot)
+```elisp
+;; Python development with eglot and pylsp
+(use-package eglot
+  :hook (python-mode . eglot-ensure)
+  :config
+  (add-to-list 'eglot-server-programs 
+               '(python-mode . ("pylsp"))))
+
+;; Configure pylsp for our toolchain
+(with-eval-after-load 'eglot
+  (setq-default eglot-workspace-configuration
+                '((pylsp . ((plugins . ((black . ((enabled . t)
+                                                   (line_length . 88)))
+                                        (ruff . ((enabled . t)))
+                                        (mypy . ((enabled . t))))))))))
+```
+
+### Formatting with built-in compile
+```elisp
+;; Format current buffer with Black
+(defun python-format-buffer ()
+  "Format current Python buffer with Black."
+  (interactive)
+  (when (eq major-mode 'python-mode)
+    (shell-command-on-region (point-min) (point-max) 
+                             "black --stdin-filename=buffer.py -" 
+                             (current-buffer) t)))
+
+;; Bind to common formatting key
+(define-key python-mode-map (kbd "C-c f") #'python-format-buffer)
+```
+
+### Testing with built-in compile
+```elisp
+;; Run project tests
+(defun python-run-tests ()
+  "Run pytest in project root."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "uv run pytest")))
+
+(define-key python-mode-map (kbd "C-c t") #'python-run-tests)
+```
+
+### REPL Integration
+```elisp
+;; Enhanced Python REPL
+(setq python-shell-interpreter "python"
+      python-shell-interpreter-args "-i")
+
+;; Send region to Python REPL
+(define-key python-mode-map (kbd "C-c C-r") #'python-shell-send-region)

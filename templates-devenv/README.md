@@ -50,7 +50,45 @@ All templates in this directory follow these standards:
 - **Pre-commit hooks** for automated quality checks
 - **EditorConfig** for consistent coding style
 - **direnv integration** for automatic environment loading
+- **Core Emacs compatibility** - All configurations prioritize built-in Emacs functionality
 - **Comprehensive documentation** with examples
+
+## Core Emacs Configuration
+
+All templates are designed to work seamlessly with core Emacs functionality. The following base configuration supports all templates:
+
+### Essential Setup
+```elisp
+;; Enable direnv integration
+(use-package direnv
+  :config
+  (direnv-mode))
+
+;; Project management with built-in project.el
+(use-package project
+  :bind (("C-x p f" . project-find-file)
+         ("C-x p s" . project-shell)
+         ("C-x p d" . project-dired)))
+
+;; Language Server Protocol with built-in eglot
+(use-package eglot
+  :hook ((python-mode . eglot-ensure)
+         (scala-mode . eglot-ensure)
+         (scheme-mode . eglot-ensure))
+  :config
+  (setq eglot-events-buffer-size 0))
+
+;; Built-in compilation mode for linting and testing
+(setq compilation-scroll-output t)
+```
+
+### EditorConfig Support
+```elisp
+;; Respect .editorconfig files
+(use-package editorconfig
+  :config
+  (editorconfig-mode 1))
+```
 
 ## Contributing
 
