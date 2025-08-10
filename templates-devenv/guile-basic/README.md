@@ -1,4 +1,3 @@
-
 # Guile Basic Template (devenv)
 
 A modern Guile (GNU Scheme) project template with best practices and tooling for rapid development using [devenv](https://github.com/cachix/devenv).
@@ -63,7 +62,7 @@ devenv shell repl
 devenv shell compile
 
 # Check compilation warnings and errors
-guild compile -Warity-mismatch -Wformat main.scm
+guild compile -Warity-mismatch -Wformat -Wunbound-variable main.scm
 
 # Interactive development in REPL
 guile -L .
@@ -156,3 +155,57 @@ Tests use SRFI-64 testing framework:
 3. Add new modules following the `(project-name module-name)` pattern
 4. Write tests in `tests/` using SRFI-64
 5. Update `devenv.nix` for additional development tools
+
+## Emacs Configuration
+
+For consistent Guile development using core Emacs functionality with Geiser:
+
+### Geiser Integration
+```elisp
+;; Geiser for interactive Guile development
+(use-package geiser
+  :hook (scheme-mode . geiser-mode))
+
+(use-package geiser-guile
+  :config
+  (setq geiser-guile-load-path '(".")
+        geiser-guile-init-file nil))
+
+;; Key bindings for Geiser
+(with-eval-after-load 'geiser-mode
+  (define-key geiser-mode-map (kbd "C-c C-z") #'geiser)
+  (define-key geiser-mode-map (kbd "C-c C-k") #'geiser-eval-buffer)
+  (define-key geiser-mode-map (kbd "C-c C-e") #'geiser-eval-last-sexp))
+```
+
+### Built-in Compilation for Linting
+```elisp
+;; Guild compilation for linting
+(defun guile-compile-file ()
+  "Compile current Guile file with Guild."
+  (interactive)
+  (when (eq major-mode 'scheme-mode)
+    (let ((default-directory (project-root (project-current))))
+      (compile (format "guild compile -Warity-mismatch -Wformat -Wunbound-variable %s"
+                       (file-name-nondirectory buffer-file-name))))))
+
+(define-key scheme-mode-map (kbd "C-c c") #'guile-compile-file)
+```
+
+### Formatting and Indentation
+```elisp
+;; Scheme formatting conventions
+(add-hook 'scheme-mode-hook
+          (lambda ()
+            (setq-local indent-tabs-mode nil)
+            (setq-local tab-width 2)
+            (setq-local lisp-indent-offset 2)))
+
+;; Format buffer using built-in indentation
+(defun scheme-format-buffer ()
+  "Format current Scheme buffer."
+  (interactive)
+  (when (eq major-mode 'scheme-mode)
+    (indent-region (point-min) (point-max))))
+
+(define-key scheme-mode-map (kbd "C-c f") #'scheme-format-buffer)

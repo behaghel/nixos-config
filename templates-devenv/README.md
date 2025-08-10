@@ -78,6 +78,14 @@ All templates are designed to work seamlessly with core Emacs functionality. The
   :config
   (setq eglot-events-buffer-size 0))
 
+;; Geiser for Scheme-compatible languages (Guile, etc.)
+(use-package geiser
+  :hook (scheme-mode . geiser-mode))
+
+(use-package geiser-guile
+  :config
+  (setq geiser-guile-load-path '(".")))
+
 ;; Built-in compilation mode for linting and testing
 (setq compilation-scroll-output t)
 ```
