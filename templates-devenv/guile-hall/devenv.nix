@@ -13,6 +13,26 @@
   ];
 
   scripts = {
+    lint.exec = ''
+      echo "🔍 Linting Guile code..."
+      # Use guild compile for linting with warnings
+      find . -name "*.scm" -not -path "./tests/*" -exec guild compile -Warity-mismatch -Wformat -Wunbound-variable {} \; 2>&1 | grep -E "(warning|error)" || echo "✅ No linting issues found!"
+    '';
+
+    format.exec = ''
+      echo "🎨 Formatting Guile code..."
+      echo "ℹ️  Manual formatting required for Guile. Use consistent indentation:"
+      echo "   - 2 spaces for indentation"
+      echo "   - Align function arguments vertically"
+      echo "   - Keep line length under 80 characters"
+      echo "✅ Formatting guidelines displayed!"
+    '';
+
+    repl.exec = ''
+      echo "🔍 Starting Guile REPL with project modules..."
+      guile -L . "$@"
+    '';
+
     dist.exec = ''
       echo "📦 Creating distribution..."
       hall dist "$@"
@@ -22,11 +42,6 @@
     run.exec = ''
       echo "🚀 Running application..."
       guile -L . -s guile-hall-project.scm "$@"
-    '';
-
-    repl.exec = ''
-      echo "🔍 Starting Guile REPL..."
-      guile -L . "$@"
     '';
 
     compile.exec = ''
@@ -49,9 +64,11 @@
     echo ""
     echo "Available commands:"
     echo "  devenv test           - Run test suite"
+    echo "  devenv shell lint     - Lint source code"
+    echo "  devenv shell format   - Format source code (guidelines)"
+    echo "  devenv shell repl     - Start Guile REPL with project loaded"
     echo "  devenv shell dist     - Create distribution"
     echo "  devenv shell run      - Run the main application"
-    echo "  devenv shell repl     - Start Guile REPL"
     echo "  devenv shell compile  - Compile with Hall"
     echo ""
     echo "Environment ready!"

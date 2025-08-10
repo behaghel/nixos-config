@@ -31,6 +31,8 @@
         apps = {
           run = "${guileVersion}/bin/guile -L . -s guile-hall-project.scm \"$@\"";
           test = "hall test \"$@\"";
+          lint = "find . -name \"*.scm\" -not -path \"./tests/*\" -exec guild compile -Warity-mismatch -Wformat -Wunbound-variable {} \\; 2>&1 | grep -E \"(warning|error)\" || echo \"✅ No linting issues found!\"";
+          format = "echo \"🎨 Formatting guidelines for Guile:\"; echo \"   - Use 2 spaces for indentation\"; echo \"   - Align function arguments vertically\"; echo \"   - Keep lines under 80 characters\"";
           repl = "${guileVersion}/bin/guile -L . \"$@\"";
           compile = "hall compile \"$@\"";
           build = "hall build \"$@\"";
@@ -71,16 +73,17 @@
           export GUILE_LOAD_PATH=".:$GUILE_LOAD_PATH"
           export GUILE_LOAD_COMPILED_PATH=".:$GUILE_LOAD_COMPILED_PATH"
           
+          echo "Standard Commands:"
+          echo "  nix run .#lint         - Lint source code with Guild"
+          echo "  nix run .#format       - Show formatting guidelines"
+          echo "  nix run .#repl         - Start REPL with project modules"
+          echo ""
           echo "Hall Commands:"
           echo "  hall build             - Build the project"
           echo "  hall test              - Run test suite"
           echo "  hall clean             - Clean build artifacts"
           echo "  hall dist              - Create distribution tarball"
           echo "  hall compile           - Compile to bytecode"
-          echo ""
-          echo "Development Commands:"
-          echo "  guile -L . -s main.scm - Run the main application"
-          echo "  guile -L .             - Start REPL with project modules"
         '';
       };
     in

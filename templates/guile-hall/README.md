@@ -143,6 +143,14 @@ Hall integrates with standard Guile testing:
 
 ## Code Quality Tools
 
+### Linting
+- **Guild compiler** - Static analysis with warnings (`-Warity-mismatch`, `-Wformat`, `-Wunbound-variable`)
+- **`nix run .#lint`** - Lint all source files automatically
+
+### Formatting
+- **Manual formatting** - Guile follows Lisp formatting conventions
+- **`nix run .#format`** - Display formatting guidelines
+
 ### Build System
 - **Autotools** - Professional build system integration via Hall
 - **Hall** - Project structure management and scaffolding
@@ -151,9 +159,53 @@ Hall integrates with standard Guile testing:
 - **SRFI-64** - Comprehensive testing framework
 - **Hall test** - Integrated test runner
 
-### Development
-- **Guile REPL** - Interactive development with module loading
+### REPL Support
+- **Guile REPL** - Interactive development with module loading (`nix run .#repl`)
 - **Guild compiler** - Bytecode compilation
+
+## Emacs Configuration
+
+For consistent linting and formatting in Emacs, add this to your configuration:
+
+### Linting with Flycheck
+```elisp
+;; Enable flycheck for Scheme files
+(use-package flycheck
+  :hook (scheme-mode . flycheck-mode))
+
+;; Configure Guild for Guile linting
+(flycheck-define-checker guile-guild
+  "A Guile checker using Guild compiler."
+  :command ("guild" "compile" 
+            "-Warity-mismatch" "-Wformat" "-Wunbound-variable"
+            source-inplace)
+  :error-patterns
+  ((warning line-start (file-name) ":" line ":" column ": warning: " (message) line-end)
+   (error line-start (file-name) ":" line ":" column ": error: " (message) line-end))
+  :modes scheme-mode)
+
+(add-to-list 'flycheck-checkers 'guile-guild)
+```
+
+### Formatting with Geiser
+```elisp
+;; Geiser configuration for Guile development
+(use-package geiser-guile
+  :config
+  (setq geiser-guile-load-path '(".")))
+
+;; Automatic indentation for Scheme
+(add-hook 'scheme-mode-hook
+          (lambda ()
+            (setq-local indent-tabs-mode nil)
+            (setq-local tab-width 2)
+            (setq-local lisp-indent-offset 2)))
+
+;; Auto-format on save (optional)
+(add-hook 'scheme-mode-hook
+          (lambda ()
+            (add-hook 'before-save-hook 'indent-region nil t)))
+```
 
 ## Environment Management
 
