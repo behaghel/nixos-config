@@ -21,17 +21,12 @@ This template provides a complete development environment with:
    devenv shell
    ```
 
-2. **Build the project** (install dependencies and setup hooks):
-   ```bash
-   devenv shell build
-   ```
-
-3. **Run tests**:
+2. **Run tests**:
    ```bash
    devenv shell check
    ```
 
-4. **Run the hello world example**:
+3. **Run the hello world example**:
    ```bash
    devenv shell run
    ```
@@ -40,7 +35,6 @@ This template provides a complete development environment with:
 
 ### Core Commands
 
-- **`devenv shell build`** - Install dependencies and prepare the project for development
 - **`devenv shell check`** - Run the full test suite with pytest
 - **`devenv shell install`** - Build distribution packages (wheel and source)
 - **`devenv shell run`** - Execute the main application
@@ -54,8 +48,8 @@ This template provides a complete development environment with:
 ### Example Workflows
 
 ```bash
-# Start development
-devenv shell build
+# Start development (environment loads automatically)
+devenv shell
 
 # Run tests continuously during development
 devenv shell check

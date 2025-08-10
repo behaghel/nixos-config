@@ -1,4 +1,3 @@
-
 { pkgs, lib, config, inputs, ... }:
 
 {
@@ -20,12 +19,6 @@
   ];
 
   scripts = {
-    build.exec = ''
-      echo "🔧 Compiling Scala project..."
-      sbt compile
-      echo "✅ Project setup complete!"
-    '';
-
     check.exec = ''
       echo "🧪 Running test suite..."
       sbt test
@@ -65,22 +58,14 @@
     echo "⚡ Scala Development Environment"
     echo "=================================="
     echo ""
-    echo "Standard devenv commands:"
-    echo "  devenv shell build    - Install dependencies and setup project"
+    echo "Available commands:"
     echo "  devenv shell check    - Run test suite"
     echo "  devenv shell install  - Build fat JAR for distribution"
-    echo ""
-    echo "Development commands:"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Scalafmt"
     echo "  devenv shell console  - Start Scala REPL"
     echo "  devenv shell clean    - Clean build artifacts"
     echo ""
-    echo "Build tool commands:"
-    echo "  sbt compile          - Compile the project"
-    echo "  sbt test             - Run test suite"
-    echo "  sbt assembly         - Create fat JAR"
-    echo ""
-    echo "Environment ready! Run 'devenv shell build' to get started."
+    echo "Environment ready!"
   '';
 }

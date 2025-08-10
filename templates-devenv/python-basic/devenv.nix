@@ -1,4 +1,3 @@
-
 { pkgs, lib, config, inputs, ... }:
 
 {
@@ -19,13 +18,6 @@
   ];
 
   scripts = {
-    build.exec = ''
-      echo "🔧 Setting up Python project..."
-      uv sync --dev
-      pre-commit install
-      echo "✅ Project setup complete!"
-    '';
-
     check.exec = ''
       echo "🧪 Running test suite..."
       uv run pytest
@@ -62,12 +54,9 @@
     echo "🐍 Python Development Environment"
     echo "=================================="
     echo ""
-    echo "Standard devenv commands:"
-    echo "  devenv shell build    - Install dependencies and setup project"
+    echo "Available commands:"
     echo "  devenv shell check    - Run test suite"
     echo "  devenv shell install  - Build distribution packages"
-    echo ""
-    echo "Development commands:"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Black and Ruff"
     echo "  devenv shell lint     - Run linting with Ruff and mypy"
@@ -77,7 +66,7 @@
     echo "  uv add --dev <pkg>    - Add development dependency"
     echo "  uv lock --upgrade     - Update dependencies"
     echo ""
-    echo "Environment ready! Run 'devenv shell build' to get started."
+    echo "Environment ready!"
   '';
 
   pre-commit = {

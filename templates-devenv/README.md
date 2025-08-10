@@ -22,8 +22,7 @@ After creating a project from a template:
 1. Navigate to the new project directory
 2. The development environment will automatically load if you have `direnv` installed
 3. Run `devenv shell` to enter the environment manually if needed
-4. Run standard lifecycle commands to manage your project
-5. Start developing!
+4. Start developing!
 
 ## Available Templates
 
@@ -39,8 +38,7 @@ After creating a project from a template:
 All templates in this directory follow these standards:
 
 - **devenv-based** development environments for reproducible setups
-- **Standardized lifecycle commands** using devenv scripts:
-  - `devenv shell build` - Install dependencies and prepare project
+- **Essential lifecycle commands** using devenv scripts:
   - `devenv shell check` - Run test suites
   - `devenv shell install` - Create distribution packages
   - Language-specific commands via devenv scripts
