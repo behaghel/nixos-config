@@ -13,16 +13,6 @@
   ];
 
   scripts = {
-    init.exec = ''
-      if [ ! -f "hall.scm" ]; then
-        echo "🚀 Initializing new Hall project..."
-        hall init guile-hall-project --author="Your Name" --email="your.email@example.com"
-        echo "✅ Hall project initialized!"
-      else
-        echo "Hall project already initialized."
-      fi
-    '';
-
     dist.exec = ''
       echo "📦 Creating distribution..."
       hall dist "$@"
@@ -46,11 +36,18 @@
   };
 
   enterShell = ''
+    # Auto-initialize Hall project if needed
+    if [ ! -f "hall.scm" ]; then
+      echo "🚀 Initializing new Hall project..."
+      hall init guile-hall-project --author="Your Name" --email="your.email@example.com"
+      echo "✅ Hall project initialized!"
+      echo ""
+    fi
+    
     echo "🏛️ Guile Hall Development Environment"
     echo "====================================="
     echo ""
     echo "Available commands:"
-    echo "  devenv shell init     - Initialize Hall project (if needed)"
     echo "  devenv test           - Run test suite"
     echo "  devenv shell dist     - Create distribution"
     echo "  devenv shell run      - Run the main application"
