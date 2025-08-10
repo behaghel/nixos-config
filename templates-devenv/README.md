@@ -21,7 +21,7 @@ After creating a project from a template:
 
 1. Navigate to the new project directory
 2. The development environment will automatically load if you have `direnv` installed
-3. Run `devenv shell` to enter the environment manually if needed
+3. The project will be automatically bootstrapped using community best practices on first visit
 4. Start developing!
 
 ## Available Templates

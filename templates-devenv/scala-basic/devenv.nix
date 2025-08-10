@@ -49,6 +49,14 @@
   };
 
   enterShell = ''
+    # Auto-bootstrap Scala project if needed
+    if [ ! -f "build.sbt" ]; then
+      echo "🚀 Bootstrapping new Scala project..."
+      sbt new scala/scala3.g8 --name=scala-basic-project --package=scalabasic
+      echo "✅ Scala project bootstrapped!"
+      echo ""
+    fi
+    
     echo "⚡ Scala Development Environment"
     echo "=================================="
     echo ""

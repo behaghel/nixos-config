@@ -45,6 +45,14 @@
   };
 
   enterShell = ''
+    # Auto-bootstrap Python project if needed
+    if [ ! -f "pyproject.toml" ]; then
+      echo "🚀 Bootstrapping new Python project..."
+      uv init python-basic-project
+      echo "✅ Python project bootstrapped!"
+      echo ""
+    fi
+
     echo "🐍 Python Development Environment"
     echo "=================================="
     echo ""
@@ -52,13 +60,9 @@
     echo "  devenv test           - Run test suite"
     echo "  devenv shell dist     - Build distribution packages"
     echo "  devenv shell run      - Run the main application"
-    echo "  devenv shell format   - Format code with Black and Ruff"
-    echo "  devenv shell lint     - Run linting with Ruff and mypy"
-    echo ""
-    echo "Package management:"
-    echo "  uv add <package>      - Add new dependency"
-    echo "  uv add --dev <pkg>    - Add development dependency"
-    echo "  uv lock --upgrade     - Update dependencies"
+    echo "  devenv shell format   - Format code with black and ruff"
+    echo "  devenv shell lint     - Lint code with ruff and mypy"
+    echo "  devenv shell clean    - Clean build artifacts"
     echo ""
     echo "Environment ready!"
   '';

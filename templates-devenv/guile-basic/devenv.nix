@@ -36,15 +36,57 @@
   };
 
   enterShell = ''
+    # Auto-create basic Guile project structure if needed
+    if [ ! -f "main.scm" ]; then
+      echo "🚀 Creating basic Guile project structure..."
+      mkdir -p guile-basic tests
+
+      cat > main.scm << 'EOF'
+#!/usr/bin/env guile
+!#
+
+(add-to-load-path ".")
+(use-modules (guile-basic hello))
+
+(display (hello-world))
+(newline)
+EOF
+
+      cat > guile-basic/hello.scm << 'EOF'
+(define-module (guile-basic hello)
+  #:export (hello-world))
+
+(define (hello-world)
+  "Hello, World from Guile!")
+EOF
+
+      cat > tests/test-runner.scm << 'EOF'
+(use-modules (srfi srfi-64)
+             (guile-basic hello))
+
+(test-begin "guile-basic-tests")
+
+(test-equal "hello-world returns greeting"
+  "Hello, World from Guile!"
+  (hello-world))
+
+(test-end "guile-basic-tests")
+EOF
+
+      chmod +x main.scm
+      echo "✅ Guile project structure created!"
+      echo ""
+    fi
+
     echo "🐧 Guile Development Environment"
     echo "=================================="
     echo ""
     echo "Available commands:"
     echo "  devenv test           - Run test suite"
-    echo "  devenv shell dist     - Compile to bytecode"
+    echo "  devenv shell dist     - Create distribution"
     echo "  devenv shell run      - Run the main application"
+    echo "  devenv shell compile  - Compile Guile modules"
     echo "  devenv shell repl     - Start Guile REPL"
-    echo "  devenv shell compile  - Compile with Guild"
     echo ""
     echo "Environment ready!"
   '';
