@@ -23,7 +23,7 @@ This template provides a complete development environment with:
 
 2. **Run tests**:
    ```bash
-   devenv shell check
+   devenv test
    ```
 
 3. **Run the hello world example**:
@@ -35,7 +35,7 @@ This template provides a complete development environment with:
 
 ### Core Commands
 
-- **`devenv shell check`** - Run the full test suite with pytest
+- **`devenv test`** - Run the full test suite with pytest
 - **`devenv shell install`** - Build distribution packages (wheel and source)
 - **`devenv shell run`** - Execute the main application
 - **`devenv shell format`** - Format code with Black and Ruff
@@ -52,7 +52,7 @@ This template provides a complete development environment with:
 devenv shell
 
 # Run tests continuously during development
-devenv shell check
+devenv test
 
 # Run specific test file
 uv run pytest tests/test_main.py

@@ -23,12 +23,6 @@
       fi
     '';
 
-    check.exec = ''
-      echo "🧪 Running test suite..."
-      hall test "$@"
-      echo "✅ Tests completed!"
-    '';
-
     install.exec = ''
       echo "📦 Creating distribution..."
       hall dist "$@"
@@ -57,7 +51,7 @@
     echo ""
     echo "Available commands:"
     echo "  devenv shell init     - Initialize Hall project (if needed)"
-    echo "  devenv shell check    - Run test suite"
+    echo "  devenv test           - Run test suite"
     echo "  devenv shell install  - Create distribution"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell repl     - Start Guile REPL"
@@ -70,4 +64,11 @@
     GUILE_LOAD_PATH = "./";
     GUILE_LOAD_COMPILED_PATH = "./";
   };
+
+  # Use devenv's built-in test functionality
+  test = ''
+    echo "🧪 Running test suite..."
+    hall test "$@"
+    echo "✅ Tests completed!"
+  '';
 }

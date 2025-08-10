@@ -18,12 +18,6 @@
   ];
 
   scripts = {
-    check.exec = ''
-      echo "🧪 Running test suite..."
-      uv run pytest
-      echo "✅ Tests completed!"
-    '';
-
     install.exec = ''
       echo "📦 Building distribution packages..."
       uv build
@@ -55,7 +49,7 @@
     echo "=================================="
     echo ""
     echo "Available commands:"
-    echo "  devenv shell check    - Run test suite"
+    echo "  devenv test           - Run test suite"
     echo "  devenv shell install  - Build distribution packages"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Black and Ruff"
@@ -77,4 +71,11 @@
       mypy.enable = true;
     };
   };
+
+  # Use devenv's built-in test functionality
+  test = ''
+    echo "🧪 Running test suite..."
+    uv run pytest
+    echo "✅ Tests completed!"
+  '';
 }

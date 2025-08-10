@@ -12,12 +12,6 @@
   ];
 
   scripts = {
-    check.exec = ''
-      echo "🧪 Running test suite..."
-      guile -L . -s tests/test-runner.scm
-      echo "✅ Tests completed!"
-    '';
-
     install.exec = ''
       echo "📦 Compiling to Guile bytecode..."
       guild compile -L . main.scm
@@ -46,7 +40,7 @@
     echo "=================================="
     echo ""
     echo "Available commands:"
-    echo "  devenv shell check    - Run test suite"
+    echo "  devenv test           - Run test suite"
     echo "  devenv shell install  - Compile to bytecode"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell repl     - Start Guile REPL"
@@ -59,4 +53,11 @@
     GUILE_LOAD_PATH = "./";
     GUILE_LOAD_COMPILED_PATH = "./";
   };
+
+  # Use devenv's built-in test functionality
+  test = ''
+    echo "🧪 Running test suite..."
+    guile -L . -s tests/test-runner.scm
+    echo "✅ Tests completed!"
+  '';
 }

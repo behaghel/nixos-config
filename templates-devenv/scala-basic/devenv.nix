@@ -19,12 +19,6 @@
   ];
 
   scripts = {
-    check.exec = ''
-      echo "🧪 Running test suite..."
-      sbt test
-      echo "✅ Tests completed!"
-    '';
-
     install.exec = ''
       echo "📦 Building fat JAR..."
       sbt assembly
@@ -59,7 +53,7 @@
     echo "=================================="
     echo ""
     echo "Available commands:"
-    echo "  devenv shell check    - Run test suite"
+    echo "  devenv test           - Run test suite"
     echo "  devenv shell install  - Build fat JAR for distribution"
     echo "  devenv shell run      - Run the main application"
     echo "  devenv shell format   - Format code with Scalafmt"
@@ -67,5 +61,12 @@
     echo "  devenv shell clean    - Clean build artifacts"
     echo ""
     echo "Environment ready!"
+  '';
+
+  # Use devenv's built-in test functionality
+  test = ''
+    echo "🧪 Running test suite..."
+    sbt test
+    echo "✅ Tests completed!"
   '';
 }
