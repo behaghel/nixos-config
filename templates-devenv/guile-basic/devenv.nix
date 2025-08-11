@@ -110,7 +110,7 @@ EOF
   };
 
   # Use devenv's built-in test functionality
-  test = ''
+  enterTest = ''
     echo "🧪 Running test suite..."
     guile -L . -s tests/test-runner.scm
     echo "✅ Tests completed!"

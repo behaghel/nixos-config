@@ -79,7 +79,7 @@
   '';
 
   # Use devenv's built-in test functionality
-  test = ''
+  enterTest = ''
     echo "🧪 Running test suite..."
     sbt test
     echo "✅ Tests completed!"

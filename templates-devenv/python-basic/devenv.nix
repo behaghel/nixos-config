@@ -82,7 +82,7 @@
   };
 
   # Use devenv's built-in test functionality
-  test = ''
+  enterTest = ''
     echo "🧪 Running test suite..."
     uv run pytest
     echo "✅ Tests completed!"
