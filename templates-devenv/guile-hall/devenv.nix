@@ -93,7 +93,7 @@ Environment ready!'';
   # Use devenv's built-in test functionality
   enterTest = ''
     echo "🧪 Running test suite..."
-    hall test "$@"
+    hall build check --execute
     echo "✅ Tests completed!"
   '';
 }
