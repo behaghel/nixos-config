@@ -19,6 +19,16 @@
   ];
 
   scripts = {
+    init.exec = ''
+      # Auto-bootstrap project if needed
+      if [ ! -f "build.sbt" ]; then
+        echo "🚀 Bootstrapping new Scala project..."
+        sbt new scala/scala3.g8 --name=scala-basic --organization=com.example
+        echo "✅ Scala project bootstrapped!"
+        echo ""
+      fi
+    '';
+
     dist.exec = ''
       echo "📦 Building fat JAR..."
       sbt assembly
@@ -55,31 +65,33 @@
   };
 
   enterShell = ''
-    # Auto-bootstrap project if needed
-    if [ ! -f "build.sbt" ]; then
-      echo "🚀 Bootstrapping new Scala project..."
-      sbt new scala/scala3.g8 --name=scala-basic --organization=com.example
-      echo "✅ Scala project bootstrapped!"
-      echo ""
+    # Initialize project if in interactive mode and not already initialized
+    if [[ $- == *i* ]] && [ ! -f "build.sbt" ]; then
+      devenv shell init
     fi
-
-    # Only show greeting in interactive shells
+    
+    # Show greeting in interactive shells
     if [[ $- == *i* ]]; then
-      echo "⚡ Scala Basic Development Environment"
-      echo "====================================="
-      echo ""
-      echo "Available commands:"
-      echo "  devenv test           - Run test suite with ScalaTest"
-      echo "  devenv shell run      - Run the main application"
-      echo "  devenv shell repl     - Start Scala REPL"
-      echo "  devenv shell format   - Format code with Scalafmt"  
-      echo "  devenv shell lint     - Check formatting with Scalafmt"
-      echo "  devenv shell dist     - Build fat JAR"
-      echo "  sbt <command>         - Execute sbt commands"
-      echo ""
-      echo "Environment ready!"
+      echo "$GREETING"
     fi
   '';
+
+  env = {
+    GREETING = ''
+⚡ Scala Basic Development Environment
+=====================================
+
+Available commands:
+  devenv test           - Run test suite with ScalaTest
+  devenv shell run      - Run the main application
+  devenv shell repl     - Start Scala REPL
+  devenv shell format   - Format code with Scalafmt
+  devenv shell lint     - Check formatting with Scalafmt
+  devenv shell dist     - Build fat JAR
+  sbt <command>         - Execute sbt commands
+
+Environment ready!'';
+  };
 
   # Use devenv's built-in test functionality
   enterTest = ''

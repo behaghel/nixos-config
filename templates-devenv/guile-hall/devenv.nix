@@ -13,6 +13,16 @@
   ];
 
   scripts = {
+    init.exec = ''
+      # Auto-initialize Hall project if needed
+      if [ ! -f "hall.scm" ]; then
+        echo "🚀 Initializing new Hall project..."
+        hall init guile-hall-project --author="$ORGANIZATION" --execute
+        echo "✅ Hall project initialized!"
+        echo ""
+      fi
+    '';
+
     lint.exec = ''
       echo "🔍 Linting Guile code..."
       # Use guild compile for linting with warnings
@@ -51,35 +61,34 @@
   };
 
   enterShell = ''
-    # Auto-initialize Hall project if needed
-    if [ ! -f "hall.scm" ]; then
-      echo "🚀 Initializing new Hall project..."
-      hall init guile-hall-project --author="$ORGANIZATION" --execute
-      echo "✅ Hall project initialized!"
-      echo ""
+    # Initialize project if in interactive mode and not already initialized
+    if [[ $- == *i* ]] && [ ! -f "hall.scm" ]; then
+      devenv shell init
     fi
     
-    # Only show greeting in interactive shells
+    # Show greeting in interactive shells
     if [[ $- == *i* ]]; then
-      echo "🏛️ Guile Hall Development Environment"
-      echo "====================================="
-      echo ""
-      echo "Available commands:"
-      echo "  devenv test           - Run test suite"
-      echo "  devenv shell lint     - Lint source code"
-      echo "  devenv shell format   - Format source code (guidelines)"
-      echo "  devenv shell repl     - Start Guile REPL with project loaded"
-      echo "  devenv shell dist     - Create distribution"
-      echo "  devenv shell run      - Run the main application"
-      echo "  devenv shell compile  - Compile with Hall"
-      echo ""
-      echo "Environment ready!"
+      echo "$GREETING"
     fi
   '';
 
   env = {
     GUILE_LOAD_PATH = "./";
     GUILE_LOAD_COMPILED_PATH = "./";
+    GREETING = ''
+🏛️ Guile Hall Development Environment
+=====================================
+
+Available commands:
+  devenv test           - Run test suite
+  devenv shell lint     - Lint source code
+  devenv shell format   - Format source code (guidelines)
+  devenv shell repl     - Start Guile REPL with project loaded
+  devenv shell dist     - Create distribution
+  devenv shell run      - Run the main application
+  devenv shell compile  - Compile with Hall
+
+Environment ready!'';
   };
 
   # Use devenv's built-in test functionality

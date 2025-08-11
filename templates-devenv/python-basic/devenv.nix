@@ -18,6 +18,16 @@
   ];
 
   scripts = {
+    init.exec = ''
+      # Auto-bootstrap Python project if needed
+      if [ ! -f "pyproject.toml" ]; then
+        echo "🚀 Bootstrapping new Python project..."
+        uv init python-basic-project
+        echo "✅ Python project bootstrapped!"
+        echo ""
+      fi
+    '';
+
     dist.exec = ''
       echo "📦 Building distribution packages..."
       uv build
@@ -50,31 +60,33 @@
   };
 
   enterShell = ''
-    # Auto-bootstrap Python project if needed
-    if [ ! -f "pyproject.toml" ]; then
-      echo "🚀 Bootstrapping new Python project..."
-      uv init python-basic-project
-      echo "✅ Python project bootstrapped!"
-      echo ""
+    # Initialize project if in interactive mode and not already initialized
+    if [[ $- == *i* ]] && [ ! -f "pyproject.toml" ]; then
+      devenv shell init
     fi
-
-    # Only show greeting in interactive shells
+    
+    # Show greeting in interactive shells
     if [[ $- == *i* ]]; then
-      echo "🐍 Python Basic Development Environment"
-      echo "========================================"
-      echo ""
-      echo "Available commands:"
-      echo "  devenv test           - Run test suite with pytest"
-      echo "  devenv shell run      - Run the main application"
-      echo "  devenv shell format   - Format code with Black and Ruff"
-      echo "  devenv shell lint     - Run linting with Ruff and mypy"
-      echo "  devenv shell dist     - Build distribution packages"
-      echo "  uv add <package>      - Add new dependencies"
-      echo "  uv lock --upgrade     - Update dependencies"
-      echo ""
-      echo "Environment ready!"
+      echo "$GREETING"
     fi
   '';
+
+  env = {
+    GREETING = ''
+🐍 Python Basic Development Environment
+========================================
+
+Available commands:
+  devenv test           - Run test suite with pytest
+  devenv shell run      - Run the main application
+  devenv shell format   - Format code with Black and Ruff
+  devenv shell lint     - Run linting with Ruff and mypy
+  devenv shell dist     - Build distribution packages
+  uv add <package>      - Add new dependencies
+  uv lock --upgrade     - Update dependencies
+
+Environment ready!'';
+  };
 
   pre-commit = {
     enable = true;
