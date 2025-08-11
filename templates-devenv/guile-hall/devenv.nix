@@ -13,16 +13,6 @@
   ];
 
   scripts = {
-    init.exec = ''
-      # Auto-initialize Hall project if needed
-      if [ ! -f "hall.scm" ]; then
-        echo "🚀 Initializing new Hall project..."
-        hall init guile-hall-project --author="$ORGANIZATION" --execute
-        echo "✅ Hall project initialized!"
-        echo ""
-      fi
-    '';
-
     lint.exec = ''
       echo "🔍 Linting Guile code..."
       # Use guild compile for linting with warnings

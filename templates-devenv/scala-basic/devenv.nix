@@ -19,16 +19,6 @@
   ];
 
   scripts = {
-    init.exec = ''
-      # Auto-bootstrap project if needed
-      if [ ! -f "build.sbt" ]; then
-        echo "🚀 Bootstrapping new Scala project..."
-        sbt new scala/scala3.g8 --name=scala-basic --organization=com.example
-        echo "✅ Scala project bootstrapped!"
-        echo ""
-      fi
-    '';
-
     dist.exec = ''
       echo "📦 Building fat JAR..."
       sbt assembly

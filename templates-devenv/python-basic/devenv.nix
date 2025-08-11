@@ -18,16 +18,6 @@
   ];
 
   scripts = {
-    init.exec = ''
-      # Auto-bootstrap Python project if needed
-      if [ ! -f "pyproject.toml" ]; then
-        echo "🚀 Bootstrapping new Python project..."
-        uv init python-basic-project
-        echo "✅ Python project bootstrapped!"
-        echo ""
-      fi
-    '';
-
     dist.exec = ''
       echo "📦 Building distribution packages..."
       uv build
