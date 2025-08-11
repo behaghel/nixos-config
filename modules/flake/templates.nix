@@ -1,30 +1,13 @@
-
-{ inputs, lib, flake-parts-lib, ... }:
-let
-  inherit (flake-parts-lib) mkPerSystemOption;
-  inherit (lib) mkOption types;
-in
+{ inputs, lib, ... }:
 {
-  options = {
-    flake = {
-      templateDirectories = mkOption {
-        type = types.listOf types.str;
-        default = [ "templates" "templates-devenv" ];
-        description = "List of directories to scan for templates";
-      };
-    };
-  };
-
-  config = {
-    flake = 
+  flake = 
       let
-        # Function to recursively find all template directories
+        # Function to list subdirectories
         findTemplates = baseDir:
           let
             dirContents = builtins.readDir baseDir;
             templateDirs = lib.filterAttrs (name: type: 
-              type == "directory" && 
-              builtins.pathExists (baseDir + "/${name}/flake.nix")
+              type == "directory"
             ) dirContents;
           in
           lib.mapAttrs' (name: _: {
@@ -34,7 +17,6 @@ in
               description = 
                 let
                   readmePath = baseDir + "/${name}/README.md";
-                  flakeNixPath = baseDir + "/${name}/flake.nix";
                 in
                 if builtins.pathExists readmePath then
                   # Try to extract description from README.md first line
@@ -53,18 +35,24 @@ in
           }) templateDirs;
 
         # Scan all configured directories for templates
-        allTemplates = lib.foldl' (acc: dir:
+        allTemplates = lib.foldl' (acc: templateDef:
           let
+            dir = builtins.head (lib.attrNames templateDef);
+            suffix = builtins.getAttr dir templateDef;
             dirPath = ./. + "/../.." + "/${dir}";
           in
           if builtins.pathExists dirPath then
-            acc // (findTemplates dirPath)
+            acc // (lib.mapAttrs' (name: template:
+              {
+                name = name + suffix;
+                value = template.value;
+              }
+            ) (findTemplates dirPath))
           else
             acc
-        ) {} inputs.self.templateDirectories;
+        ) {} [{ templates = ""; templates-devenv = "-devenv" }];
       in
       {
         templates = allTemplates;
       };
-  };
 }
