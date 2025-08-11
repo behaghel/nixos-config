@@ -1,14 +1,8 @@
-{ flake, pkgs, lib, ... }:
+{ pkgs, lib, ... }:
 
-let
-  inherit (flake) inputs;
-in
 # TODO: it's not really bash, it's shell, a precursor to any shell env
 # currently if I enable my zsh module without this, it breaks it
 {
-  imports = [
-    inputs.nix-index-database.hmModules.nix-index
-  ];
   # TODO: DRY
   # technically that should look like
   # home.file.".config".source = ./.config;
@@ -57,15 +51,6 @@ in
     ];
 
   programs = {
-    nix-index = {
-      enable = true;
-      enableZshIntegration = true;
-    };
-    nix-index-database.comma.enable = true;
-    lsd = {
-      enable = true;
-      enableAliases = true;
-    };
     bat.enable = true;
     zoxide.enable = true;
     fzf.enable = true;

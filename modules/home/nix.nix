@@ -1,5 +1,12 @@
-{ config, pkgs, lib, ... }:
+{ flake, config, pkgs, lib, ... }:
+let
+  inherit (flake) inputs;
+in
 {
+  imports = [
+    inputs.nix-index-database.homeModules.nix-index
+  ];
+
   # Garbage collect automatically every week
   nix.gc.automatic = true;
 
@@ -11,4 +18,16 @@
   # Nix configuration is managed globally by nix-darwin.
   # Prevent $HOME nix.conf from disrespecting it.
   home.file."~/.config/nix/nix.conf".text = "";
+
+  programs = {
+    nix-index = {
+      enable = true;
+      enableZshIntegration = true;
+    };
+    nix-index-database.comma.enable = true;
+    lsd = {
+      enable = true;
+      enableBashIntegration = true;
+    };
+  };
 }

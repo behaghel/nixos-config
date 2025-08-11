@@ -4,7 +4,7 @@ with lib;
 {
   programs.zsh = {
     enable = true;
-    dotDir = ".config/zsh";
+    dotDir = "${config.xdg.configHome}/zsh";
     enableCompletion = true;
     autosuggestion.enable = true;
     syntaxHighlighting.enable = true;
@@ -24,14 +24,12 @@ with lib;
     ];
 
     # stolen: https://github.com/mjlbach/nix-dotfiles/blob/master/home-manager/modules/cli.nix
-    initExtraBeforeCompInit = ''
+    initContent = ''
         # Emacs tramp mode compatibility
         [[ $TERM == "tramp" ]] && unsetopt zle && PS1='$ ' && return
         # password-store completion broken
         fpath=(${pkgs.pass}/share/zsh/site-functions $fpath)
         source ~/.aliases
-      '';
-    initExtra = ''
         for i in ~/.config/profile.d/*.profile; do
           source $i
         done

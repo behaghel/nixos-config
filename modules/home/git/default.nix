@@ -1,9 +1,9 @@
-{ pkgs, flake, ... }:
+{ pkgs, config, ... }:
 {
   programs.git = {
     enable = true;
-    userName = flake.config.me.fullname;
-    userEmail = flake.config.me.email;
+    userName = config.me.fullname;
+    userEmail = config.me.email;
     ignores = [ "*~" "*.swp" ];
     delta = {
       enable = true;

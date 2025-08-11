@@ -9,8 +9,8 @@
       package = lib.mkIf (config.nix.package != null)
         (pkgs.nix-direnv.override { nix = config.nix.package; });
     };
-    enableZshIntegration = config.hub.zsh.enable;
-    enableBashIntegration = config.hub.bash.enable;
+    enableZshIntegration = config.programs.zsh.enable;
+    enableBashIntegration = config.programs.bash.enable;
 
     config.global = {
       hide_env_diff = true;

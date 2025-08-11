@@ -1,3 +1,4 @@
+{ pkgs, ...}:
 {
   programs.gpg = {
     enable = true;
@@ -10,12 +11,12 @@
     enableSshSupport = true;
     grabKeyboardAndMouse = true;
     enableScDaemon = false;
-    # pinentryPackage = null;
+    pinentry.package = pkgs.pinentry-gtk2;
     # Additional gpg-agent settings if needed
-    extraConfig = ''
-      allow-preset-passphrase
-      allow-loopback-pinentry
-      allow-emacs-pinentry
-    '';
+    # extraConfig = ''
+    #   allow-preset-passphrase
+    #   allow-loopback-pinentry
+    #   allow-emacs-pinentry
+    # '';
   };
 }
