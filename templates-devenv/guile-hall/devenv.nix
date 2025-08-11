@@ -54,7 +54,13 @@
     # Initialize project if not already initialized
     if [ ! -f "hall.scm" ]; then
       echo "🚀 Initializing new Hall project..."
-      hall init guile-hall-project --author="$ORGANIZATION" --execute
+      hall init guile-hall-project --author="$ORGANIZATION"
+      # Move files from subdirectory to root
+      if [ -d "guile-hall-project" ]; then
+        mv guile-hall-project/* .
+        mv guile-hall-project/.* . 2>/dev/null || true
+        rmdir guile-hall-project
+      fi
       echo "✅ Hall project initialized!"
       echo ""
     fi
