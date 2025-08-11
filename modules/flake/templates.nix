@@ -37,8 +37,8 @@
         # Scan all configured directories for templates
         allTemplates = lib.foldl' (acc: templateDef:
           let
-            dir = builtins.head (lib.attrNames templateDef);
-            suffix = builtins.getAttr dir templateDef;
+            dir = builtins.getAttr "baseDir" templateDef;
+            suffix = builtins.getAttr "suffix" templateDef;
             dirPath = ./. + "/../.." + "/${dir}";
           in
           if builtins.pathExists dirPath then
@@ -50,7 +50,7 @@
             ) (findTemplates dirPath))
           else
             acc
-        ) {} [{ templates = ""; templates-devenv = "-devenv" }];
+        ) [ { baseDir = "templates"; suffix = ""; } { baseDir = "templates-devenv"; suffix = "-devenv"; } ];
       in
       {
         templates = allTemplates;
