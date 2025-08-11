@@ -62,7 +62,7 @@
 
   enterShell = ''
     # Initialize project if in interactive mode and not already initialized
-    if [[ $- == *i* ]] && [ ! -f "hall.scm" ]; then
+    if [ ! -f "hall.scm" ]; then
       devenv shell init
     fi
     
