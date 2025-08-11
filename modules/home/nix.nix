@@ -25,9 +25,5 @@ in
       enableZshIntegration = true;
     };
     nix-index-database.comma.enable = true;
-    lsd = {
-      enable = true;
-      enableBashIntegration = true;
-    };
   };
 }

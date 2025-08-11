@@ -56,6 +56,10 @@
     fzf.enable = true;
     jq.enable = true;
     htop.enable = true;
+    lsd = {
+      enable = true;
+      enableBashIntegration = true;
+    };
   };
   home.activation = {
     myHomeDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
