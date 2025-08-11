@@ -91,9 +91,46 @@ EOF
   };
 
   enterShell = ''
-    # Initialize project if in interactive mode and not already initialized
-    if [[ $- == *i* ]] && [ ! -f "main.scm" ]; then
-      devenv shell init
+    # Initialize project if not already initialized
+    if [ ! -f "main.scm" ]; then
+      echo "🚀 Creating basic Guile project structure..."
+      mkdir -p guile-basic tests
+
+      cat > main.scm << 'EOF'
+#!/usr/bin/env guile
+!#
+
+(add-to-load-path ".")
+(use-modules (guile-basic hello))
+
+(display (hello-world))
+(newline)
+EOF
+
+      cat > guile-basic/hello.scm << 'EOF'
+(define-module (guile-basic hello)
+  #:export (hello-world))
+
+(define (hello-world)
+  "Hello, World from Guile!")
+EOF
+
+      cat > tests/test-runner.scm << 'EOF'
+(use-modules (srfi srfi-64)
+             (guile-basic hello))
+
+(test-begin "guile-basic-tests")
+
+(test-equal "hello-world returns greeting"
+  "Hello, World from Guile!"
+  (hello-world))
+
+(test-end "guile-basic-tests")
+EOF
+
+      chmod +x main.scm
+      echo "✅ Guile project structure created!"
+      echo ""
     fi
     
     # Show greeting in interactive shells

@@ -61,9 +61,12 @@
   };
 
   enterShell = ''
-    # Initialize project if in interactive mode and not already initialized
+    # Initialize project if not already initialized
     if [ ! -f "hall.scm" ]; then
-      devenv shell init
+      echo "🚀 Initializing new Hall project..."
+      hall init guile-hall-project --author="$ORGANIZATION" --execute
+      echo "✅ Hall project initialized!"
+      echo ""
     fi
     
     # Show greeting in interactive shells

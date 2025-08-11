@@ -65,9 +65,12 @@
   };
 
   enterShell = ''
-    # Initialize project if in interactive mode and not already initialized
-    if [[ $- == *i* ]] && [ ! -f "build.sbt" ]; then
-      devenv shell init
+    # Initialize project if not already initialized
+    if [ ! -f "build.sbt" ]; then
+      echo "🚀 Bootstrapping new Scala project..."
+      sbt new scala/scala3.g8 --name=scala-basic --organization=com.example
+      echo "✅ Scala project bootstrapped!"
+      echo ""
     fi
     
     # Show greeting in interactive shells

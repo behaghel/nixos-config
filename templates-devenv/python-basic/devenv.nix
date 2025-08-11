@@ -60,9 +60,12 @@
   };
 
   enterShell = ''
-    # Initialize project if in interactive mode and not already initialized
-    if [[ $- == *i* ]] && [ ! -f "pyproject.toml" ]; then
-      devenv shell init
+    # Initialize project if not already initialized
+    if [ ! -f "pyproject.toml" ]; then
+      echo "🚀 Bootstrapping new Python project..."
+      uv init python-basic-project
+      echo "✅ Python project bootstrapped!"
+      echo ""
     fi
     
     # Show greeting in interactive shells
