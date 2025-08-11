@@ -59,19 +59,22 @@
       echo ""
     fi
     
-    echo "🏛️ Guile Hall Development Environment"
-    echo "====================================="
-    echo ""
-    echo "Available commands:"
-    echo "  devenv test           - Run test suite"
-    echo "  devenv shell lint     - Lint source code"
-    echo "  devenv shell format   - Format source code (guidelines)"
-    echo "  devenv shell repl     - Start Guile REPL with project loaded"
-    echo "  devenv shell dist     - Create distribution"
-    echo "  devenv shell run      - Run the main application"
-    echo "  devenv shell compile  - Compile with Hall"
-    echo ""
-    echo "Environment ready!"
+    # Only show greeting in interactive shells
+    if [[ $- == *i* ]]; then
+      echo "🏛️ Guile Hall Development Environment"
+      echo "====================================="
+      echo ""
+      echo "Available commands:"
+      echo "  devenv test           - Run test suite"
+      echo "  devenv shell lint     - Lint source code"
+      echo "  devenv shell format   - Format source code (guidelines)"
+      echo "  devenv shell repl     - Start Guile REPL with project loaded"
+      echo "  devenv shell dist     - Create distribution"
+      echo "  devenv shell run      - Run the main application"
+      echo "  devenv shell compile  - Compile with Hall"
+      echo ""
+      echo "Environment ready!"
+    fi
   '';
 
   env = {

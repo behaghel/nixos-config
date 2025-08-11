@@ -58,18 +58,22 @@
       echo ""
     fi
 
-    echo "🐍 Python Development Environment"
-    echo "=================================="
-    echo ""
-    echo "Available commands:"
-    echo "  devenv test           - Run test suite"
-    echo "  devenv shell dist     - Build distribution packages"
-    echo "  devenv shell run      - Run the main application"
-    echo "  devenv shell format   - Format code with black and ruff"
-    echo "  devenv shell lint     - Lint code with ruff and mypy"
-    echo "  devenv shell repl     - Start Python REPL"
-    echo ""
-    echo "Environment ready!"
+    # Only show greeting in interactive shells
+    if [[ $- == *i* ]]; then
+      echo "🐍 Python Basic Development Environment"
+      echo "========================================"
+      echo ""
+      echo "Available commands:"
+      echo "  devenv test           - Run test suite with pytest"
+      echo "  devenv shell run      - Run the main application"
+      echo "  devenv shell format   - Format code with Black and Ruff"
+      echo "  devenv shell lint     - Run linting with Ruff and mypy"
+      echo "  devenv shell dist     - Build distribution packages"
+      echo "  uv add <package>      - Add new dependencies"
+      echo "  uv lock --upgrade     - Update dependencies"
+      echo ""
+      echo "Environment ready!"
+    fi
   '';
 
   pre-commit = {

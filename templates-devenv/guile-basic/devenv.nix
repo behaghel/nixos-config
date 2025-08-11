@@ -89,19 +89,21 @@ EOF
       echo ""
     fi
 
-    echo "🐧 Guile Development Environment"
-    echo "=================================="
-    echo ""
-    echo "Available commands:"
-    echo "  devenv test           - Run test suite"
-    echo "  devenv shell dist     - Create distribution"
-    echo "  devenv shell run      - Run the main application"
-    echo "  devenv shell format   - Format code (manual for Guile)"
-    echo "  devenv shell lint     - Lint code with Guild warnings"
-    echo "  devenv shell repl     - Start Guile REPL"
-    echo "  devenv shell compile  - Compile Guile modules"
-    echo ""
-    echo "Environment ready!"
+    # Only show greeting in interactive shells
+    if [[ $- == *i* ]]; then
+      echo "🐧 Guile Basic Development Environment"
+      echo "======================================"
+      echo ""
+      echo "Available commands:"
+      echo "  devenv test           - Run test suite"
+      echo "  devenv shell run      - Run the main application"
+      echo "  devenv shell repl     - Start Guile REPL with project loaded"
+      echo "  devenv shell compile  - Compile to bytecode"
+      echo "  devenv shell lint     - Lint source code"
+      echo "  devenv shell format   - Format source code (guidelines)"
+      echo ""
+      echo "Environment ready!"
+    fi
   '';
 
   env = {
