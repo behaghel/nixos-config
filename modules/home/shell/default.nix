@@ -44,13 +44,16 @@ in
       sd        # sed++
       # ncdu      # du++
       moreutils # ts, etc.
+      tree
 
-      asciinema # screencast your terminal
+      # asciinema # screencast your terminal
 
       neofetch
       pandoc
       wget
       my-aspell
+
+      omnix
     ];
 
   programs = {
