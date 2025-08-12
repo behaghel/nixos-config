@@ -4,4 +4,3 @@ inputs:
     url: github:NixOS/nixpkgs/nixos-unstable
   nixpkgs-python:
     url: github:cachix/nixpkgs-python
-    follows: nixpkgs
