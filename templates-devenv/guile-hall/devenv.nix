@@ -98,7 +98,13 @@
           echo "  ✓ Added test-math.scm with comprehensive unit tests"
         fi
       fi
-      
+
+      # finishing initialisation of the build infra
+      hall scan -x # register new files in hall.scm
+      # devenv shell build <- infinite loop
+      hall build -x # generate configure.ac
+      autoreconf -vif && ./configure && make
+  
       echo "✅ Hall project initialized with examples!"
       echo ""
     fi
@@ -107,10 +113,6 @@
     if [ -f "hall.scm" ]; then
       # echo "🔍 Scanning for new files and updating Hall project..."
       hall scan -x # register new files in hall.scm
-      # devenv shell build <- infinite loop
-      hall build -x # generate configure.ac
-      autoreconf -vif && ./configure && make
-      # echo "✅ Hall project updated!"
       # echo ""
     fi
     
