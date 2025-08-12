@@ -74,7 +74,7 @@
       rm -rf guile-hall-project tests math.scm 2>/dev/null || true
       
       # Initialize Hall project without --execute flag
-      hall init guile-hall-project --author="$ORGANIZATION"
+      hall init guile-hall-project --author="$ORGANIZATION" --execute
       
       # Move files from subdirectory to root
       if [ -d "guile-hall-project" ]; then
