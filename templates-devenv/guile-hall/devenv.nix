@@ -99,6 +99,7 @@
           cp "template-resources/test-math.scm" "tests/"
           echo "  ✓ Added test-math.scm with comprehensive unit tests"
         fi
+        rm -rf templates-resources
       fi
 
       # finishing initialisation of the build infra

@@ -122,17 +122,3 @@
 
 ;; End the test suite
 (test-end "math-module-tests")
-
-;; Print test summary
-(let ((runner (test-runner-current)))
-  (format #t "~%Test Summary:~%")
-  (format #t "  Tests run: ~a~%" (test-runner-test-count runner))
-  (format #t "  Passes: ~a~%" (test-runner-pass-count runner))
-  (format #t "  Failures: ~a~%" (test-runner-fail-count runner))
-  (format #t "  Errors: ~a~%" (test-runner-xfail-count runner))
-  
-  ;; Exit with appropriate code
-  (exit (if (and (zero? (test-runner-fail-count runner))
-                 (zero? (test-runner-xfail-count runner)))
-            0
-            1)))
