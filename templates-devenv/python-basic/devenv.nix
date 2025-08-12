@@ -12,7 +12,6 @@
     black
     ruff
     mypy
-    pytest
     pre-commit
     git
   ];
