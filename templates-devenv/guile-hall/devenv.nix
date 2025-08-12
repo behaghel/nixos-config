@@ -86,10 +86,11 @@
       if [ -d ".template-resources" ]; then
         echo "📋 Installing template example files..."
         
-        # Copy math module to the main project directory
+        # Copy math module to the project directory structure
         if [ -f ".template-resources/math.scm" ]; then
-          cp ".template-resources/math.scm" .
-          echo "  ✓ Added math.scm module with example functions"
+          mkdir -p guile-hall-project
+          cp ".template-resources/math.scm" guile-hall-project/
+          echo "  ✓ Added guile-hall-project/math.scm module with example functions"
         fi
         
         # Copy test files to tests directory
@@ -125,6 +126,7 @@
   env = {
     GUILE_LOAD_PATH = "./";
     GUILE_LOAD_COMPILED_PATH = "./";
+    GUILE_AUTO_COMPILE = "0";  # Suppress auto-compilation warnings
     GUILD = "${pkgs.guile_3_0}/bin/guild";
     GREETING = ''
 🏛️ Guile Hall Development Environment
