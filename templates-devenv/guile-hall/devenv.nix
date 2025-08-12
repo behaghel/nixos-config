@@ -106,8 +106,9 @@
     # Always scan for new files and update Hall project structure
     if [ -f "hall.scm" ]; then
       # echo "🔍 Scanning for new files and updating Hall project..."
-      hall scan -x
+      hall scan -x # register new files in hall.scm
       # devenv shell build <- infinite loop
+      hall build -x # generate configure.ac
       autoreconf -vif && ./configure && make
       # echo "✅ Hall project updated!"
       # echo ""
