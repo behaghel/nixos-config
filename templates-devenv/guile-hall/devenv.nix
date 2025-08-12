@@ -3,6 +3,7 @@
 {
   packages = with pkgs; [
     guile_3_0
+    guile_3_0.dev  # Provides guile.m4 with GUILE_PKG macro
     guile-hall
     pkg-config
     texinfo
@@ -48,6 +49,21 @@
       echo "🔨 Compiling with Hall..."
       hall compile "$@"
     '';
+
+    build.exec = ''
+      echo "🏗️ Building project with autotools..."
+      if [ ! -f "configure" ] || [ "configure.ac" -nt "configure" ]; then
+        echo "🔧 Regenerating configure script..."
+        autoreconf -vif
+      fi
+      if [ ! -f "Makefile" ]; then
+        echo "🔧 Running configure..."
+        ./configure
+      fi
+      echo "🔨 Running make..."
+      make
+      echo "✅ Build completed!"
+    '';
   };
 
   enterShell = ''
@@ -61,7 +77,9 @@
         mv guile-hall-project/.* . 2>/dev/null || true
         rmdir guile-hall-project
       fi
-      echo "✅ Hall project initialized!"
+      echo "🔧 Regenerating autotools configuration..."
+      autoreconf -vif
+      echo "✅ Hall project initialized and configured!"
       echo ""
     fi
     
@@ -80,6 +98,7 @@
 
 Available commands:
   devenv test           - Run test suite
+  devenv shell build    - Build project with autotools
   devenv shell lint     - Lint source code
   devenv shell format   - Format source code (guidelines)
   devenv shell repl     - Start Guile REPL with project loaded
