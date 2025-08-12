@@ -71,8 +71,8 @@
     if [ ! -f "hall.scm" ]; then
       echo "🚀 Initializing new Hall project..."
       
-      # Initialize Hall project without --execute flag
-      hall init guile-hall-project --author="$ORGANIZATION"
+      # Initialize Hall project with --execute flag
+      hall init guile-hall-project --author="$ORGANIZATION" --execute
       
       # Move files from subdirectory to root
       if [ -d "guile-hall-project" ]; then
@@ -144,13 +144,16 @@ Environment ready!'';
     # Ensure Hall project is up to date
     hall scan -x
     
-    # Build and run tests using Hall's proper lifecycle
+    # Build the project first
+    echo "🏗️ Building project..."
     if ! hall build; then
       echo "❌ Build failed"
       exit 1
     fi
     
-    if ! hall test; then
+    # Run tests using Hall's check command
+    echo "🧪 Running tests..."
+    if ! hall build check; then
       echo "❌ Tests failed"
       exit 1
     fi
