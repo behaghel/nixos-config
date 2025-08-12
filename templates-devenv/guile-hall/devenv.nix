@@ -70,15 +70,25 @@
     # Initialize project if not already initialized
     if [ ! -f "hall.scm" ]; then
       echo "🚀 Initializing new Hall project..."
-      hall init guile-hall-project --author="$ORGANIZATION" --execute
+      # Remove any existing conflicting files/directories
+      rm -rf guile-hall-project tests math.scm 2>/dev/null || true
+      
+      # Initialize Hall project without --execute flag
+      hall init guile-hall-project --author="$ORGANIZATION"
+      
       # Move files from subdirectory to root
       if [ -d "guile-hall-project" ]; then
-        mv guile-hall-project/* .
-        mv guile-hall-project/.* . 2>/dev/null || true
-        rmdir guile-hall-project
+        # Use cp to avoid overwrite issues, then remove source
+        cp -r guile-hall-project/* . 2>/dev/null || true
+        cp -r guile-hall-project/.* . 2>/dev/null || true
+        rm -rf guile-hall-project
       fi
-      echo "🔧 Regenerating autotools configuration..."
-      autoreconf -vif
+      
+      # Only run autoreconf if configure.ac exists
+      if [ -f "configure.ac" ]; then
+        echo "🔧 Regenerating autotools configuration..."
+        autoreconf -vif
+      fi
       echo "✅ Hall project initialized and configured!"
       echo ""
     fi
