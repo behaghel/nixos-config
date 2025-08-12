@@ -94,7 +94,8 @@
         fi
         
         # Copy test files to tests directory
-        if [ -f ".template-resources/test-math.scm" ] && [ -d "tests" ]; then
+        if [ -f ".template-resources/test-math.scm" ]; then
+          mkdir -p "tests" 
           cp ".template-resources/test-math.scm" "tests/"
           echo "  ✓ Added test-math.scm with comprehensive unit tests"
         fi
