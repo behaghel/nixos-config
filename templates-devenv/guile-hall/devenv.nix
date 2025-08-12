@@ -83,20 +83,20 @@
       fi
       
       # Copy template resources to appropriate locations
-      if [ -d ".template-resources" ]; then
+      if [ -d "template-resources" ]; then
         echo "📋 Installing template example files..."
         
         # Copy math module to the project directory structure
-        if [ -f ".template-resources/math.scm" ]; then
+        if [ -f "template-resources/math.scm" ]; then
           mkdir -p guile-hall-project
-          cp ".template-resources/math.scm" guile-hall-project/
+          cp "template-resources/math.scm" guile-hall-project/
           echo "  ✓ Added guile-hall-project/math.scm module with example functions"
         fi
         
         # Copy test files to tests directory
-        if [ -f ".template-resources/test-math.scm" ]; then
+        if [ -f "template-resources/test-math.scm" ]; then
           mkdir -p "tests" 
-          cp ".template-resources/test-math.scm" "tests/"
+          cp "template-resources/test-math.scm" "tests/"
           echo "  ✓ Added test-math.scm with comprehensive unit tests"
         fi
       fi
