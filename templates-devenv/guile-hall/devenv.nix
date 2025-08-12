@@ -72,7 +72,7 @@
       echo "🚀 Initializing new Hall project..."
       
       # Initialize Hall project without --execute flag
-      hall init guile-hall-project --author="$ORGANIZATION" --execute
+      hall init guile-hall-project --author="$ORGANIZATION"
       
       # Move files from subdirectory to root
       if [ -d "guile-hall-project" ]; then
@@ -99,12 +99,15 @@
         fi
       fi
       
-      # Only run autoreconf if configure.ac exists
-      if [ -f "configure.ac" ]; then
-        echo "🔧 Regenerating autotools configuration..."
-        autoreconf -vif
-      fi
-      echo "✅ Hall project initialized and configured with examples!"
+      echo "✅ Hall project initialized with examples!"
+      echo ""
+    fi
+    
+    # Always scan for new files and update Hall project structure
+    if [ -f "hall.scm" ]; then
+      echo "🔍 Scanning for new files and updating Hall project..."
+      hall scan -x
+      echo "✅ Hall project updated!"
       echo ""
     fi
     
@@ -136,8 +139,22 @@ Environment ready!'';
 
   # Use devenv's built-in test functionality
   enterTest = ''
-    echo "🧪 Running test suite..."
-    hall build check --execute
-    echo "✅ Tests completed!"
+    echo "🧪 Running test suite with Hall..."
+    
+    # Ensure Hall project is up to date
+    hall scan -x
+    
+    # Build and run tests using Hall's proper lifecycle
+    if ! hall build; then
+      echo "❌ Build failed"
+      exit 1
+    fi
+    
+    if ! hall test; then
+      echo "❌ Tests failed"
+      exit 1
+    fi
+    
+    echo "✅ All tests passed!"
   '';
 }
