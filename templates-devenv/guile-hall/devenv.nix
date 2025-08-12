@@ -3,7 +3,7 @@
 {
   packages = with pkgs; [
     guile_3_0
-    guile_3_0.dev  # Provides guile.m4 with GUILE_PKG macro
+    guile_3_0.dev  # Provides guile.m4 with GUILE_PKG macro and guild
     guile-hall
     pkg-config
     texinfo
@@ -123,6 +123,7 @@
   env = {
     GUILE_LOAD_PATH = "./";
     GUILE_LOAD_COMPILED_PATH = "./";
+    GUILD = "${pkgs.guile_3_0.dev}/bin/guild";
     GREETING = ''
 🏛️ Guile Hall Development Environment
 =====================================
