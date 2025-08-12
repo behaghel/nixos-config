@@ -1,33 +1,43 @@
-
-# Compiled Guile files
+# Guile compiled files
 *.go
 
+# Autotools files
+/autom4te.cache/
+/config.log
+/config.status
+/configure
+/Makefile
+/Makefile.in
+/aclocal.m4
+/compile
+/config.guess
+/config.sub
+/depcomp
+/install-sh
+/missing
+/test-driver
+
 # Hall generated files
-configure
-configure.in
-Makefile.in
-Makefile
-aclocal.m4
-autom4te.cache/
-config.log
-config.status
-install-sh
-missing
+/pre-inst-env
 
 # Build artifacts
+/.libs/
+*.o
+*.la
+*.lo
+
+# Distribution files
 *.tar.gz
 *.tar.xz
 
-# Editor backups
+# Template resources (used during initialization only)
+/.template-resources/
+
+# Editor files
 *~
 .#*
-\#*\#
+\#*#
 
-# OS generated files
+# OS files
 .DS_Store
-.DS_Store?
-._*
-.Spotlight-V100
-.Trashes
-ehthumbs.db
 Thumbs.db

@@ -70,11 +70,9 @@
     # Initialize project if not already initialized
     if [ ! -f "hall.scm" ]; then
       echo "🚀 Initializing new Hall project..."
-      # Remove any existing conflicting files/directories
-      rm -rf guile-hall-project tests math.scm 2>/dev/null || true
       
       # Initialize Hall project without --execute flag
-      hall init guile-hall-project --author="$ORGANIZATION" --execute
+      hall init guile-hall-project --author="$ORGANIZATION"
       
       # Move files from subdirectory to root
       if [ -d "guile-hall-project" ]; then
@@ -84,12 +82,29 @@
         rm -rf guile-hall-project
       fi
       
+      # Copy template resources to appropriate locations
+      if [ -d ".template-resources" ]; then
+        echo "📋 Installing template example files..."
+        
+        # Copy math module to the main project directory
+        if [ -f ".template-resources/math.scm" ]; then
+          cp ".template-resources/math.scm" .
+          echo "  ✓ Added math.scm module with example functions"
+        fi
+        
+        # Copy test files to tests directory
+        if [ -f ".template-resources/test-math.scm" ] && [ -d "tests" ]; then
+          cp ".template-resources/test-math.scm" "tests/"
+          echo "  ✓ Added test-math.scm with comprehensive unit tests"
+        fi
+      fi
+      
       # Only run autoreconf if configure.ac exists
       if [ -f "configure.ac" ]; then
         echo "🔧 Regenerating autotools configuration..."
         autoreconf -vif
       fi
-      echo "✅ Hall project initialized and configured!"
+      echo "✅ Hall project initialized and configured with examples!"
       echo ""
     fi
     
