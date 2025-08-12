@@ -123,7 +123,7 @@
   env = {
     GUILE_LOAD_PATH = "./";
     GUILE_LOAD_COMPILED_PATH = "./";
-    GUILD = "${pkgs.guile_2_2.dev}/bin/guild";
+    GUILD = "${pkgs.guile_3_0}/bin/guild";
     GREETING = ''
 🏛️ Guile Hall Development Environment
 =====================================
