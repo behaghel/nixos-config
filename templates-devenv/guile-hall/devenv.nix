@@ -105,10 +105,11 @@
     
     # Always scan for new files and update Hall project structure
     if [ -f "hall.scm" ]; then
-      echo "🔍 Scanning for new files and updating Hall project..."
+      # echo "🔍 Scanning for new files and updating Hall project..."
       hall scan -x
-      echo "✅ Hall project updated!"
-      echo ""
+      devenv shell build
+      # echo "✅ Hall project updated!"
+      # echo ""
     fi
     
     # Show greeting in interactive shells
@@ -141,19 +142,9 @@ Environment ready!'';
   enterTest = ''
     echo "🧪 Running test suite with Hall..."
     
-    # Ensure Hall project is up to date
-    hall scan -x
-    
-    # Build the project first
-    echo "🏗️ Building project..."
-    if ! hall build; then
-      echo "❌ Build failed"
-      exit 1
-    fi
-    
     # Run tests using Hall's check command
     echo "🧪 Running tests..."
-    if ! hall build check; then
+    if ! make check; then
       echo "❌ Tests failed"
       exit 1
     fi
