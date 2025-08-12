@@ -107,7 +107,8 @@
     if [ -f "hall.scm" ]; then
       # echo "🔍 Scanning for new files and updating Hall project..."
       hall scan -x
-      devenv shell build
+      # devenv shell build <- infinite loop
+      autoreconf -vif && ./configure && make
       # echo "✅ Hall project updated!"
       # echo ""
     fi
