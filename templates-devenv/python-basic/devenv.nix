@@ -9,7 +9,6 @@
 
   packages = with pkgs; [
     # Development tools
-    pre-commit
     git
   ];
 
