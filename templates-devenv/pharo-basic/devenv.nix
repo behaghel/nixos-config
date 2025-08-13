@@ -57,8 +57,8 @@
     repl.exec = ''
       echo "🐹 Starting Pharo IDE..."
       if [ -f "pharo-local/Pharo.image" ]; then
-        echo "Opening Pharo image in graphical mode..."
-        pharo pharo-local/Pharo.image st startup.st
+        cd pharo-local
+        pharo
       else
         echo "❌ No Pharo image found. Run 'devenv shell setup' first."
         exit 1
