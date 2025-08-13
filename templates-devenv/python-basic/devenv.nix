@@ -97,7 +97,10 @@ Environment ready!'';
     hooks = {
       black.enable = true;
       ruff.enable = true;
-      mypy.enable = true;
+      mypy = {
+        enable = true;
+        entry = "uv run mypy";
+      };
     };
   };
 
