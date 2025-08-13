@@ -32,6 +32,7 @@ After creating a project from a template:
 | `scala-basic-devenv` | Modern Scala development environment | • Scala 3 with `sbt` build tool<br>• Scalafmt for formatting, ScalaTest for testing<br>• Metals language server support<br>• Assembly plugin for fat JAR creation<br>• Complete lifecycle commands (`build`, `test`, `package`, etc.) |
 | `guile-basic-devenv` | Modern Guile (GNU Scheme) development environment | • Guile 3.0 with module system support<br>• Guild compiler and linter for code quality<br>• SRFI-64 testing framework<br>• Interactive REPL development<br>• Complete lifecycle commands (`build`, `test`, `compile`, etc.) |
 | `guile-hall-devenv` | Professional Guile development with guile-hall | • Guile 3.0 with guile-hall project management<br>• Autotools integration for professional builds<br>• Project scaffolding and metadata management<br>• Integrated testing and distribution<br>• Complete lifecycle commands (`build`, `test`, `dist`, etc.) |
+| `pharo-basic-devenv` | Modern Pharo Smalltalk development environment | • Pharo Smalltalk with automatic image management<br>• Tonel format for git-friendly source code<br>• SUnit testing framework with headless execution<br>• Code critics and quality analysis tools<br>• Complete lifecycle commands (`test`, `run`, `lint`, etc.) |
 
 ## Template Standards
 
