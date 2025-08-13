@@ -60,6 +60,11 @@
       echo "📦 Installing dependencies from pyproject.toml..."
       uv sync
 
+      echo "🔧 Initializing Git repository..."
+      git init
+      git add .
+      git commit -m "Initial commit from python-basic template"
+
       echo "✅ Project bootstrapped successfully!"
       echo ""
     fi
