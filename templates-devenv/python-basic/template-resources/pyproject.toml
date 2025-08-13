@@ -1,7 +1,7 @@
 
 [build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build>=0.8.2,<0.9.0"]
+build-backend = "uv_build"
 
 [project]
 name = "python-basic-project"
@@ -11,7 +11,7 @@ readme = "README.md"
 license = "MIT"
 requires-python = ">=3.12"
 authors = [
-    { name = "Your Name", email = "your.email@example.com" },
+    { name = "Hubert Behaghel", email = "behaghel@gmail.com" },
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
