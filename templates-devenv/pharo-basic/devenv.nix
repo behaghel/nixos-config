@@ -121,7 +121,7 @@
 
       # Load project code into image
       echo "📚 Loading project code into Pharo image..."
-      # xvfb-run -a pharo pharo-local/Pharo.image st --save startup.st
+      xvfb-run -a pharo pharo-local/Pharo.image st --save startup.st
 
       echo "🔧 Initializing Git repository..."
       git init
