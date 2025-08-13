@@ -10,7 +10,7 @@
   packages = with pkgs; [
     # Development tools
     git
-    python312Packages.pytest
+    python312Packages.pytest # required for mypy to find it when running as git hook during `devenv test`
   ];
 
   scripts = {
@@ -100,7 +100,7 @@ Environment ready!'';
       ruff.enable = true;
       mypy = {
         enable = true;
-        entry = "uv run mypy src tests";
+        entry = "uv run mypy";
       };
     };
   };
