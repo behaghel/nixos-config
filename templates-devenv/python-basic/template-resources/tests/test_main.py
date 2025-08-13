@@ -1,7 +1,7 @@
-
 """Tests for main module."""
 
 import pytest
+
 from python_basic.main import greet
 
 
@@ -17,11 +17,14 @@ def test_greet_with_name() -> None:
     assert result == "Hello, Alice!"
 
 
-@pytest.mark.parametrize("name,expected", [
-    ("Bob", "Hello, Bob!"),
-    ("", "Hello, !"),
-    ("Python", "Hello, Python!"),
-])
+@pytest.mark.parametrize(
+    "name,expected", 
+    [
+        ("Bob", "Hello, Bob!"),
+        ("", "Hello, !"),
+        ("Python", "Hello, Python!"),
+    ],
+)
 def test_greet_parametrized(name: str, expected: str) -> None:
     """Test greet function with various inputs."""
     result = greet(name)

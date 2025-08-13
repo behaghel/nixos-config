@@ -1,13 +1,12 @@
-
 """Main module for the Python basic project."""
 
 
 def greet(name: str = "World") -> str:
     """Return a greeting message.
-    
+
     Args:
         name: The name to greet. Defaults to "World".
-        
+
     Returns:
         A greeting message.
     """
