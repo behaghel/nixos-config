@@ -18,7 +18,7 @@ def test_greet_with_name() -> None:
 
 
 @pytest.mark.parametrize(
-    "name,expected", 
+    "name,expected",
     [
         ("Bob", "Hello, Bob!"),
         ("", "Hello, !"),
