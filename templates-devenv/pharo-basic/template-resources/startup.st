@@ -4,7 +4,8 @@
 "Load project using Metacello baseline"
 Metacello new
   baseline: 'PharoBasic';
-  repository: 'tonel://src';
+  filetreeDirectory: '.';
   load.
+
 
 Transcript show: 'PharoBasic packages loaded successfully via Metacello!'; cr.
