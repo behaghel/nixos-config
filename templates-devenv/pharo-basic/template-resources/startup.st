@@ -8,4 +8,4 @@ Metacello new
   load.
 
 
-Transcript show: 'PharoBasic packages loaded successfully via Metacello\!'; cr.
+Transcript show: 'PharoBasic packages loaded successfully via Metacello.'; cr.
