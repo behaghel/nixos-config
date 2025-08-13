@@ -1,8 +1,4 @@
 { pkgs, lib, config, inputs, ... }:
-
-let
-  templateUtils = import ../template-utils.nix { inherit pkgs lib; };
-in
 {
   packages = with pkgs; [
     guile_3_0
@@ -69,28 +65,50 @@ in
     '';
   };
 
-  enterShell = templateUtils.standardEnterShell {
-    projectTypeMsg = "🏛️ Bootstrapping new Guile Hall project...";
-    keyFile = "hall.scm";
-    greeting = config.env.GREETING;
-    extraBootstrapSteps = ''
+  enterShell = ''
+    # Initialize project if not already initialized
+    if [ ! -f "hall.scm" ]; then
+      echo "🏛️ Bootstrapping new Guile Hall project..."
+      
+      # Copy template resources to project root
+      if [ -d "template-resources" ]; then
+        echo "📁 Copying template files..."
+        cp -r template-resources/* .
+        rm -rf template-resources
+        echo "  ✓ Template files copied and template-resources cleaned up"
+      fi
+      
       # Initialize Hall project with --execute flag
       hall init guile-hall-project --author="Your Name" --execute
       
-      ${templateUtils.moveSubdirectoryToRoot "guile-hall-project"}
+      # Move files from subdirectory to root
+      if [ -d "guile-hall-project" ]; then
+        # Use cp to avoid overwrite issues, then remove source
+        cp -r guile-hall-project/* . 2>/dev/null || true
+        cp -r guile-hall-project/.* . 2>/dev/null || true
+        rm -rf guile-hall-project
+        echo "  ✓ Moved files from guile-hall-project/ to root directory"
+      fi
 
       # finishing initialisation of the build infra
       hall scan -x # register new files in hall.scm
       hall build -x # generate configure.ac
       autoreconf -vif && ./configure && make
-    '';
-    extraShellSteps = ''
-      # Always scan for new files and update Hall project structure
-      if [ -f "hall.scm" ]; then
-        hall scan -x # register new files in hall.scm
-      fi
-    '';
-  };
+      
+      echo "✅ Project bootstrapped successfully!"
+      echo ""
+    fi
+
+    # Always scan for new files and update Hall project structure
+    if [ -f "hall.scm" ]; then
+      hall scan -x # register new files in hall.scm
+    fi
+
+    # Show greeting in interactive shells
+    if [[ $- == *i* ]]; then
+      echo "${config.env.GREETING}"
+    fi
+  '';
 
   env = {
     GUILE_LOAD_PATH = "./";

@@ -77,21 +77,26 @@ Some project initialization tools create a subdirectory that needs to be moved t
 - **guile-hall** - Creates a `project-name/` subdirectory with project files
 - **Python cookiecutter-style tools** - Often create nested project directories
 
-The `template-utils.nix` provides `moveSubdirectoryToRoot` function to handle this:
+The bootstrap logic handles this pattern directly in `devenv.nix`:
 
 ```nix
-extraBootstrapSteps = ''
+enterShell = ''
   # Tool creates subdirectory with project files
   some-init-tool create my-project
   
   # Move all contents to root and clean up
-  ${templateUtils.moveSubdirectoryToRoot "my-project"}
+  if [ -d "my-project" ]; then
+    cp -r my-project/* . 2>/dev/null || true
+    cp -r my-project/.* . 2>/dev/null || true
+    rm -rf my-project
+    echo "  ✓ Moved files from my-project/ to root directory"
+  fi
   
   # Continue with other setup...
 '';
 ```
 
-This function safely copies both regular and hidden files, then removes the subdirectory.
+This pattern safely copies both regular and hidden files, then removes the subdirectory.
 
 Example structure:
 ```

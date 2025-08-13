@@ -1,8 +1,5 @@
 { pkgs, lib, config, inputs, ... }:
 
-let
-  templateUtils = import ../template-utils.nix { inherit pkgs lib; };
-in
 {
   languages.python = {
     enable = true;
@@ -47,15 +44,31 @@ in
     '';
   };
 
-  enterShell = templateUtils.standardEnterShell {
-    projectTypeMsg = "🚀 Bootstrapping new Python project...";
-    keyFile = "pyproject.toml";
-    greeting = config.env.GREETING;
-    extraBootstrapSteps = ''
+  enterShell = ''
+    # Initialize project if not already initialized
+    if [ ! -f "pyproject.toml" ]; then
+      echo "🚀 Bootstrapping new Python project..."
+
+      # Copy template resources to project root
+      if [ -d "template-resources" ]; then
+        echo "📁 Copying template files..."
+        cp -r template-resources/* .
+        rm -rf template-resources
+        echo "  ✓ Template files copied and template-resources cleaned up"
+      fi
+
       echo "📦 Installing dependencies from pyproject.toml..."
       uv sync
-    '';
-  };
+
+      echo "✅ Project bootstrapped successfully!"
+      echo ""
+    fi
+
+    # Show greeting in interactive shells
+    if [[ $- == *i* ]]; then
+      echo "${config.env.GREETING}"
+    fi
+  '';
 
   env = {
     GREETING = ''
