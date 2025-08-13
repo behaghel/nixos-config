@@ -7,3 +7,6 @@ Metacello new
   repository: 'tonel://src';
   load.
 
+"Exit the image after loading"
+Smalltalk snapshot: true andQuit: true.
+
