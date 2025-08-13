@@ -52,11 +52,25 @@
     # Initialize project if not already initialized
     if [ ! -f "pyproject.toml" ]; then
       echo "🚀 Bootstrapping new Python project..."
-      uv init python-basic-project
-      echo "✅ Python project bootstrapped!"
+      # Use --lib flag for better project structure with src/ layout
+      uv init --lib python-basic-project
+
+      # Move project files to current directory
+      if [ -d "python-basic-project" ]; then
+        # Use cp to avoid overwrite issues, then remove source
+        cp -r python-basic-project/* . 2>/dev/null || true
+        cp -r python-basic-project/.* . 2>/dev/null || true
+        rm -rf python-basic-project
+      fi
+
+      # Add development dependencies
+      echo "📦 Installing development dependencies..."
+      uv add --dev pytest black ruff mypy
+
+      echo "✅ Python project bootstrapped with dependencies!"
       echo ""
     fi
-    
+
     # Show greeting in interactive shells
     if [[ $- == *i* ]]; then
       echo "$GREETING"
