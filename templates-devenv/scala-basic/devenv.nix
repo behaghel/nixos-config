@@ -59,6 +59,16 @@
     if [ ! -f "build.sbt" ]; then
       echo "🚀 Bootstrapping new Scala project..."
       sbt new scala/scala3.g8 --name=scala-basic --organization=com.example
+      
+      # Move generated files from subdirectory to root
+      if [ -d "scala-basic" ]; then
+        echo "📁 Moving project files to root directory..."
+        cp -r scala-basic/* . 2>/dev/null || true
+        cp -r scala-basic/.* . 2>/dev/null || true
+        rm -rf scala-basic
+        echo "  ✓ Project files moved to root and scala-basic/ cleaned up"
+      fi
+      
       echo "✅ Scala project bootstrapped!"
       echo ""
     fi
