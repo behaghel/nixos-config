@@ -99,7 +99,7 @@ Environment ready!'';
       ruff.enable = true;
       mypy = {
         enable = true;
-        entry = "uv run mypy";
+        entry = "uv run mypy .";
       };
     };
   };
