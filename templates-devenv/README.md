@@ -52,6 +52,37 @@ All templates in this directory follow these standards:
 - **direnv integration** for automatic environment loading
 - **Core Emacs compatibility** - All configurations prioritize built-in Emacs functionality
 - **Comprehensive documentation** with examples
+- **Template resources pattern** for bootstrapping project files
+
+### Template Resources Pattern
+
+Templates use a `template-resources/` directory to store pre-written files that are copied during project bootstrapping. This pattern provides:
+
+- **Consistent file structure** - Files in `template-resources/` maintain the same relative path as their final destination
+- **Reduced inline code** - Complex file contents are stored as separate files rather than embedded in shell scripts
+- **Better maintainability** - Template files can be edited independently and tested separately
+- **Automatic cleanup** - The `template-resources/` directory is removed after bootstrapping
+
+#### Implementation
+
+During the `enterShell` phase, templates:
+1. Check if key project files exist (indicating an already bootstrapped project)
+2. If not bootstrapped, copy files from `template-resources/` to their target locations
+3. Remove the `template-resources/` directory after copying
+4. Perform any additional setup (dependency installation, etc.)
+
+Example structure:
+```
+template-name/
+├── devenv.nix
+├── template-resources/
+│   ├── src/
+│   │   └── main.py          # Copied to ./src/main.py
+│   ├── tests/
+│   │   └── test_main.py     # Copied to ./tests/test_main.py
+│   └── pyproject.toml       # Copied to ./pyproject.toml
+└── ...
+```
 
 ## Core Emacs Configuration
 

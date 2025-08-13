@@ -1,5 +1,8 @@
 { pkgs, lib, config, inputs, ... }:
 
+let
+  templateUtils = import ../template-utils.nix { inherit pkgs lib; };
+in
 {
   languages.python = {
     enable = true;
@@ -44,73 +47,16 @@
     '';
   };
 
-  enterShell = ''
-    # Initialize project if not already initialized
-    if [ ! -f "pyproject.toml" ]; then
-      echo "🚀 Bootstrapping new Python project..."
-      # Use --lib flag for better project structure with src/ layout
-      uv init --lib python-basic-project
-
-      # Move project files to current directory
-      if [ -d "python-basic-project" ]; then
-        # Use cp to avoid overwrite issues, then remove source
-        cp -r python-basic-project/* . 2>/dev/null || true
-        cp -r python-basic-project/.* . 2>/dev/null || true
-        rm -rf python-basic-project
-      fi
-
+  enterShell = templateUtils.standardEnterShell {
+    projectTypeMsg = "🚀 Bootstrapping new Python project...";
+    keyFile = "pyproject.toml";
+    greeting = config.env.GREETING;
+    extraBootstrapSteps = ''
       # Add development dependencies
       echo "📦 Installing development dependencies..."
       uv add --dev pytest black ruff mypy
-
-      # Create sample test if it doesn't exist
-      if [ ! -f "tests/test_main.py" ]; then
-        mkdir -p tests
-        cat > tests/test_main.py << 'EOF'
-"""Tests for main module."""
-
-import pytest
-from python_basic.main import greet
-
-
-def test_greet_default() -> None:
-    """Test greet function with default parameter."""
-    result = greet()
-    assert result == "Hello, World!"
-
-
-def test_greet_with_name() -> None:
-    """Test greet function with custom name."""
-    result = greet("Alice")
-    assert result == "Hello, Alice!"
-
-
-@pytest.mark.parametrize("name,expected", [
-    ("Bob", "Hello, Bob!"),
-    ("", "Hello, !"),
-    ("Python", "Hello, Python!"),
-])
-def test_greet_parametrized(name: str, expected: str) -> None:
-    """Test greet function with various inputs."""
-    result = greet(name)
-    assert result == expected
-EOF
-        
-        cat > tests/__init__.py << 'EOF'
-"""Test package."""
-EOF
-        echo "  ✓ Added sample pytest tests with parametrized examples"
-      fi
-
-      echo "✅ Python project bootstrapped with dependencies!"
-      echo ""
-    fi
-
-    # Show greeting in interactive shells
-    if [[ $- == *i* ]]; then
-      echo "$GREETING"
-    fi
-  '';
+    '';
+  };
 
   env = {
     GREETING = ''

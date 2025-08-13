@@ -1,5 +1,8 @@
 { pkgs, lib, config, inputs, ... }:
 
+let
+  templateUtils = import ../template-utils.nix { inherit pkgs lib; };
+in
 {
   packages = with pkgs; [
     guile_3_0
