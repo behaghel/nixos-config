@@ -122,11 +122,14 @@
       # Load project code into image
       echo "📚 Loading project code into Pharo image..."
       xvfb-run -a pharo pharo-local/Pharo.image eval --save "
-        | repo |
+        | repo packages |
         repo := TonelRepository new
           directory: '.' asFileReference;
           yourself.
-        repo loadAllPackages.
+        packages := repo packageNames.
+        packages do: [ :packageName |
+          repo loadPackageNamed: packageName
+        ].
         Smalltalk saveSession.
       "
 
