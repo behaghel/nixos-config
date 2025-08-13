@@ -7,4 +7,3 @@ Metacello new
   repository: 'tonel://src';
   load.
 
-Transcript show: 'PharoBasic packages loaded successfully via Metacello.'; cr.
