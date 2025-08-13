@@ -52,9 +52,8 @@ in
     keyFile = "pyproject.toml";
     greeting = config.env.GREETING;
     extraBootstrapSteps = ''
-      # Add development dependencies
-      echo "📦 Installing development dependencies..."
-      uv add --dev pytest black ruff mypy
+      echo "📦 Installing dependencies from pyproject.toml..."
+      uv sync
     '';
   };
 

@@ -69,13 +69,13 @@ in
     '';
   };
 
-  enterShell = ''
-    # Initialize project if not already initialized
-    if [ ! -f "hall.scm" ]; then
-      echo "🚀 Initializing new Hall project..."
-      
+  enterShell = templateUtils.standardEnterShell {
+    projectTypeMsg = "🏛️ Bootstrapping new Guile Hall project...";
+    keyFile = "hall.scm";
+    greeting = config.env.GREETING;
+    extraBootstrapSteps = ''
       # Initialize Hall project with --execute flag
-      hall init guile-hall-project --author="$ORGANIZATION" --execute
+      hall init guile-hall-project --author="Your Name" --execute
       
       # Move files from subdirectory to root
       if [ -d "guile-hall-project" ]; then
@@ -84,49 +84,19 @@ in
         cp -r guile-hall-project/.* . 2>/dev/null || true
         rm -rf guile-hall-project
       fi
-      
-      # Copy template resources to appropriate locations
-      if [ -d "template-resources" ]; then
-        echo "📋 Installing template example files..."
-        
-        # Copy math module to the project directory structure
-        if [ -f "template-resources/math.scm" ]; then
-          mkdir -p guile-hall-project
-          cp "template-resources/math.scm" guile-hall-project/
-          echo "  ✓ Added guile-hall-project/math.scm module with example functions"
-        fi
-        
-        # Copy test files to tests directory
-        if [ -f "template-resources/test-math.scm" ]; then
-          mkdir -p "tests" 
-          cp "template-resources/test-math.scm" "tests/"
-          echo "  ✓ Added test-math.scm with comprehensive unit tests"
-        fi
-        rm -rf templates-resourcessudo systemctl restart nix-daemon
-      fi
 
       # finishing initialisation of the build infra
       hall scan -x # register new files in hall.scm
-      # devenv shell build <- infinite loop
       hall build -x # generate configure.ac
       autoreconf -vif && ./configure && make
-  
-      echo "✅ Hall project initialized with examples!"
-      echo ""
-    fi
-    
-    # Always scan for new files and update Hall project structure
-    if [ -f "hall.scm" ]; then
-      # echo "🔍 Scanning for new files and updating Hall project..."
-      hall scan -x # register new files in hall.scm
-      # echo ""
-    fi
-    
-    # Show greeting in interactive shells
-    if [[ $- == *i* ]]; then
-      echo "$GREETING"
-    fi
-  '';
+    '';
+    extraShellSteps = ''
+      # Always scan for new files and update Hall project structure
+      if [ -f "hall.scm" ]; then
+        hall scan -x # register new files in hall.scm
+      fi
+    '';
+  };
 
   env = {
     GUILE_LOAD_PATH = "./";
