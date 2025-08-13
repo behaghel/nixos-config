@@ -1,2 +1,0 @@
-
-Package { #name : 'PharoBasic-Tests' }
