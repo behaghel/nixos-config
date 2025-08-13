@@ -86,7 +86,9 @@
       # Download latest stable Pharo image if not exists
       if [ ! -f "Pharo.image" ]; then
         echo "📥 Downloading Pharo image..."
-        curl -L https://get.pharo.org/64/stable+vm | bash
+        pharo-launcher --headless install --name Pharo stable
+        mv Pharo/* .
+        rmdir Pharo
         echo "✅ Pharo image downloaded!"
       fi
       
@@ -115,7 +117,9 @@
       
       if [ ! -f "Pharo.image" ]; then
         echo "📥 Downloading Pharo image..."
-        curl -L https://get.pharo.org/64/stable+vm | bash
+        pharo-launcher --headless install --name Pharo stable
+        mv Pharo/* .
+        rmdir Pharo
       fi
       
       cd ..
