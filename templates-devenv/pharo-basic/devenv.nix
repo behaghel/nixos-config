@@ -5,7 +5,6 @@
   packages = with pkgs; [
     # Pharo development tools
     pharo
-    pharo-launcher
     git
     curl
     unzip
@@ -86,9 +85,7 @@
       # Download latest stable Pharo image if not exists
       if [ ! -f "Pharo.image" ]; then
         echo "📥 Downloading Pharo image..."
-        pharo-launcher --headless install --name Pharo stable
-        mv Pharo/* .
-        rmdir Pharo
+        curl -L https://get.pharo.org/64/stable+vm | bash
         echo "✅ Pharo image downloaded!"
       fi
       
@@ -117,9 +114,7 @@
       
       if [ ! -f "Pharo.image" ]; then
         echo "📥 Downloading Pharo image..."
-        pharo-launcher --headless install --name Pharo stable
-        mv Pharo/* .
-        rmdir Pharo
+        curl -L https://get.pharo.org/64/stable+vm | bash
       fi
       
       cd ..
