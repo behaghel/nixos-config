@@ -80,7 +80,7 @@ Available commands:
 Environment ready!'';
   };
 
-  pre-commit = {
+  git-hooks = {
     enable = true;
     hooks = {
       black.enable = true;
