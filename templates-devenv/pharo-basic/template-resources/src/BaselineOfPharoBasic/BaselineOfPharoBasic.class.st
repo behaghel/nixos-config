@@ -11,7 +11,7 @@ BaselineOfPharoBasic >> baseline: spec [
 	spec
 		for: #common
 		do: [
-			"Define packages"
+			"Define packages - tests are now in src/ alongside main packages"
 			spec
 				package: 'PharoBasic';
 				package: 'PharoBasic-Tests' with: [ spec requires: #('PharoBasic') ].
