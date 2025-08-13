@@ -71,6 +71,28 @@ During the `enterShell` phase, templates:
 3. Remove the `template-resources/` directory after copying
 4. Perform any additional setup (dependency installation, etc.)
 
+### Subdirectory Bootstrap Pattern
+
+Some project initialization tools create a subdirectory that needs to be moved to the project root. This pattern is common in tools like:
+- **guile-hall** - Creates a `project-name/` subdirectory with project files
+- **Python cookiecutter-style tools** - Often create nested project directories
+
+The `template-utils.nix` provides `moveSubdirectoryToRoot` function to handle this:
+
+```nix
+extraBootstrapSteps = ''
+  # Tool creates subdirectory with project files
+  some-init-tool create my-project
+  
+  # Move all contents to root and clean up
+  ${templateUtils.moveSubdirectoryToRoot "my-project"}
+  
+  # Continue with other setup...
+'';
+```
+
+This function safely copies both regular and hidden files, then removes the subdirectory.
+
 Example structure:
 ```
 template-name/

@@ -28,8 +28,21 @@
     fi
   '';
 
+  # Move contents from a subdirectory to root and remove the subdirectory
+  # Usage: ${moveSubdirectoryToRoot "project-name"}
+  moveSubdirectoryToRoot = subdirName: ''
+    # Move files from subdirectory to root
+    if [ -d "${subdirName}" ]; then
+      # Use cp to avoid overwrite issues, then remove source
+      cp -r ${subdirName}/* . 2>/dev/null || true
+      cp -r ${subdirName}/.* . 2>/dev/null || true
+      rm -rf ${subdirName}
+      echo "  ✓ Moved files from ${subdirName}/ to root directory"
+    fi
+  '';
+
   # Combine bootstrap and greeting for complete enterShell
-  standardEnterShell = { projectTypeMsg, keyFile, greeting, extraBootstrapSteps ? "" }: ''
+  standardEnterShell = { projectTypeMsg, keyFile, greeting, extraBootstrapSteps ? "", extraShellSteps ? "" }: ''
     ${lib.strings.removeSuffix "\n" (bootstrapFromTemplateResources projectTypeMsg keyFile)}
       
       ${extraBootstrapSteps}
@@ -37,6 +50,8 @@
       echo "✅ Project bootstrapped successfully!"
       echo ""
     fi
+
+    ${extraShellSteps}
 
     ${showGreetingInInteractiveShell greeting}
   '';

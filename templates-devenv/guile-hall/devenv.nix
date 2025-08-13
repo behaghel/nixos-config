@@ -77,13 +77,7 @@ in
       # Initialize Hall project with --execute flag
       hall init guile-hall-project --author="Your Name" --execute
       
-      # Move files from subdirectory to root
-      if [ -d "guile-hall-project" ]; then
-        # Use cp to avoid overwrite issues, then remove source
-        cp -r guile-hall-project/* . 2>/dev/null || true
-        cp -r guile-hall-project/.* . 2>/dev/null || true
-        rm -rf guile-hall-project
-      fi
+      ${templateUtils.moveSubdirectoryToRoot "guile-hall-project"}
 
       # finishing initialisation of the build infra
       hall scan -x # register new files in hall.scm
