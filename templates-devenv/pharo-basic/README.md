@@ -65,25 +65,64 @@ devenv shell dist
 ## Project Structure
 
 ```
-src/PharoBasic/              # Main package source code
-├── PharoBasicExample.class.st  # Example class with business logic
-└── package.st               # Package definition
-
-tests/PharoBasic-Tests/      # Test package source code
-├── PharoBasicExampleTest.class.st  # Test cases for example class
-└── package.st               # Test package definition
+src/                         # Source code in Tonel format
+├── BaselineOfPharoBasic/    # Metacello baseline (bill of materials)
+│   ├── BaselineOfPharoBasic.class.st  # Project dependencies and structure
+│   └── package.st           # Baseline package definition
+├── PharoBasic/              # Main package source code
+│   ├── PharoBasicExample.class.st     # Example class with business logic
+│   └── package.st           # Package definition
+└── PharoBasic-Tests/        # Test package source code
+    ├── PharoBasicExampleTest.class.st # Test cases for example class
+    └── package.st           # Test package definition
 
 pharo-local/                 # Local Pharo image and VM (auto-created)
 ├── Pharo.image              # Pharo image file
 ├── Pharo.changes            # Changes file
 └── pharo-vm/               # Pharo virtual machine
+
+startup.st                   # Bootstrap script for loading packages
+```
+
+## Metacello Integration
+
+This template uses [Metacello](https://github.com/Metacello/metacello) as the project management and dependency resolution system:
+
+### Baseline Definition
+The `BaselineOfPharoBasic` class defines the project's "bill of materials":
+- **Package dependencies** - Defines which packages depend on others
+- **Load groups** - Organizes packages into logical groups (Core, Tests, etc.)
+- **External dependencies** - Can specify external libraries and their versions
+
+### Loading the Project
+The project is loaded using Metacello:
+```smalltalk
+Metacello new
+  baseline: 'PharoBasic';
+  repository: 'tonel://src';
+  load.
+```
+
+### Package Groups
+- **Core** - Main application packages (`PharoBasic`)
+- **Tests** - Test packages (`PharoBasic-Tests`)
+- **default** - Loads both Core and Tests
+
+### Adding Dependencies
+To add external dependencies, modify the baseline:
+```smalltalk
+spec
+  baseline: 'SomeLibrary' 
+  with: [ spec repository: 'github://user/repo:main/src' ];
+  package: 'PharoBasic' with: [ spec requires: #('SomeLibrary') ].
 ```
 
 ## Development Tools
 
 ### Source Code Management
 - **Tonel format** - Git-friendly Smalltalk source code format
-- **Automatic loading** - Code automatically loaded into Pharo image
+- **Metacello** - Project management and dependency resolution
+- **Automatic loading** - Code automatically loaded into Pharo image via baseline
 
 ### Testing
 - **SUnit** - Comprehensive testing framework with assertions
@@ -143,11 +182,13 @@ devenv test
 
 ## Customization
 
-1. Update package names in `src/` and `tests/` directories
-2. Modify the main application in `PharoBasicExample`
-3. Add new classes following Smalltalk naming conventions
-4. Write tests using SUnit assertions
-5. Update `devenv.nix` for additional development tools
+1. Update the baseline in `src/BaselineOfPharoBasic/` to define dependencies
+2. Update package names in `src/` and `tests/` directories
+3. Modify the main application in `PharoBasicExample`
+4. Add new classes following Smalltalk naming conventions
+5. Write tests using SUnit assertions
+6. Add external dependencies via Metacello in the baseline
+7. Update `devenv.nix` for additional development tools
 
 ## Emacs Configuration
 
