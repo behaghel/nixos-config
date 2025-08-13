@@ -9,9 +9,6 @@
 
   packages = with pkgs; [
     # Development tools
-    black
-    ruff
-    mypy
     pre-commit
     git
   ];
