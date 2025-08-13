@@ -58,7 +58,7 @@
       fi
 
       echo "📦 Installing dependencies from pyproject.toml..."
-      uv sync
+      uv sync --all-extras
 
       echo "🔧 Initializing Git repository..."
       git init
