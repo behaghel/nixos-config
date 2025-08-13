@@ -10,6 +10,7 @@
   packages = with pkgs; [
     # Development tools
     git
+    python312Packages.pytest
   ];
 
   scripts = {
