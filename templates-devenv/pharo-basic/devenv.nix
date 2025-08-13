@@ -1,4 +1,3 @@
-
 { pkgs, lib, config, inputs, ... }:
 
 {
@@ -56,9 +55,10 @@
     '';
 
     repl.exec = ''
-      echo "🐹 Starting Pharo REPL..."
+      echo "🐹 Starting Pharo IDE..."
       if [ -f "pharo-local/Pharo.image" ]; then
-        pharo pharo-local/Pharo.image
+        echo "Opening Pharo image in graphical mode..."
+        pharo pharo-local/Pharo.image st startup.st
       else
         echo "❌ No Pharo image found. Run 'devenv shell setup' first."
         exit 1
@@ -77,18 +77,18 @@
 
     setup.exec = ''
       echo "🔧 Setting up Pharo development environment..."
-      
+
       # Create pharo-local directory
       mkdir -p pharo-local
       cd pharo-local
-      
+
       # Download latest stable Pharo image if not exists
       if [ ! -f "Pharo.image" ]; then
         echo "📥 Downloading Pharo image..."
         curl -L https://get.pharo.org/64/stable+vm | bash
         echo "✅ Pharo image downloaded!"
       fi
-      
+
       cd ..
       echo "✅ Pharo environment setup completed!"
     '';
@@ -111,12 +111,12 @@
       echo "🔧 Setting up Pharo environment..."
       mkdir -p pharo-local
       cd pharo-local
-      
+
       if [ ! -f "Pharo.image" ]; then
         echo "📥 Downloading Pharo image..."
         curl -L https://get.pharo.org/64/stable+vm | bash
       fi
-      
+
       cd ..
 
       # Load project code into image

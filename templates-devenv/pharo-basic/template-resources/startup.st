@@ -1,12 +1,16 @@
 
-"Startup script to load PharoBasic packages into the image"
+"Startup script for interactive GUI development"
 
-"Load project using Metacello baseline - both main and test packages are in src/"
-Metacello new
-  baseline: 'PharoBasic';
-  repository: 'tonel://src';
-  load.
+"Display a welcome message when opening the image in GUI mode"
+UIManager default inform: 'Welcome to PharoBasic Development!
 
-"Exit the image after loading"
-Smalltalk snapshot: true andQuit: true.
+Your project has been loaded and is ready for development.
+
+Main class: PharoBasicExample
+Test class: PharoBasicExampleTest
+
+Use the System Browser to explore your code.
+Use the Playground to experiment with Smalltalk.
+
+Happy coding!'.
 
