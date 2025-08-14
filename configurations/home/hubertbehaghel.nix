@@ -1,4 +1,4 @@
-{ flake, ... }:
+{ flake, pkgs, ... }:
 let
   inherit (flake) inputs;
   inherit (inputs) self;
@@ -19,4 +19,15 @@ in
   };
 
   home.stateVersion = "24.11";
+
+  # Linux-specific Alacritty configuration to fix OpenGL issues
+  programs.alacritty.settings = {
+    general.live_config_reload = true;
+    env.LIBGL_ALWAYS_SOFTWARE = "1";
+  };
+
+  # Ensure Mesa software rendering is available on Linux
+  home.packages = with pkgs; [
+    mesa
+  ];
 }
