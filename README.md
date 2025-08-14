@@ -14,6 +14,23 @@ git config core.hooksPath githooks
 
 Use `nix flake check` to evaluate the defined system configurations and verify formatting.
 
+## Adding NixOS Host Configurations
+
+To add a new NixOS host configuration to this repository:
+
+1. **Customize your configuration**: Edit `./modules/nixos/*.nix` files to customize your NixOS configuration modules.
+
+2. **Import existing configuration**: If you have an existing NixOS configuration, import it by running:
+   ```bash
+   mv /etc/nixos/*.nix ./configurations/nixos/HOSTNAME/
+   ```
+   Replace `HOSTNAME` with your actual hostname.
+
+3. **Apply the configuration**: Run the following command to apply your configuration:
+   ```bash
+   nix --extra-experimental-features "nix-command flakes" run
+   ```
+
 ## Workflow
 
 This repository follows the [nixos-unified](https://nixos-unified.org/#why) conventions. nixos-unified exposes several `nix run` commands to manage the configuration throughout its life cycle.
