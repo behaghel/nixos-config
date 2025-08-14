@@ -1,15 +1,10 @@
 "Setting up the basic tooling to get hacking."
 
-| browser |
-browser := ClyFullBrowserMorph openOnClass: PharoBasicExample .
+ClyFullBrowserMorph openOnClass: PharoBasicExample .
 
-"Open Test Runner and run PharoBasic tests"
-| testRunner |
-testRunner := DrTests open.
+DrTests open.
 
-"Open Playground for interactive development"
-| playground |
-playground := StPlaygroundPresenter openContents: '|example |
+StPlaygroundPresenter openContents: '|example |
 example := PharoBasicExample new.
 example greet: ''Developer''.
 example run.
