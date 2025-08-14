@@ -35,7 +35,7 @@
       # Template directories to scan
       templateConfigs = [
         { baseDir = "templates"; suffix = ""; }
-        { baseDir = "templates-devenv"; suffix = "-devenv"; }
+        # { baseDir = "templates-devenv"; suffix = "-devenv"; }
       ];
 
       # Scan all configured directories for templates

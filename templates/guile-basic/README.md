@@ -1,7 +1,6 @@
+# Guile Basic Template (devenv)
 
-# Guile Basic Template
-
-A modern Guile (GNU Scheme) project template with best practices and tooling for rapid development.
+A modern Guile (GNU Scheme) project template with best practices and tooling for rapid development using [devenv](https://github.com/cachix/devenv).
 
 ## Features
 
@@ -12,69 +11,58 @@ This template provides a complete development environment with:
 - **🧪 Testing framework** - SRFI-64 for comprehensive testing
 - **🏗️ Build system** - Guild compilation for bytecode generation
 - **📝 Configuration** - EditorConfig for consistent coding style
-- **🔄 Nix environment** - Reproducible development setup with direnv
+- **🔄 devenv environment** - Reproducible development setup with direnv
 
 ## Quick Start
 
 1. **Enter the development environment** (happens automatically with direnv):
    ```bash
-   nix develop
+   devenv shell
    ```
 
-2. **Build the project** (compile the source):
+2. **Run tests**:
    ```bash
-   nix develop --build
+   devenv test
    ```
 
-3. **Run tests**:
+3. **Run the hello world example**:
    ```bash
-   nix develop --check
-   ```
-
-4. **Run the hello world example**:
-   ```bash
-   guile -L . -s main.scm
+   devenv shell run
    ```
 
 ## Development Lifecycle
 
 ### Core Commands
 
-- **`nix develop --build`** - Compile the project with Guild
-- **`nix develop --check`** - Run the full test suite with SRFI-64
-- **`nix develop --install`** - Compile to Guile bytecode
+- **`devenv test`** - Run the full test suite with SRFI-64
+- **`devenv shell dist`** - Compile to Guile bytecode
+- **`devenv shell run`** - Execute the main application
+- **`devenv shell compile`** - Compile project with Guild
+- **`devenv shell repl`** - Start Guile REPL with project modules
 - **`guile -L . -s <file>`** - Execute Scheme files with project modules
-- **`nix flake update`** - Update Nix flake inputs (development tools)
+- **`devenv update`** - Update devenv configuration
+- **`nix flake update`** - Update Nix flake inputs
 
 ### Example Workflows
 
 ```bash
-# Start development
-nix develop --build
-
-# Run tests continuously during development
-nix develop --check
+# Run tests
+devenv test
 
 # Run specific test file
 guile -L . -s tests/test-runner.scm
 
 # Run the main application
-guile -L . -s main.scm
+devenv shell run
 
 # Start REPL with project modules loaded
-nix run .#repl
-
-# Lint code with Guild
-nix run .#lint
-
-# Format code (manual for Guile)
-nix run .#format
+devenv shell repl
 
 # Compile to bytecode
-guild compile -L . main.scm
+devenv shell compile
 
 # Check compilation warnings and errors
-guild compile -Warity-mismatch -Wformat main.scm
+guild compile -Warity-mismatch -Wformat -Wunbound-variable main.scm
 
 # Interactive development in REPL
 guile -L .
@@ -91,9 +79,9 @@ scheme@(guile-user)> (greet "Developer")
 ├── tests/                   # Test files
 │   └── test-runner.scm      # Test suite with SRFI-64
 ├── main.scm                 # Main application entry point
-├── flake.nix               # Nix development environment
-├── .envrc                  # Direnv configuration
-├── .editorconfig          # Editor configuration
+├── devenv.nix               # devenv development environment
+├── .envrc                   # Direnv configuration
+├── .editorconfig           # Editor configuration
 ├── .gitignore             # Git ignore rules
 └── README.md              # This file
 ```
@@ -112,9 +100,9 @@ scheme@(guile-user)> (greet "Developer")
 
 ## Environment Management
 
-This template uses Nix for reproducible development environments:
+This template uses devenv for reproducible development environments:
 
-- **Nix flake** provides consistent tooling across machines
+- **devenv** provides consistent tooling across machines
 - **direnv** automatically loads the environment when entering the directory
 - **GUILE_LOAD_PATH** configured to include project modules
 
@@ -122,7 +110,7 @@ This template uses Nix for reproducible development environments:
 
 - **`main.scm`** - Application entry point and command-line handling
 - **`.editorconfig`** - Editor settings for consistent formatting
-- **`flake.nix`** - Nix development environment specification
+- **`devenv.nix`** - devenv development environment specification
 
 ## Module System
 
@@ -154,67 +142,11 @@ Tests use SRFI-64 testing framework:
 
 ## Getting Help
 
-- Enter `nix develop` to see available lifecycle commands in the shell prompt
-- Use `nix develop --build`, `--check`, and `--install` for standard operations
+- Enter `devenv shell` to see available lifecycle commands in the shell prompt
+- Use `devenv test` and `devenv shell <command>` for standard operations
 - Start `guile -L .` for interactive development
 - Check the [Guile manual](https://www.gnu.org/software/guile/manual/) for language reference
-- Review `flake.nix` for development environment setup
-
-## Emacs Configuration
-
-To get the best Guile development experience in Emacs:
-
-### Scheme Mode and Geiser
-```elisp
-;; Enhanced Scheme support
-(use-package geiser
-  :ensure t
-  :config
-  (setq geiser-default-implementation 'guile
-        geiser-active-implementations '(guile)
-        geiser-guile-load-path '("./")))
-
-(use-package geiser-guile
-  :ensure t
-  :config
-  (setq geiser-guile-binary "guile"
-        geiser-guile-load-init-file-p t))
-```
-
-### Formatting and Indentation
-```elisp
-;; Scheme indentation rules
-(put 'test-begin 'scheme-indent-function 1)
-(put 'test-equal 'scheme-indent-function 2)
-(put 'test-assert 'scheme-indent-function 1)
-(put 'use-modules 'scheme-indent-function 0)
-(put 'define-module 'scheme-indent-function 1)
-
-;; Auto-formatting for Scheme
-(add-hook 'scheme-mode-hook
-          (lambda ()
-            (setq indent-tabs-mode nil
-                  tab-width 2
-                  scheme-indent-offset 2)))
-```
-
-### REPL Integration
-```elisp
-;; Enhanced REPL workflow
-(with-eval-after-load 'geiser-mode
-  (define-key geiser-mode-map (kbd "C-c C-a") 'geiser-mode-switch-to-repl-and-enter))
-```
-
-### Project Structure Support
-```elisp
-;; Guile module detection
-(add-hook 'scheme-mode-hook
-          (lambda ()
-            (when (string-match "\\.scm$" (buffer-file-name))
-              (setq geiser-guile-load-path
-                    (cons (file-name-directory (buffer-file-name))
-                          geiser-guile-load-path)))))
-```
+- Review `devenv.nix` for development environment setup
 
 ## Customization
 
@@ -222,6 +154,58 @@ To get the best Guile development experience in Emacs:
 2. Modify the main application in `main.scm`
 3. Add new modules following the `(project-name module-name)` pattern
 4. Write tests in `tests/` using SRFI-64
-5. Extend the development environment in `flake.nix` if needed
+5. Update `devenv.nix` for additional development tools
 
-Happy hacking! 🐧
+## Emacs Configuration
+
+For consistent Guile development using core Emacs functionality with Geiser:
+
+### Geiser Integration
+```elisp
+;; Geiser for interactive Guile development
+(use-package geiser
+  :hook (scheme-mode . geiser-mode))
+
+(use-package geiser-guile
+  :config
+  (setq geiser-guile-load-path '(".")
+        geiser-guile-init-file nil))
+
+;; Key bindings for Geiser
+(with-eval-after-load 'geiser-mode
+  (define-key geiser-mode-map (kbd "C-c C-z") #'geiser)
+  (define-key geiser-mode-map (kbd "C-c C-k") #'geiser-eval-buffer)
+  (define-key geiser-mode-map (kbd "C-c C-e") #'geiser-eval-last-sexp))
+```
+
+### Built-in Compilation for Linting
+```elisp
+;; Guild compilation for linting
+(defun guile-compile-file ()
+  "Compile current Guile file with Guild."
+  (interactive)
+  (when (eq major-mode 'scheme-mode)
+    (let ((default-directory (project-root (project-current))))
+      (compile (format "guild compile -Warity-mismatch -Wformat -Wunbound-variable %s"
+                       (file-name-nondirectory buffer-file-name))))))
+
+(define-key scheme-mode-map (kbd "C-c c") #'guile-compile-file)
+```
+
+### Formatting and Indentation
+```elisp
+;; Scheme formatting conventions
+(add-hook 'scheme-mode-hook
+          (lambda ()
+            (setq-local indent-tabs-mode nil)
+            (setq-local tab-width 2)
+            (setq-local lisp-indent-offset 2)))
+
+;; Format buffer using built-in indentation
+(defun scheme-format-buffer ()
+  "Format current Scheme buffer."
+  (interactive)
+  (when (eq major-mode 'scheme-mode)
+    (indent-region (point-min) (point-max))))
+
+(define-key scheme-mode-map (kbd "C-c f") #'scheme-format-buffer)

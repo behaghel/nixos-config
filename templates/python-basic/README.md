@@ -1,7 +1,6 @@
+# Python Basic Template (devenv)
 
-# Python Basic Template
-
-A modern Python project template with best practices and tooling for rapid development.
+A modern Python project template with best practices and tooling for rapid development using [devenv](https://github.com/cachix/devenv).
 
 ## Features
 
@@ -12,64 +11,53 @@ This template provides a complete development environment with:
 - **🏗️ Build system** - Hatchling for packaging
 - **🪝 Pre-commit hooks** - Automated formatting and testing
 - **📝 Configuration** - EditorConfig for consistent coding style
-- **🔄 Nix environment** - Reproducible development setup with direnv
+- **🔄 devenv environment** - Reproducible development setup with direnv
 
 ## Quick Start
 
 1. **Enter the development environment** (happens automatically with direnv):
    ```bash
-   nix develop
+   devenv shell
    ```
 
-2. **Build the project** (install dependencies and setup hooks):
+2. **Run tests**:
    ```bash
-   nix develop --build
+   devenv test
    ```
 
-3. **Run tests**:
+3. **Run the hello world example**:
    ```bash
-   nix develop --check
-   ```
-
-4. **Run the hello world example**:
-   ```bash
-   uv run python -m python_basic.main
+   devenv shell run
    ```
 
 ## Development Lifecycle
 
 ### Core Commands
 
-- **`nix develop --build`** - Install dependencies and prepare the project for development
-- **`nix develop --check`** - Run the full test suite with pytest
-- **`nix develop --install`** - Build distribution packages (wheel and source)
-- **`uv run <command>`** - Execute commands in the project environment
+- **`devenv test`** - Run the full test suite with pytest
+- **`devenv shell dist`** - Build distribution packages (wheel and source)
+- **`devenv shell run`** - Execute the main application
+- **`devenv shell format`** - Format code with Black and Ruff
+- **`devenv shell lint`** - Run linting with Ruff and mypy
+- **`uv add <package>`** - Add new dependencies
 - **`uv lock --upgrade`** - Update Python dependencies to latest compatible versions
+- **`devenv update`** - Update devenv configuration
 - **`nix flake update`** - Update Nix flake inputs (development tools)
 
 ### Example Workflows
 
 ```bash
-# Start development
-nix develop --build
+# Start development (environment loads automatically)
+devenv shell
 
 # Run tests continuously during development
-nix develop --check
+devenv test
 
 # Run specific test file
 uv run pytest tests/test_main.py
 
 # Run the main application
-uv run python -m python_basic.main
-
-# Format code
-nix run .#format
-
-# Lint code
-nix run .#lint
-
-# Start Python REPL with project loaded
-nix run .#repl
+devenv shell run
 
 # Add new dependencies
 uv add requests
@@ -79,7 +67,11 @@ uv add --dev pytest-cov  # Development dependency
 uv lock --upgrade
 
 # Build packages for distribution
-nix develop --install
+devenv shell dist
+
+# Format and lint code
+devenv shell format
+devenv shell lint
 ```
 
 ## Project Structure
@@ -92,11 +84,12 @@ nix develop --install
 ├── tests/                    # Test files
 │   ├── __init__.py
 │   └── test_main.py         # Example tests
-├── flake.nix                # Nix development environment
+├── devenv.nix               # devenv configuration
+├── devenv.yaml              # devenv inputs
+├── flake.nix                # Nix flake for devenv
 ├── pyproject.toml           # Python project configuration
 ├── .envrc                   # Direnv configuration
 ├── .editorconfig           # Editor configuration
-├── .pre-commit-config.yaml # Pre-commit hooks
 └── README.md               # This file
 ```
 
@@ -120,77 +113,89 @@ The template includes pre-commit hooks that run automatically on each commit:
 
 ## Environment Management
 
-This template uses Nix for reproducible development environments:
+This template uses devenv for reproducible development environments:
 
-- **Nix flake** provides consistent tooling across machines
+- **devenv** provides consistent tooling across machines
 - **direnv** automatically loads the environment when entering the directory
 - **uv** handles Python package management efficiently
 
 ## Configuration Files
 
+- **`devenv.nix`** - devenv development environment specification
 - **`pyproject.toml`** - Python project metadata and tool configuration
 - **`.editorconfig`** - Editor settings for consistent formatting
-- **`.pre-commit-config.yaml`** - Pre-commit hook configuration
-- **`flake.nix`** - Nix development environment specification
+- **`flake.nix`** - Nix flake configuration for devenv
 
 ## Getting Help
 
-- Enter `nix develop` to see available lifecycle commands in the shell prompt
-- Use `nix develop --build`, `--check`, and `--install` for standard operations
+- Enter `devenv shell` to see available lifecycle commands in the shell prompt
+- Use `devenv shell build`, `check`, and `install` for standard operations
 - Check `pyproject.toml` for project configuration
-- Review `flake.nix` for development environment setup
+- Review `devenv.nix` for development environment setup
 - Examine `tests/` for testing examples
-
-## Emacs Configuration
-
-To get consistent formatting and linting in Emacs that matches the project's tools:
-
-### Formatting (Black + Ruff)
-Add to your Emacs configuration:
-
-```elisp
-;; Python formatting with Black
-(use-package blacken
-  :ensure t
-  :hook (python-mode . blacken-mode)
-  :config
-  (setq blacken-line-length 88))
-
-;; Python linting with Ruff via flymake
-(use-package flymake-ruff
-  :ensure t
-  :hook (python-mode . flymake-ruff-load))
-```
-
-### Type Checking (mypy)
-```elisp
-;; mypy integration
-(use-package flycheck
-  :ensure t
-  :hook (python-mode . flycheck-mode)
-  :config
-  (flycheck-add-next-checker 'python-flake8 'python-mypy))
-```
-
-### LSP Support
-For full IDE features, use `lsp-mode` or `eglot` with `pylsp`:
-
-```elisp
-(use-package lsp-mode
-  :ensure t
-  :hook (python-mode . lsp-deferred)
-  :config
-  (setq lsp-pylsp-plugins-black-enabled t
-        lsp-pylsp-plugins-ruff-enabled t
-        lsp-pylsp-plugins-mypy-enabled t))
-```
 
 ## Customization
 
 1. Update `pyproject.toml` with your project details
 2. Modify dependencies in the `[project]` section
 3. Add new modules in `src/python_basic/`
-4. Write tests in `tests/`
-5. Extend the development environment in `flake.nix` if needed
+4. Write tests in `tests/` using pytest
+5. Customize `devenv.nix` for additional tools or configuration
 
-Happy coding! 🐍
+## Emacs Configuration
+
+For consistent Python development using core Emacs functionality:
+
+### Built-in Language Server (eglot)
+```elisp
+;; Python development with eglot and pylsp
+(use-package eglot
+  :hook (python-mode . eglot-ensure)
+  :config
+  (add-to-list 'eglot-server-programs 
+               '(python-mode . ("pylsp"))))
+
+;; Configure pylsp for our toolchain
+(with-eval-after-load 'eglot
+  (setq-default eglot-workspace-configuration
+                '((pylsp . ((plugins . ((black . ((enabled . t)
+                                                   (line_length . 88)))
+                                        (ruff . ((enabled . t)))
+                                        (mypy . ((enabled . t))))))))))
+```
+
+### Formatting with built-in compile
+```elisp
+;; Format current buffer with Black
+(defun python-format-buffer ()
+  "Format current Python buffer with Black."
+  (interactive)
+  (when (eq major-mode 'python-mode)
+    (shell-command-on-region (point-min) (point-max) 
+                             "black --stdin-filename=buffer.py -" 
+                             (current-buffer) t)))
+
+;; Bind to common formatting key
+(define-key python-mode-map (kbd "C-c f") #'python-format-buffer)
+```
+
+### Testing with built-in compile
+```elisp
+;; Run project tests
+(defun python-run-tests ()
+  "Run pytest in project root."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "uv run pytest")))
+
+(define-key python-mode-map (kbd "C-c t") #'python-run-tests)
+```
+
+### REPL Integration
+```elisp
+;; Enhanced Python REPL
+(setq python-shell-interpreter "python"
+      python-shell-interpreter-args "-i")
+
+;; Send region to Python REPL
+(define-key python-mode-map (kbd "C-c C-r") #'python-shell-send-region)

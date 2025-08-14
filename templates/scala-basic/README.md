@@ -1,7 +1,7 @@
 
-# Scala Basic Template
+# Scala Basic Template (devenv)
 
-A modern Scala project template with best practices and tooling for rapid development.
+A modern Scala project template with best practices and tooling for rapid development using devenv.
 
 ## Features
 
@@ -12,75 +12,77 @@ This template provides a complete development environment with:
 - **🧪 Testing framework** - ScalaTest for comprehensive testing
 - **🏗️ Build system** - sbt with assembly plugin for fat JAR creation
 - **📝 Configuration** - EditorConfig for consistent coding style
-- **🔄 Nix environment** - Reproducible development setup with direnv
+- **🔄 devenv environment** - Reproducible development setup with direnv
 
 ## Quick Start
 
 1. **Enter the development environment** (happens automatically with direnv):
    ```bash
-   nix develop
+   devenv shell
    ```
 
-2. **Build the project** (install dependencies and setup):
-   ```bash
-   nix develop --build
-   ```
+2. **The project will auto-bootstrap** using `sbt new` on first visit
 
 3. **Run tests**:
    ```bash
-   nix develop --check
+   devenv test
    ```
 
 4. **Run the hello world example**:
    ```bash
-   sbt run
+   devenv shell run
    ```
 
 ## Development Lifecycle
 
 ### Core Commands
 
-- **`nix develop --build`** - Install dependencies and prepare the project for development
-- **`nix develop --check`** - Run the full test suite with ScalaTest
-- **`nix develop --install`** - Build fat JAR for distribution
-- **`sbt <command>`** - Execute sbt commands in the project environment
-- **`nix flake update`** - Update Nix flake inputs (development tools)
+- **`devenv test`** - Run the full test suite with ScalaTest
+- **`devenv shell dist`** - Build fat JAR for distribution
+- **`devenv shell format`** - Format source code with Scalafmt
+- **`devenv shell lint`** - Check code formatting with Scalafmt
+- **`devenv shell repl`** - Start Scala REPL with project loaded
+- **`devenv shell run`** - Run the main application
+- **`devenv update`** - Update dependencies
+- **`nix flake update`** - Update Nix development tools
 
 ### Example Workflows
 
 ```bash
-# Start development
-nix develop --build
+# Start development (auto-bootstraps project)
+devenv shell
 
 # Run tests continuously during development
-nix develop --check
+devenv test
 
 # Run specific test class
 sbt "testOnly scalabasic.MainSpec"
 
 # Run the main application
-sbt run
+devenv shell run
 
 # Compile the project
 sbt compile
 
 # Start Scala REPL with project classpath
-nix run .#repl
+devenv shell repl
 
 # Format code
-nix run .#format
+devenv shell format
 
 # Check formatting
-nix run .#lint
+devenv shell lint
 
 # Create fat JAR
-sbt assembly
+devenv shell dist
 
 # Update dependencies
 sbt update
 ```
 
 ## Project Structure
+
+After auto-bootstrapping, your project will have:
 
 ```
 .
@@ -92,13 +94,13 @@ sbt update
 ├── project/                      # sbt configuration
 │   ├── build.properties         # sbt version
 │   └── plugins.sbt              # sbt plugins
-├── flake.nix                    # Nix development environment
-├── build.sbt                   # Project configuration and dependencies
-├── .scalafmt.conf              # Code formatting configuration
-├── .envrc                      # Direnv configuration
-├── .editorconfig               # Editor configuration
-├── .gitignore                  # Git ignore rules
-└── README.md                   # This file
+├── devenv.nix                   # devenv development environment
+├── build.sbt                    # Project configuration and dependencies
+├── .scalafmt.conf               # Code formatting configuration
+├── .envrc                       # Direnv configuration
+├── .editorconfig                # Editor configuration
+├── .gitignore                   # Git ignore rules
+└── README.md                    # This file
 ```
 
 ## Code Quality Tools
@@ -118,79 +120,103 @@ sbt update
 
 ## Environment Management
 
-This template uses Nix for reproducible development environments:
+This template uses devenv for reproducible development environments:
 
-- **Nix flake** provides consistent tooling across machines
+- **devenv** provides consistent tooling across machines
 - **direnv** automatically loads the environment when entering the directory
 - **sbt** handles Scala compilation and dependency management
+- **Auto-bootstrapping** creates project files using community best practices
 
 ## Configuration Files
 
-- **`build.sbt`** - Project metadata, dependencies, and build configuration
-- **`.scalafmt.conf`** - Code formatting rules for Scalafmt
+- **`devenv.nix`** - devenv development environment specification
+- **`build.sbt`** - Project metadata, dependencies, and build configuration (auto-generated)
+- **`.scalafmt.conf`** - Code formatting rules for Scalafmt (auto-generated)
 - **`.editorconfig`** - Editor settings for consistent formatting
-- **`flake.nix`** - Nix development environment specification
+- **`flake.nix`** - Nix flake configuration for devenv
 
 ## Getting Help
 
-- Enter `nix develop` to see available lifecycle commands in the shell prompt
-- Use `nix develop --build`, `--check`, and `--install` for standard operations
-- Check `build.sbt` for project configuration
-- Review `flake.nix` for development environment setup
-- Examine `src/test/` for testing examples
+- Enter `devenv shell` to see available lifecycle commands in the shell prompt
+- Use `devenv test`, `devenv shell format`, etc. for standard operations
+- Check `build.sbt` for project configuration (after auto-bootstrap)
+- Review `devenv.nix` for development environment setup
+- Examine `src/test/` for testing examples (after auto-bootstrap)
 
 ## Emacs Configuration
 
-To get consistent formatting and development experience in Emacs:
+For consistent Scala development using core Emacs functionality:
 
-### Scala Mode and Formatting
+### Built-in Language Server (eglot)
 ```elisp
-;; Scala development
-(use-package scala-mode
-  :ensure t
-  :mode "\\.s\\(cala\\|bt\\)$")
-
-;; Scalafmt integration
-(use-package scalafmt
-  :ensure t
-  :hook (scala-mode . scalafmt-enable-on-save)
+;; Scala development with eglot and Metals
+(use-package eglot
+  :hook (scala-mode . eglot-ensure)
   :config
-  (setq scalafmt-command "scalafmt"))
+  (add-to-list 'eglot-server-programs 
+               '(scala-mode . ("metals"))))
 ```
 
-### Metals LSP Support
+### Formatting with built-in compile
 ```elisp
-;; Metals Language Server
-(use-package lsp-metals
-  :ensure t
-  :hook (scala-mode . lsp-deferred)
-  :config
-  (setq lsp-metals-server-args '("-J-Dmetals.allow-multiline-string-formatting=off")))
+;; Format current buffer with scalafmt
+(defun scala-format-buffer ()
+  "Format current Scala buffer with scalafmt."
+  (interactive)
+  (when (eq major-mode 'scala-mode)
+    (shell-command-on-region (point-min) (point-max) 
+                             "scalafmt --stdin" 
+                             (current-buffer) t)))
 
-;; SBT integration
-(use-package sbt-mode
-  :ensure t
-  :commands sbt-start sbt-command
-  :config
-  (substitute-key-definition 'minibuffer-complete-word
-                           'self-insert-command
-                           minibuffer-local-completion-map))
+;; Bind to common formatting key
+(define-key scala-mode-map (kbd "C-c f") #'scala-format-buffer)
 ```
 
-### REPL Integration
+### SBT Integration with built-in compile
 ```elisp
-;; Enhanced Scala REPL
-(use-package scala-repl
-  :ensure t
-  :hook (scala-mode . scala-repl-mode))
+;; SBT compilation commands
+(defun scala-sbt-compile ()
+  "Compile Scala project with sbt."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "sbt compile")))
+
+(defun scala-sbt-test ()
+  "Run sbt tests."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "sbt test")))
+
+(defun scala-sbt-run ()
+  "Run Scala application with sbt."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "sbt run")))
+
+;; Key bindings
+(define-key scala-mode-map (kbd "C-c c") #'scala-sbt-compile)
+(define-key scala-mode-map (kbd "C-c t") #'scala-sbt-test)
+(define-key scala-mode-map (kbd "C-c r") #'scala-sbt-run)
+```
+
+### REPL Integration with built-in inferior-process
+```elisp
+;; Scala REPL using sbt console
+(defun scala-start-repl ()
+  "Start Scala REPL using sbt console."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (run-scala "sbt console")))
+
+(define-key scala-mode-map (kbd "C-c C-z") #'scala-start-repl)
 ```
 
 ## Customization
 
-1. Update `build.sbt` with your project details and dependencies
+1. Update `build.sbt` with your project details and dependencies (after auto-bootstrap)
 2. Modify the package structure in `src/main/scala/`
 3. Add new test files in `src/test/scala/`
-4. Configure Scalafmt rules in `.scalafmt.conf`
-5. Extend the development environment in `flake.nix` if needed
+4. Customize `.scalafmt.conf` for formatting preferences
+5. Extend the development environment in `devenv.nix` if needed
 
 Happy coding! ⚡

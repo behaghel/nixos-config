@@ -1,42 +1,43 @@
+# Guile compiled files
+*.go
 
-# Hall-generated files
+# Autotools files
+/autom4te.cache/
+/config.log
+/config.status
 /configure
 /Makefile
 /Makefile.in
 /aclocal.m4
-/autom4te.cache/
-/config.log
-/config.status
+/compile
 /config.guess
 /config.sub
+/depcomp
 /install-sh
 /missing
-/compile
+/test-driver
+
+# Hall generated files
+/pre-inst-env
 
 # Build artifacts
-*.go
-*.log
-.libs/
+/.libs/
+*.o
 *.la
 *.lo
-*.o
 
 # Distribution files
 *.tar.gz
 *.tar.xz
 
+# Template resources (used during initialization only)
+/.template-resources/
+
 # Editor files
 *~
 .#*
 \#*#
-*.swp
-*.swo
 
 # OS files
 .DS_Store
 Thumbs.db
-
-# Nix
-result
-result-*
-.direnv/

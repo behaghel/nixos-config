@@ -1,251 +1,99 @@
-# Guile Hall Template
-
-A modern Guile (GNU Scheme) project template using guile-hall for project management and best practices.
-
-## Features
-
-This template provides a complete development environment with:
-
-- **🏛️ Guile Hall** - Professional project management for Guile projects
-- **🐧 Modern Guile tooling** - Guile 3.0 with module system support
-- **🔧 Development tools** - Autotools integration, testing framework
-- **🧪 Testing framework** - Integrated testing with Hall
-- **🏗️ Build system** - Autotools-based build system via Hall
-- **📦 Distribution** - Tarball creation for package distribution
-- **📝 Configuration** - EditorConfig for consistent coding style
-- **🔄 Nix environment** - Reproducible development setup with direnv
-
-## Quick Start
-
-1. **Enter the development environment** (happens automatically with direnv):
-   ```bash
-   nix develop
-   ```
-
-2. **Build the project** (initialize and build with Hall):
-   ```bash
-   nix develop --build
-   ```
-
-3. **Run tests**:
-   ```bash
-   nix develop --check
-   ```
-
-4. **Run the application**:
-   ```bash
-   guile -L . -s main.scm
-   ```
-
-## Development Lifecycle
-
-### Core Commands
-
-- **`nix develop --build`** - Initialize and build the project with Hall
-- **`nix develop --check`** - Run the full test suite
-- **`nix develop --install`** - Create distribution tarball
-- **`hall <command>`** - Execute Hall project management commands
-- **`nix flake update`** - Update Nix flake inputs (development tools)
-
-### Hall Commands
-
-```bash
-# Project management
-hall build              # Build the project
-hall test               # Run test suite
-hall clean              # Clean build artifacts
-hall dist               # Create distribution tarball
-hall compile            # Compile to bytecode
-
-# Development workflows
-echo "Development Commands:"
-          echo "  guile -L . -s guile-hall-project.scm - Run the main application"
-          echo "  guile -L .             - Start REPL with project modules"
-```
-
-### Example Workflows
-
-```bash
-# Start development
-nix develop --build
-
-# Continuous development cycle
-hall build
-hall test
-
-# Add new modules
-# Edit hall.scm to add new files/modules
-hall build
-
-# Create distribution
-nix develop --install
-```
-
-## Project Structure
-
-After initialization, Hall creates this structure:
-
-```
-.
-├── hall.scm                 # Hall project configuration
-├── main.scm                # Main application entry point
-├── guile-hall-project/      # Project modules (auto-generated)
-├── tests/                   # Test files (auto-generated)
-├── configure.ac            # Autotools configuration (auto-generated)
-├── Makefile.am             # Makefile template (auto-generated)
-├── flake.nix              # Nix development environment
-├── .envrc                 # Direnv configuration
-├── .editorconfig         # Editor configuration
-└── README.md             # This file
-```
-
-## Hall Project Management
-
-### Project Configuration
-
-Hall uses `hall.scm` for project configuration:
-
-```scheme
-;; Example hall.scm
-(hall-description
-  (name "guile-hall-project")
-  (prefix "guile")
-  (version "0.1.0")
-  (author "Your Name")
-  (copyright (2024))
-  (synopsis "A Guile project managed by Hall")
-  (description "Longer description of your project")
-  (home-page "https://example.com")
-  (license gpl3+)
-  (dependencies `(("guile" (>= "3.0"))))
-  (files (libraries ((scheme-file "guile-hall-project")))))
-```
-
-### Adding Modules
-
-1. Edit `hall.scm` to declare new files
-2. Run `hall build` to regenerate autotools files
-3. Implement your modules
-
-### Testing
-
-Hall integrates with standard Guile testing:
-
-```scheme
-;; In tests/
-(use-modules (srfi srfi-64)
-             (guile-hall-project))
-
-(test-begin "my-project-tests")
-(test-equal "expected" "actual" (my-function))
-(test-end)
-```
-
-## Code Quality Tools
-
 ### Linting
 - **Guild compiler** - Static analysis with warnings (`-Warity-mismatch`, `-Wformat`, `-Wunbound-variable`)
-- **`nix run .#lint`** - Lint all source files automatically
+- **`devenv shell lint`** - Lint all source files automatically
 
 ### Formatting
 - **Manual formatting** - Guile follows Lisp formatting conventions
-- **`nix run .#format`** - Display formatting guidelines
-
-### Build System
-- **Autotools** - Professional build system integration via Hall
-- **Hall** - Project structure management and scaffolding
-
-### Testing
-- **SRFI-64** - Comprehensive testing framework
-- **Hall test** - Integrated test runner
+- **`devenv shell format`** - Display formatting guidelines
 
 ### REPL Support
-- **Guile REPL** - Interactive development with module loading (`nix run .#repl`)
-- **Guild compiler** - Bytecode compilation
+- **Guile REPL** - Interactive development with module loading (`devenv shell repl`)
+
+## Environment Management
+
+This template uses devenv for reproducible development environments:
+
+- **devenv** provides consistent tooling across machines
+- **direnv** automatically loads the environment when entering the directory
+- **GUILE_LOAD_PATH** configured to include project modules
 
 ## Emacs Configuration
 
-For consistent linting and formatting in Emacs, add this to your configuration:
+For consistent Guile development using core Emacs functionality with Geiser:
 
-### Linting with Flycheck
+### Geiser Integration
 ```elisp
-;; Enable flycheck for Scheme files
-(use-package flycheck
-  :hook (scheme-mode . flycheck-mode))
+;; Geiser for interactive Guile development
+(use-package geiser
+  :hook (scheme-mode . geiser-mode))
 
-;; Configure Guild for Guile linting
-(flycheck-define-checker guile-guild
-  "A Guile checker using Guild compiler."
-  :command ("guild" "compile" 
-            "-Warity-mismatch" "-Wformat" "-Wunbound-variable"
-            source-inplace)
-  :error-patterns
-  ((warning line-start (file-name) ":" line ":" column ": warning: " (message) line-end)
-   (error line-start (file-name) ":" line ":" column ": error: " (message) line-end))
-  :modes scheme-mode)
-
-(add-to-list 'flycheck-checkers 'guile-guild)
-```
-
-### Formatting with Geiser
-```elisp
-;; Geiser configuration for Guile development
 (use-package geiser-guile
   :config
-  (setq geiser-guile-load-path '(".")))
+  (setq geiser-guile-load-path '(".")
+        geiser-guile-init-file nil))
 
-;; Automatic indentation for Scheme
+;; Key bindings for Geiser
+(with-eval-after-load 'geiser-mode
+  (define-key geiser-mode-map (kbd "C-c C-z") #'geiser)
+  (define-key geiser-mode-map (kbd "C-c C-k") #'geiser-eval-buffer)
+  (define-key geiser-mode-map (kbd "C-c C-e") #'geiser-eval-last-sexp))
+```
+
+### Hall Project Integration
+```elisp
+;; Hall project commands using built-in compile
+(defun guile-hall-build ()
+  "Build Guile Hall project."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "hall build")))
+
+(defun guile-hall-test ()
+  "Run Guile Hall tests."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "hall test")))
+
+(defun guile-hall-dist ()
+  "Create Guile Hall distribution."
+  (interactive)
+  (let ((default-directory (project-root (project-current))))
+    (compile "hall dist")))
+
+;; Key bindings for Hall
+(define-key scheme-mode-map (kbd "C-c b") #'guile-hall-build)
+(define-key scheme-mode-map (kbd "C-c t") #'guile-hall-test)
+(define-key scheme-mode-map (kbd "C-c d") #'guile-hall-dist)
+```
+
+### Built-in Compilation for Linting
+```elisp
+;; Guild compilation for linting
+(defun guile-compile-file ()
+  "Compile current Guile file with Guild."
+  (interactive)
+  (when (eq major-mode 'scheme-mode)
+    (let ((default-directory (project-root (project-current))))
+      (compile (format "guild compile -Warity-mismatch -Wformat -Wunbound-variable %s"
+                       (file-name-nondirectory buffer-file-name))))))
+
+(define-key scheme-mode-map (kbd "C-c c") #'guile-compile-file)
+```
+
+### Formatting and Indentation
+```elisp
+;; Scheme formatting conventions
 (add-hook 'scheme-mode-hook
           (lambda ()
             (setq-local indent-tabs-mode nil)
             (setq-local tab-width 2)
             (setq-local lisp-indent-offset 2)))
 
-;; Auto-format on save (optional)
-(add-hook 'scheme-mode-hook
-          (lambda ()
-            (add-hook 'before-save-hook 'indent-region nil t)))
-```
+;; Format buffer using built-in indentation
+(defun scheme-format-buffer ()
+  "Format current Scheme buffer."
+  (interactive)
+  (when (eq major-mode 'scheme-mode)
+    (indent-region (point-min) (point-max))))
 
-## Environment Management
-
-This template uses Nix for reproducible development environments:
-
-- **Nix flake** provides consistent tooling across machines
-- **direnv** automatically loads the environment when entering the directory
-- **GUILE_LOAD_PATH** configured to include project modules
-- **guile-hall** for professional project management
-
-## Configuration Files
-
-- **`hall.scm`** - Hall project configuration and metadata
-- **`main.scm`** - Application entry point
-- **`.editorconfig`** - Editor settings for consistent formatting
-- **`flake.nix`** - Nix development environment specification
-
-## Getting Help
-
-- Enter `nix develop` to see available lifecycle commands in the shell prompt
-- Use `nix develop --build`, `--check`, and `--install` for standard operations
-- Check [Hall documentation](https://gitlab.com/a-sassmannshausen/guile-hall) for project management
-- Review the [Guile manual](https://www.gnu.org/software/guile/manual/) for language reference
-- Start `guile -L .` for interactive development
-
-## Customization
-
-1. Run `nix develop --build` to initialize the Hall project
-2. Edit `hall.scm` to configure your project metadata
-3. Add modules and files as declared in `hall.scm`
-4. Run `hall build` after configuration changes
-5. Write tests in the `tests/` directory
-6. Extend the development environment in `flake.nix` if needed
-
-## Advantages of Hall
-
-- **Professional structure** - Follows GNU/Guile conventions
-- **Autotools integration** - Standard build system for distribution
-- **Metadata management** - Centralized project configuration
-- **Scaffolding** - Automatic file generation and organization
-- **Testing integration** - Built-in test runner and structure
-
-Happy hacking with Hall! 🏛️
+(define-key scheme-mode-map (kbd "C-c f") #'scheme-format-buffer)
