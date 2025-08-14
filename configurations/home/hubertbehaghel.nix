@@ -8,6 +8,7 @@ in
     self.homeModules.default
     self.homeModules.linux-only
     self.homeModules.dev
+    self.homeModules.alacritty
   ];
   # Defined by /modules/home/me.nix
   # And used all around in /modules/home/*
