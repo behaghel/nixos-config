@@ -1,6 +1,6 @@
 
 # Pharo image files (local development)
-pharo-local/
+/pharo-local/
 *.image
 *.changes
 *.sources
