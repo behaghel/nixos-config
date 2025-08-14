@@ -8,7 +8,7 @@ in
 {
   imports = [
     self.darwinModules.default
-    ../../modules/nixos/shared/fonts.nix
+    ../../modules/nixos/gui/fonts.nix
   ];
 
   nixpkgs.hostPlatform = "aarch64-darwin";
