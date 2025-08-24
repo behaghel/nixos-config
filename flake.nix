@@ -2,6 +2,10 @@
   inputs = {
     # main inputs (updated by `nix run .#update`)
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    my-emacs-config = {
+      url = "github:yourusername/your-emacs-config-repo";
+      flake = false;
+    };
     flake-parts.url = "github:hercules-ci/flake-parts";
     nix-darwin.url = "github:LnL7/nix-darwin";
     nix-darwin.inputs.nixpkgs.follows = "nixpkgs";
