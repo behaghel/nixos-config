@@ -212,6 +212,22 @@
         "type": "github"
       }
     },
+    "my-emacs-config": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1754661085,
+        "narHash": "sha256-spf9pidrOZplsjuGdo0FtBaoBGFv5dCaFauFyJ1dsGw=",
+        "owner": "behaghel",
+        "repo": ".emacs.d",
+        "rev": "fb27c271c8ef3246cb6c849608bd6f835d4a15a2",
+        "type": "github"
+      },
+      "original": {
+        "owner": "behaghel",
+        "repo": ".emacs.d",
+        "type": "github"
+      }
+    },
     "nix-darwin": {
       "inputs": {
         "nixpkgs": [
@@ -506,6 +522,7 @@
         "emacs": "emacs",
         "flake-parts": "flake-parts",
         "home-manager": "home-manager",
+        "my-emacs-config": "my-emacs-config",
         "nix-darwin": "nix-darwin",
         "nix-index-database": "nix-index-database",
         "nixos-hardware": "nixos-hardware",
