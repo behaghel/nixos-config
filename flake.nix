@@ -3,7 +3,7 @@
     # main inputs (updated by `nix run .#update`)
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
     my-emacs-config = {
-      url = "github:yourusername/your-emacs-config-repo";
+      url = "github:behaghel/.emacs.d";
       flake = false;
     };
     flake-parts.url = "github:hercules-ci/flake-parts";
