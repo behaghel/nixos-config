@@ -1,29 +1,52 @@
 
-{ pkgs, flake, ... }:
+{ pkgs, ... }:
 let
-  inherit (flake) inputs;
-  
-  # Script to sync your external config to ~/.emacs.d
-  emacs-config-sync = pkgs.writeShellScriptBin "emacs-config-sync" ''
-    echo "Syncing Emacs configuration from flake input..."
+  # Script to set up Emacs configuration by cloning from GitHub
+  emacs-config-setup = pkgs.writeShellScriptBin "emacs-config-setup" ''
+    set -e  # Exit immediately on any error
     
-    # Create backup if .emacs.d exists and is not a symlink
+    EMACS_CONFIG_REPO="https://github.com/behaghel/.emacs.d.git"
+    
+    echo "=== Setting up Emacs configuration ==="
+    
+    # If .emacs.d already exists and is a directory (not symlink), assume it's set up
     if [ -d "$HOME/.emacs.d" ] && [ ! -L "$HOME/.emacs.d" ]; then
-      echo "Backing up existing .emacs.d to .emacs.d.backup"
-      mv "$HOME/.emacs.d" "$HOME/.emacs.d.backup"
+      echo "✓ Emacs configuration already exists at ~/.emacs.d"
+      
+      # Check if it's a git repository and offer to pull updates
+      if [ -d "$HOME/.emacs.d/.git" ]; then
+        echo "Checking for updates..."
+        cd "$HOME/.emacs.d"
+        if git fetch --dry-run 2>/dev/null; then
+          echo "✓ Repository is accessible, you can run 'git pull' to update"
+        fi
+      fi
+      exit 0
     fi
     
     # Remove old symlink if it exists
     if [ -L "$HOME/.emacs.d" ]; then
+      echo "Removing existing symlink"
       rm "$HOME/.emacs.d"
+      echo "✓ Symlink removed"
     fi
     
-    # Copy config to make it writable
-    cp -r "${inputs.my-emacs-config}" "$HOME/.emacs.d"
-    chmod -R u+w "$HOME/.emacs.d"
+    # Clone the configuration repository
+    echo "Cloning Emacs configuration from $EMACS_CONFIG_REPO..."
+    if ! git clone "$EMACS_CONFIG_REPO" "$HOME/.emacs.d"; then
+      echo "ERROR: Failed to clone configuration repository!"
+      echo "Make sure you have access to $EMACS_CONFIG_REPO"
+      echo "SETUP FAILED"
+      exit 1
+    fi
+    echo "✓ Configuration cloned"
     
-    echo "Emacs configuration synced! Your .emacs.d is now writable."
-    echo "Run this command again to pull updates from your config repo."
+    echo ""
+    echo "🎉 SETUP SUCCESSFUL!"
+    echo "Your Emacs configuration is ready at ~/.emacs.d"
+    echo "- Configuration is fully writable and git-managed"
+    echo "- Use 'git pull' in ~/.emacs.d to get updates"
+    echo "- Use 'git push' to save your changes"
   '';
 in
 {
@@ -33,13 +56,13 @@ in
     extraPackages = epkgs: [ epkgs.mu4e ];
   };
 
-  # Add the sync script to your environment
-  home.packages = [ emacs-config-sync ];
+  # Add the setup script to your environment
+  home.packages = [ emacs-config-setup ];
 
-  # Optionally auto-sync on activation (comment out if you prefer manual control)
-  home.activation.syncEmacsConfig = ''
+  # Auto-setup on activation if .emacs.d doesn't exist
+  home.activation.setupEmacsConfig = ''
     if [ ! -d "$HOME/.emacs.d" ] || [ -L "$HOME/.emacs.d" ]; then
-      ${emacs-config-sync}/bin/emacs-config-sync
+      ${emacs-config-setup}/bin/emacs-config-setup
     fi
   '';
 }
