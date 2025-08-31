@@ -9,11 +9,6 @@
       overlays = [
         inputs.emacs.overlays.default
       ];
-    };
-    
-    _module.args.pkgs = import inputs.nixpkgs {
-      inherit system;
-      overlays = [inputs.emacs.overlays.default];
       config.allowUnfree = true;
     };
   });
