@@ -2,7 +2,10 @@
 { pkgs, ... }:
 let
   # Script to set up Emacs configuration by cloning from GitHub
-  emacs-config-setup = pkgs.writeShellScriptBin "emacs-config-setup" ''
+  emacs-config-setup = pkgs.writeShellApplication {
+    name = "emacs-config-setup";
+    runtimeInputs = [ pkgs.git ];
+    text = ''
     set -e  # Exit immediately on any error
     
     EMACS_CONFIG_REPO="https://github.com/behaghel/.emacs.d.git"
@@ -47,7 +50,8 @@ let
     echo "- Configuration is fully writable and git-managed"
     echo "- Use 'git pull' in ~/.emacs.d to get updates"
     echo "- Use 'git push' to save your changes"
-  '';
+    '';
+  };
 in
 {
   programs.emacs = {
