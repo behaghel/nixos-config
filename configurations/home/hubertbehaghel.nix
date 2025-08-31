@@ -9,6 +9,7 @@ in
     self.homeModules.linux-only
     self.homeModules.dev
     self.homeModules.browserpass
+    self.homeModules.emacs
   ];
   # Defined by /modules/home/me.nix
   # And used all around in /modules/home/*
