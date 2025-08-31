@@ -19,5 +19,10 @@ in
     email = "hubert.behaghel@veriff.net";
   };
 
+  home.packages = with pkgs; [
+    gemini-cli
+    claude
+  ];
+
   home.stateVersion = "24.11";
 }
