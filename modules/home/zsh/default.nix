@@ -45,5 +45,4 @@ with lib;
   };
   xdg.configFile."zsh.d/gpg.zsh".source = ./.config/zsh.d/gpg.zsh;
   xdg.configFile."zsh.d/bepo.zsh".source = ./.config/zsh.d/bepo.zsh;
-  xdg.configFile.".profile".source = ./.config/profile.d/dark-mode.profile;
 }
