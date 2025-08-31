@@ -21,7 +21,7 @@ in
 
   home.packages = with pkgs; [
     gemini-cli
-    claude
+    claude-code
   ];
 
   home.stateVersion = "24.11";
