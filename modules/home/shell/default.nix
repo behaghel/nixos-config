@@ -12,7 +12,7 @@
   home.file.".aliases".source = ./.aliases;
   xdg.configFile."profile.d/hub.profile".source = ./.config/profile.d/hub.profile;
   xdg.configFile."profile.d/zz_path.profile".source = ./.config/profile.d/zz_path.profile;
-  xdg.configFile.".profile.d/dark-mode.profile".source = ./.config/profile.d/dark-mode.profile;
+  xdg.configFile.".profile.d/dark-theme.profile".source = ./.config/profile.d/dark-theme.profile;
 
   programs.bash.profileExtra = let
     sysBin = "/nix/var/nix/profiles/default/bin";
