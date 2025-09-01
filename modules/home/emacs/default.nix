@@ -63,6 +63,37 @@ in
   # Add the setup script to your environment
   home.packages = [ emacs-config-setup ];
 
+  # Install desktop entry for proper application integration
+  xdg.desktopEntries.emacs = {
+    name = "GNU Emacs";
+    genericName = "Text Editor";
+    comment = "Edit text";
+    exec = "emacs %F";
+    icon = "emacs";
+    type = "Application";
+    terminal = false;
+    categories = [ "Development" "TextEditor" ];
+    mimeType = [
+      "text/english"
+      "text/plain"
+      "text/x-makefile"
+      "text/x-c++hdr"
+      "text/x-c++src"
+      "text/x-chdr"
+      "text/x-csrc"
+      "text/x-java"
+      "text/x-moc"
+      "text/x-pascal"
+      "text/x-tcl"
+      "text/x-tex"
+      "application/x-shellscript"
+      "text/x-c"
+      "text/x-c++"
+    ];
+    startupWMClass = "Emacs";
+    keywords = [ "Text" "Editor" ];
+  };
+
   # Auto-setup on activation if .emacs.d doesn't exist
   home.activation.setupEmacsConfig = ''
     if [ ! -d "$HOME/.emacs.d" ] || [ -L "$HOME/.emacs.d" ]; then
