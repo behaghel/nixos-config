@@ -91,7 +91,6 @@ in
       "text/x-c++"
     ];
     startupWMClass = "Emacs";
-    keywords = [ "Text" "Editor" ];
   };
 
   # Auto-setup on activation if .emacs.d doesn't exist
