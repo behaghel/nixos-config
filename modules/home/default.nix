@@ -9,6 +9,7 @@
     ./starship.nix
     ./git
     ./nix.nix
+    ./tmux
     # ./dropbox
     # ./emacs.nix
     # ./mail
