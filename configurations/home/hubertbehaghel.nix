@@ -22,7 +22,10 @@ in
   home.packages = with pkgs; [
     gemini-cli
     claude-code
+    codex
   ];
+
+  hub.mail.enable = true;
 
   home.stateVersion = "24.11";
 }

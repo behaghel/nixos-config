@@ -12,6 +12,6 @@
     ./tmux
     # ./dropbox
     # ./emacs.nix
-    # ./mail
+    ./mail
   ];
 }

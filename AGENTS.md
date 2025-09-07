@@ -12,11 +12,15 @@
 
 ## Build, Test, and Development Commands
 - `nix develop`: Enter dev shell (includes `just`, `nixd`).
-- `nix run .#activate`: First-time activation on a machine.
-- `nix run .#switch`: Build and switch to the current configuration.
-  - Also available: `.#boot`, `.#test`, `.#build`, `.#rollback`.
+- `nix run .#activate`: First-time activation on a new machine.
+- `nix run`: Apply changes (autowired default in this repo).
+  - Notes: `nixos-unified` autowires `nix run` to the appropriate activation for the current user; selectors like `.#switch`, `.#boot`, `.#test`, `.#build`, and `.#rollback` remain available if you prefer them explicitly.
 - `nix flake check`: Evaluate flake, run basic checks/format validation.
 - `nix fmt`: Format Nix files (uses `nixpkgs-fmt` via flake `formatter`).
+
+## nixos-unified Autowiring
+- Default run target: `modules/flake/toplevel.nix` sets `apps.default` and `packages.default` so `nix run` executes the activation app for the current user (via `modules/flake/activate-home.nix`).
+- Practical upshot: after editing configs, just run `nix run` to apply changes; use explicit `nix run .#switch` only if you want the named action.
 
 ## Coding Style & Naming Conventions
 - Indentation: 2 spaces for `.nix` (see `.editorconfig`).
@@ -38,3 +42,9 @@
 ## Security & Configuration Tips
 - Do not commit secrets. Prefer external secret stores (e.g., `password-store`, GPG) and import at runtime.
 - Pin inputs via `flake.lock`; update with `nix run .#update` and review diffs.
+
+## Mail Module Notes
+- Gmail folders are locale-specific: this repo intentionally respects per‑account Gmail IMAP folder names based on the account language (e.g., French: `[Gmail]/Messages envoy&AOk-s`, `[Gmail]/Corbeille`, `[Gmail]/Brouillons`; English: `[Gmail]/Sent Mail`, `[Gmail]/Trash`, `[Gmail]/Draft[s]`).
+- Modified UTF‑7: IMAP folder names seen in logs/config may appear in IMAP Modified UTF‑7 (e.g., `envoy&AOk-s`). This is expected and handled by isync/mbsync.
+- XDG config: `mbsync` uses `~/.config/isyncrc` (XDG). The sync job calls `mbsync -c ~/.config/isyncrc` explicitly; `~/.mbsyncrc` is not used.
+- mu indexing: The periodic sync job runs `mbsync` only to avoid lock contention with Emacs/mu4e. If you want a separate `mu index` timer, add it explicitly (disabled by default).
