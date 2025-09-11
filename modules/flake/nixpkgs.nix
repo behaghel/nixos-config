@@ -6,9 +6,8 @@
 
     nixpkgs = {
       hostPlatform = system;
-      overlays = [
-        inputs.emacs.overlays.default
-      ];
+      # Use local overlays (includes emacs + isync OAuth/mech support) instead of only the emacs one
+      overlays = (import ../../overlays/default.nix { inherit inputs; });
       config.allowUnfree = true;
     };
   });

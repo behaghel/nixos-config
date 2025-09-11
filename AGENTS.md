@@ -48,3 +48,8 @@
 - Modified UTF‑7: IMAP folder names seen in logs/config may appear in IMAP Modified UTF‑7 (e.g., `envoy&AOk-s`). This is expected and handled by isync/mbsync.
 - XDG config: `mbsync` uses `~/.config/isyncrc` (XDG). The sync job calls `mbsync -c ~/.config/isyncrc` explicitly; `~/.mbsyncrc` is not used.
 - mu indexing: The periodic sync job runs `mbsync` only to avoid lock contention with Emacs/mu4e. If you want a separate `mu index` timer, add it explicitly (disabled by default).
+
+## Nix String Interpolation Tips
+- Shell vars inside Nix strings: use `''${VAR}` to avoid Nix interpolation. Example: `if [ "''${FLAG-}" = 1 ]; then ... fi`.
+- Embed Nix expressions once: don’t double‑interpolate variables inside `${ ... }`. Correct: `export PATH=${lib.makeBinPath [ pkgs.foo myTool ]}:"$PATH"` (note `myTool`, not `${myTool}` inside the list).
+- Mixed example (mail sync): `export PATH=${lib.makeBinPath [ isyncWithGsasl pkgs.mu ]}:"$PATH"` and later `"${isyncWithGsasl}/bin/mbsync" ...`.
