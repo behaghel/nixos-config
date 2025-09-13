@@ -48,7 +48,7 @@ let
     gmail = mkGmailAccount {
       name = "gmail"; email = "behaghel@gmail.com"; lang = "en";
       authMechs = "PLAIN";
-      passwordCommand = "${pkgs.pass}/bin/pass online/gmail/token";
+      passwordCommand = "${pkgs.pass}/bin/pass online/gmail/app-password-mbsync";
     } // { primary = true; };
 
     "behaghel.fr" = mkGmailAccount {
@@ -100,6 +100,8 @@ let
     runtimeInputs = [ pkgs.isync pkgs.mu pkgs.coreutils ];
     text = ''
       set -eu
+      # Silence Cyrus SASL XOAUTH2 debug chatter
+      export SASL_LOG_LEVEL=0
       mbsync -a work
       ${pkgs.mu}/bin/mu index --maildir="${maildir}/work"
     '';
@@ -171,6 +173,8 @@ let
     if [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then set -x; fi
     export PATH=${lib.makeBinPath [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.util-linux ]}:"$PATH"
     MBSYNC_BIN="${pkgs.isync}/bin/mbsync"
+    # Silence Cyrus SASL XOAUTH2 debug chatter
+    export SASL_LOG_LEVEL=0
     if [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then
       echo "mail-sync: using mbsync: $MBSYNC_BIN" >&2
       if command -v ldd >/dev/null 2>&1; then ldd "$MBSYNC_BIN" >&2 || true; fi
