@@ -3,163 +3,107 @@ with lib;
 
 let
   cfg = config.hub.mail;
-  emailAccountDefault = email: {
-    address = email;
-    userName = email;
-    realName = "Hubert Behaghel";
-    folders = {
-      inbox = "inbox";
-      drafts = "drafts";
-      sent = "sent";
-      trash = "trash";
-    };
-    gpg.key = email;
-    mu.enable = true;
-    msmtp.enable = true;
-  };
-  gmailAccount = name: email: lang:
+
+  mkBaseAccount = { address, userName ? address, realName ? "Hubert Behaghel"
+                  , authMechs, passwordCommand ? null, imap ? null, smtp ? null
+                  , gpgKey ? address }:
+    {
+      inherit address userName realName;
+      folders = { inbox = "inbox"; drafts = "drafts"; sent = "sent"; trash = "trash"; };
+      gpg.key = gpgKey;
+      mu.enable = true;
+      msmtp.enable = true;
+      mbsync.extraConfig.account = {
+        AuthMechs = authMechs;
+        TLSType = "IMAPS";
+      };
+    }
+    // optionalAttrs (passwordCommand != null) { inherit passwordCommand; }
+    // optionalAttrs (imap != null) { inherit imap; }
+    // optionalAttrs (smtp != null) { inherit smtp; };
+
+  mkGmailAccount = { name, email, lang, authMechs, passwordCommand ? null }:
     let
-      # Respect per-account Gmail locale folder names (English vs French)
-      farSent = if lang == "fr" then "[Gmail]/Messages envoy&AOk-s" else "[Gmail]/Sent Mail";
-      farTrash = if lang == "fr" then "[Gmail]/Corbeille" else "[Gmail]/Trash";
-      farDraft = if lang == "fr" then "[Gmail]/Brouillons" else "[Gmail]/Draft";
-      farStarred = if lang == "fr" then "[Gmail]/Important" else "[Gmail]/Starred";
-      farAll = if lang == "fr" then "[Gmail]/Tous les messages" else "[Gmail]/All Mail";
-      base = emailAccountDefault email;
+      farSent    = if lang == "fr" then "[Gmail]/Messages envoy&AOk-s" else "[Gmail]/Sent Mail";
+      farTrash   = if lang == "fr" then "[Gmail]/Corbeille"             else "[Gmail]/Trash";
+      farStarred = if lang == "fr" then "[Gmail]/Important"             else "[Gmail]/Starred";
+      farAll     = if lang == "fr" then "[Gmail]/Tous les messages"      else "[Gmail]/All Mail";
+      base = mkBaseAccount { address = email; userName = email; inherit authMechs passwordCommand; };
     in base // {
       flavor = "gmail.com";
-      mbsync = {
-        enable = true;
-        create = "maildir";
-        remove = "none";
-        expunge = "both";
+      imap = { host = "imap.gmail.com"; port = 993; tls.enable = true; };
+      mbsync = (base.mbsync or { }) // {
+        enable = true; create = "maildir"; remove = "none"; expunge = "both";
         groups.${name}.channels = {
-          inbox = {
-            patterns = [ "INBOX" ];
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Sync = "All";
-            };
-          };
-          all = {
-            farPattern = farAll;
-            nearPattern = "archive";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "All";
-            };
-          };
-          starred = {
-            farPattern = farStarred;
-            nearPattern = "starred";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "All";
-            };
-          };
-          trash = {
-            farPattern = farTrash;
-            nearPattern = "trash";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "All";
-            };
-          };
-          sent = {
-            farPattern = farSent;
-            nearPattern = "sent";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "Pull";
-            };
-          };
+          inbox = { patterns = [ "INBOX" ]; extraConfig = { CopyArrivalDate = "yes"; Sync = "All"; }; };
+          all   = { farPattern = farAll;   nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          starred={ farPattern = farStarred; nearPattern = "starred"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          trash = { farPattern = farTrash; nearPattern = "trash";   extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          sent  = { farPattern = farSent;  nearPattern = "sent";    extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Pull"; }; };
         };
       };
     };
-  # Build accounts as an attrset so we can reuse it (mu init, etc.)
+
   mailAccounts = {
-    gmail = gmailAccount "gmail" "behaghel@gmail.com" "en" // {
-      primary = true;
+    gmail = mkGmailAccount {
+      name = "gmail"; email = "behaghel@gmail.com"; lang = "en";
+      authMechs = "PLAIN";
       passwordCommand = "${pkgs.pass}/bin/pass online/gmail/token";
-    };
-    "behaghel.fr" = gmailAccount "behaghel.fr" "hubert@behaghel.fr" "fr" // {
-      primary = false;
+    } // { primary = true; };
+
+    "behaghel.fr" = mkGmailAccount {
+      name = "behaghel.fr"; email = "hubert@behaghel.fr"; lang = "fr";
+      authMechs = "PLAIN";
       passwordCommand = "${pkgs.pass}/bin/pass online/behaghel.fr/token";
-    };
-    "behaghel.org" = emailAccountDefault "hubert@behaghel.org" // {
-      primary = false;
-      userName = "behaghel@mailfence.com";
+    } // { primary = false; };
+
+    "behaghel.org" = (mkBaseAccount {
+      address = "hubert@behaghel.org";
+      # Mailfence IMAP username is the local part only (per provider docs)
+      userName = "behaghel";
+      authMechs = "PLAIN";
       passwordCommand = "${pkgs.pass}/bin/pass online/mailfence.com";
+      imap = { host = "imap.mailfence.com"; port = 993; tls.enable = true; };
+      smtp = { host = "smtp.mailfence.com"; port = 465; tls.enable = true; };
+    }) // {
+      primary = false;
       aliases = ["behaghel@mailfence.com"];
       gpg.signByDefault = true;
-      imap = {
-        host = "imap.mailfence.com";
-        port = 993;
-        tls = {
-          enable = true;
-        };
-      };
-      smtp = {
-        host = "smtp.mailfence.com";
-        port = 465;
-        tls = {
-          enable = true;
-        };
-      };
       mbsync = {
-        enable = true;
-        create = "maildir";
-        remove = "none";
-        expunge = "both";
+        enable = true; create = "maildir"; remove = "none"; expunge = "both";
         groups."behaghel.org".channels = {
-          inbox = {
-            # patterns = [ "*" "INBOX" "!Spam?" "!Sent Items" "!Archive" "!Trash" "!Drafts" ];
-            patterns = [ "INBOX" ];
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Sync = "All";
-            };
-          };
-          archive = {
-            farPattern = "Archive";
-            nearPattern = "archive";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "All";
-            };
-          };
-          trash = {
-            farPattern = "Trash";
-            nearPattern = "trash";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "All";
-            };
-          };
-          sent = {
-            farPattern = "Sent Items";
-            nearPattern = "sent";
-            extraConfig = {
-              CopyArrivalDate = "yes";
-              Create = "Near";
-              Sync = "All";
-            };
-          };
+          inbox = { patterns = [ "INBOX" ]; extraConfig = { CopyArrivalDate = "yes"; Sync = "All"; }; };
+          archive = { farPattern = "Archive"; nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          trash = { farPattern = "Trash"; nearPattern = "trash"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          sent = { farPattern = "Sent Items"; nearPattern = "sent"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
         };
+        extraConfig = { account = { TLSType = "IMAPS"; }; };
       };
     };
+
+    work = mkGmailAccount {
+      name = "work"; email = "hubert.behaghel@veriff.net"; lang = "en";
+      authMechs = "XOAUTH2";
+      passwordCommand = "OAUTH_PASS_PREFIX=veriff/mail ${gmailOAuthHelper}/bin/gmail-oauth2-token token";
+    } // { primary = false; };
   };
+
 
   maildir = "${config.home.homeDirectory}/Mail";
   myAddressArgs = with lib; let
     addrs = map (a: a.address) (attrValues mailAccounts);
   in concatStringsSep " " (map (a: "--my-address ${escapeShellArg a}") addrs);
+
+  # One-shot handler to run on new mail for 'work'
+  mailOnNewWork = pkgs.writeShellApplication {
+    name = "mail-on-new-work";
+    runtimeInputs = [ pkgs.isync pkgs.mu pkgs.coreutils ];
+    text = ''
+      set -eu
+      mbsync -a work
+      ${pkgs.mu}/bin/mu index --maildir="${maildir}/work"
+    '';
+  };
 
   # Helper to obtain an OAuth2 access token from a stored refresh token
   # Reads secrets from pass(1): defaults to prefix 'online/work-gmail'
@@ -268,7 +212,8 @@ in {
     home.packages = with pkgs; [
       mu
       gmailOAuthHelper
-    ];
+      goimapnotify
+    ] ++ [ mailOnNewWork ];
     programs = {
       # at activation it want to init db
       # but mu isn't in the path => home package instead
@@ -285,30 +230,57 @@ SyncState "*"
       };
     };
 
+    # goimapnotify config for 'work' (XOAUTH2). Triggers our oneshot service on new mail.
+    home.file.".config/goimapnotify/work.yml" = {
+      text = ''
+        host: imap.gmail.com
+        port: 993
+        tls: true
+        username: hubert.behaghel@veriff.net
+        auth: XOAUTH2
+        # Command must output a raw access token; the XOAUTH2 mech will build the SASL payload
+        passwordcmd: "OAUTH_PASS_PREFIX=veriff/mail ${gmailOAuthHelper}/bin/gmail-oauth2-token token"
+        mailboxes:
+          - name: INBOX
+            onNewMail: "systemctl --user start mail-on-new-work.service"
+        # Optional keepalive; Gmail may drop idle around 29m
+        idleTimeout: 29m
+        keepAlive: 5m
+      '';
+    };
+
+    # Long-running IDLE client for work account
+    systemd.user.services."imap-idle-work" = {
+      Unit = {
+        Description = "IMAP IDLE for work (goimapnotify)";
+        After = [ "network-online.target" ];
+        Wants = [ "network-online.target" ];
+      };
+      Service = {
+        Type = "simple";
+        ExecStart = "${pkgs.goimapnotify}/bin/goimapnotify -conf ${config.home.homeDirectory}/.config/goimapnotify/work.yml";
+        Restart = "always";
+        RestartSec = 5;
+      };
+      Install = { WantedBy = [ "default.target" ]; };
+    };
+
+    # One-shot handler to run on new mail
+    systemd.user.services."mail-on-new-work" = {
+      Unit = { Description = "On new mail (work): fetch + index"; };
+      Service = {
+        Type = "oneshot";
+        ExecStart = "${mailOnNewWork}/bin/mail-on-new-work";
+      };
+      Install = { WantedBy = [ ]; };
+    };
+
 
     accounts.email = {
       maildirBasePath = maildir;
-      accounts = mailAccounts // {
-        # Professional Gmail (work): XOAUTH2 via helper script
-        work = let
-          base = gmailAccount "work" "hubert.behaghel@veriff.net" "en";
-        in lib.recursiveUpdate base {
-          primary = false;
-          # Use XOAUTH2 initial response with your pass prefix 'veriff/mail'
-          passwordCommand = "OAUTH_PASS_PREFIX=veriff/mail ${gmailOAuthHelper}/bin/gmail-oauth2-token xoauth2 hubert.behaghel@veriff.net";
-          imap = {
-            host = "imap.gmail.com";
-            port = 993;
-            tls.enable = true;
-          };
-          mbsync = {
-            extraConfig = {
-              account = { AuthMechs = "XOAUTH2"; };
-            };
-          };
-        };
-      };
+      accounts = mailAccounts;
     };
+
 
     # Periodic sync + index using systemd -- user units
     systemd.user.services.mail-sync = {

@@ -1,4 +1,9 @@
-{ pkgs, config, lib, ... }:
+{
+  pkgs,
+  config,
+  lib,
+  ...
+}:
 with lib;
 
 {
@@ -25,23 +30,23 @@ with lib;
 
     # stolen: https://github.com/mjlbach/nix-dotfiles/blob/master/home-manager/modules/cli.nix
     initContent = ''
-        # Emacs tramp mode compatibility
-        [[ $TERM == "tramp" ]] && unsetopt zle && PS1='$ ' && return
-        # password-store completion broken
-        fpath=(${pkgs.pass}/share/zsh/site-functions $fpath)
-        source ~/.aliases
-        for i in ~/.config/profile.d/*.profile; do
-          source $i
-        done
-        for i in ~/.config/zsh.d/*.zsh; do
-          source $i
-        done
-        bindkey '^ ' autosuggest-accept
-        ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=23'
+      # Emacs tramp mode compatibility
+      [[ $TERM == "tramp" ]] && unsetopt zle && PS1='$ ' && return
+      # password-store completion broken
+      fpath=(${pkgs.pass}/share/zsh/site-functions $fpath)
+      source ~/.aliases
+      for i in ~/.config/profile.d/*.profile; do
+        source $i
+      done
+      for i in ~/.config/zsh.d/*.zsh; do
+        source $i
+      done
+      bindkey '^ ' autosuggest-accept
+      ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=23'
 
-        export -U PATH=~/.nix-profile/bin''${PATH:+:$PATH}
-        export -U PATH=/etc/profiles/per-user/$USER/bin''${PATH:+:$PATH}
-      '';
+      export -U PATH=~/.nix-profile/bin''${PATH:+:$PATH}
+      export -U PATH=/etc/profiles/per-user/$USER/bin''${PATH:+:$PATH}
+    '';
   };
   xdg.configFile."zsh.d/gpg.zsh".source = ./.config/zsh.d/gpg.zsh;
   xdg.configFile."zsh.d/bepo.zsh".source = ./.config/zsh.d/bepo.zsh;

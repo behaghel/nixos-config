@@ -62,9 +62,5 @@
       enableBashIntegration = true;
     };
   };
-  home.activation = {
-    myHomeDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
-                  $DRY_RUN_CMD mkdir -p $HOME/.local/share $HOME/tmp $HOME/ws;  ln -sfn ${pkgs.mu}/share/emacs $HOME/.local/share
-                '';
-  };
+  # No custom symlink for Emacs site-lisp; mu4e is provided via emacsPackages.
 }
