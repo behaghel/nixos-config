@@ -57,6 +57,7 @@ in
   programs.emacs = {
     enable = true;
     package = pkgs.emacs-unstable;
+    # Install mu4e from emacsPackages (nixpkgs builds it to match pkgs.mu)
     extraPackages = epkgs: [ epkgs.mu4e ];
   };
 
@@ -72,6 +73,7 @@ in
     icon = "emacs";
     type = "Application";
     terminal = false;
+    startupNotify = true;
     categories = [ "Development" "TextEditor" ];
     mimeType = [
       "text/english"
@@ -90,6 +92,20 @@ in
       "text/x-c"
       "text/x-c++"
     ];
+  };
+
+  # Optional: a desktop entry for emacsclient (connects to daemon)
+  xdg.desktopEntries.emacsclient = {
+    name = "Emacs Client";
+    genericName = "Text Editor";
+    comment = "Edit text using a running Emacs server";
+    exec = "emacsclient -c -a \"\" %F";
+    icon = "emacs";
+    type = "Application";
+    terminal = false;
+    startupNotify = true;
+    categories = [ "Development" "Utility" "TextEditor" ];
+    mimeType = [ "text/plain" ];
   };
 
   # Auto-setup on activation if .emacs.d doesn't exist
