@@ -1,4 +1,4 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, config, ... }:
 
 # TODO: it's not really bash, it's shell, a precursor to any shell env
 # currently if I enable my zsh module without this, it breaks it
@@ -10,15 +10,16 @@
   home.file.".lesskey".source = ./.lesskey;
   home.file.".ctags".source = ./.ctags;
   home.file.".aliases".source = ./.aliases;
+  xdg.configFile."profile.d/editor.profile".source = ./.config/profile.d/editor.profile;
   xdg.configFile."profile.d/hub.profile".source = ./.config/profile.d/hub.profile;
   xdg.configFile."profile.d/zz_path.profile".source = ./.config/profile.d/zz_path.profile;
   xdg.configFile."profile.d/dark_theme.profile".source = ./.config/profile.d/dark_theme.profile;
 
   programs.bash.profileExtra = let
     sysBin = "/nix/var/nix/profiles/default/bin";
-    usrBin =
-      "/etc/profiles/per-user/$USER/bin";
+    usrBin = "/etc/profiles/per-user/$USER/bin";
   in ''
+        # Ensure system and per-user profiles are present
         case :$PATH: in
           *:${sysBin}:*)  ;;  # do nothing
           *) PATH=${sysBin}:$PATH ;;
@@ -29,6 +30,19 @@
         esac
         export PATH
       '';
+
+  # Editor defaults
+  # NOTE: We set session vars and ship profile.d/editor.profile so shells pick up
+  # the emacsclient preferences even if hm-session-vars was already sourced.
+  home.sessionVariables = {
+    # Prefer the daemon-backed client in terminals; fall back to a new frame elsewhere
+    EDITOR = "emacsclient -t";
+    VISUAL = "emacsclient -c -a ''";
+    # Allow emacsclient to start a new server if the daemon isn't up yet
+    ALTERNATE_EDITOR = "";
+    # Make Git use the terminal client explicitly
+    GIT_EDITOR = "emacsclient -t";
+  };
 
   # Platform-independent terminal setup
   home.packages = with pkgs;

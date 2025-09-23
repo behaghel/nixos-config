@@ -61,6 +61,14 @@ in
     extraPackages = epkgs: [ epkgs.mu4e ];
   };
 
+  # Use Home Manager's built-in Emacs user service (daemon)
+  services.emacs = {
+    enable = true;
+    package = pkgs.emacs-unstable;
+    # Session defaults handled in modules/home/shell/default.nix
+    defaultEditor = false;
+  };
+
   # Add the setup script to your environment
   home.packages = [ emacs-config-setup ];
 
