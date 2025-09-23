@@ -91,8 +91,14 @@
       unbind -n M-.
       bind -n M-. copy-mode     # enter copy-mode
 
+      # Toggle zoom for the active pane (acts like full-screen for the window)
+      bind f resize-pane -Z
+
       # Rename current window with prefix + l
       bind l command-prompt -I "#W" "rename-window '%%'"
+
+      # Enter copy-mode directly with Alt-Enter (avoids using the prefix)
+      bind -n M-Enter copy-mode
 
       # Extra paste shortcut: prefix + Ctrl-y
       bind C-y paste-buffer
