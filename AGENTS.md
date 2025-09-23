@@ -46,10 +46,17 @@
 ## Mail Module Notes
 - Gmail folders are locale-specific: this repo intentionally respects per‑account Gmail IMAP folder names based on the account language (e.g., French: `[Gmail]/Messages envoy&AOk-s`, `[Gmail]/Corbeille`, `[Gmail]/Brouillons`; English: `[Gmail]/Sent Mail`, `[Gmail]/Trash`, `[Gmail]/Draft[s]`).
 - Modified UTF‑7: IMAP folder names seen in logs/config may appear in IMAP Modified UTF‑7 (e.g., `envoy&AOk-s`). This is expected and handled by isync/mbsync.
-- XDG config: `mbsync` uses `~/.config/isyncrc` (XDG). The sync job calls `mbsync -c ~/.config/isyncrc` explicitly; `~/.mbsyncrc` is not used.
+- XDG config: `mbsync` uses `~/.config/isyncrc` (XDG). Our jobs rely on the default lookup; we do not pass `-c` explicitly.
+- mbsync CLI targeting: `-a` means "all channels/groups", not "account". To sync a single account in this repo, call `mbsync <accountName>` which matches the group we generate (e.g., `mbsync work`).
 - mu indexing: The periodic sync job runs `mbsync` only to avoid lock contention with Emacs/mu4e. If you want a separate `mu index` timer, add it explicitly (disabled by default).
 
 ## Nix String Interpolation Tips
 - Shell vars inside Nix strings: use `''${VAR}` to avoid Nix interpolation. Example: `if [ "''${FLAG-}" = 1 ]; then ... fi`.
 - Embed Nix expressions once: don’t double‑interpolate variables inside `${ ... }`. Correct: `export PATH=${lib.makeBinPath [ pkgs.foo myTool ]}:"$PATH"` (note `myTool`, not `${myTool}` inside the list).
 - Mixed example (mail sync): `export PATH=${lib.makeBinPath [ isyncWithGsasl pkgs.mu ]}:"$PATH"` and later `"${isyncWithGsasl}/bin/mbsync" ...`.
+
+## Shell Scripting Notes
+- Booleans: avoid constant tests like `[ "1" = "true" ]`. Use a runtime flag and test it, for example `FLAG="''${ENV_FLAG:-1}"; if [ -n "''${FLAG}" ]; then ... fi`.
+- Nix → shell interpolation: in Nix strings, escape shell `${...}` as `''${...}` so Nix doesn’t try to interpolate shell parameters.
+- Job roles: let mu4e own `mu index` to avoid DB lock contention; background jobs should focus on fetching (mbsync) and optional notifications.
+- Logging hygiene: aim for informative one‑line logs; prevent unit failures where practical and surface transient tool errors as warnings.

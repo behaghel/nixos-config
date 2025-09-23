@@ -26,6 +26,12 @@ in
   ];
 
   hub.mail.enable = true;
+  # Enable IMAP IDLE notifier (goimapnotify) for work mailbox
+  hub.mail.imapnotify = {
+    enable = true;
+    accounts = [ "work" ];
+    notify = true;
+  };
 
   home.stateVersion = "24.11";
 }

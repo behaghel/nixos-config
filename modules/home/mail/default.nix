@@ -24,22 +24,29 @@ let
 
   mkGmailAccount = { name, email, lang, authMechs, passwordCommand ? null }:
     let
-      farSent    = if lang == "fr" then "[Gmail]/Messages envoy&AOk-s" else "[Gmail]/Sent Mail";
+      farSent    = if lang == "fr" then "[Gmail]/Messages envoyés" else "[Gmail]/Sent Mail";
       farTrash   = if lang == "fr" then "[Gmail]/Corbeille"             else "[Gmail]/Trash";
       farStarred = if lang == "fr" then "[Gmail]/Important"             else "[Gmail]/Starred";
       farAll     = if lang == "fr" then "[Gmail]/Tous les messages"      else "[Gmail]/All Mail";
+      farSpam    = "[Gmail]/Spam";
       base = mkBaseAccount { address = email; userName = email; inherit authMechs passwordCommand; };
     in base // {
       flavor = "gmail.com";
       imap = { host = "imap.gmail.com"; port = 993; tls.enable = true; };
+      smtp = { host = "smtp.gmail.com"; port = 465; tls.enable = true; };
+      msmtp = (base.msmtp or { }) // {
+        enable = true;
+        extraConfig = lib.optionalAttrs (lib.strings.hasInfix "XOAUTH2" authMechs) { auth = "oauthbearer"; };
+      };
       mbsync = (base.mbsync or { }) // {
         enable = true; create = "maildir"; remove = "none"; expunge = "both";
         groups.${name}.channels = {
-          inbox = { patterns = [ "INBOX" ]; extraConfig = { CopyArrivalDate = "yes"; Sync = "All"; }; };
-          all   = { farPattern = farAll;   nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
-          starred={ farPattern = farStarred; nearPattern = "starred"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
-          trash = { farPattern = farTrash; nearPattern = "trash";   extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
-          sent  = { farPattern = farSent;  nearPattern = "sent";    extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Pull"; }; };
+          inbox  = { patterns = [ "INBOX" ];                           extraConfig = { CopyArrivalDate = "yes"; Sync = "All"; }; };
+          all    = { farPattern = farAll;      nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          starred= { farPattern = farStarred;  nearPattern = "starred"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          trash  = { farPattern = farTrash;    nearPattern = "trash";   extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          sent   = { farPattern = farSent;     nearPattern = "sent";    extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Pull"; }; };
+          spam   = { farPattern = farSpam;     nearPattern = "spam";    extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Push"; }; };
         };
       };
     };
@@ -76,6 +83,7 @@ let
           archive = { farPattern = "Archive"; nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
           trash = { farPattern = "Trash"; nearPattern = "trash"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
           sent = { farPattern = "Sent Items"; nearPattern = "sent"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          spam = { farPattern = "Spam?"; nearPattern = "spam"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Push"; }; };
         };
         extraConfig = { account = { TLSType = "IMAPS"; }; };
       };
@@ -94,18 +102,8 @@ let
     addrs = map (a: a.address) (attrValues mailAccounts);
   in concatStringsSep " " (map (a: "--my-address ${escapeShellArg a}") addrs);
 
-  # One-shot handler to run on new mail for 'work'
-  mailOnNewWork = pkgs.writeShellApplication {
-    name = "mail-on-new-work";
-    runtimeInputs = [ pkgs.isync pkgs.mu pkgs.coreutils ];
-    text = ''
-      set -eu
-      # Silence Cyrus SASL XOAUTH2 debug chatter
-      export SASL_LOG_LEVEL=0
-      mbsync -a work
-      ${pkgs.mu}/bin/mu index --maildir="${maildir}/work"
-    '';
-  };
+  # IDLE handler moved to modules/home/mail/imapnotify.nix
+
 
   # Helper to obtain an OAuth2 access token from a stored refresh token
   # Reads secrets from pass(1): defaults to prefix 'online/work-gmail'
@@ -167,7 +165,6 @@ let
     '';
   };
 
-  isyncrcPath = (config.xdg.configHome or "${config.home.homeDirectory}/.config") + "/isyncrc";
   syncScript = pkgs.writeShellScript "mail-sync" ''
     set -eu
     if [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then set -x; fi
@@ -190,13 +187,19 @@ let
     # Ensure maildir exists
     mkdir -p "${maildir}"
 
-    # 1) fetch mail (explicit config path to avoid ambiguity warnings)
-    "$MBSYNC_BIN" -c "${isyncrcPath}" -a || true
+    # 1) fetch mail using default config resolution
+    "$MBSYNC_BIN" -a || true
+
+    # stamp last successful attempt time (regardless of mbsync exit)
+    STAMP_DIR="${config.xdg.cacheHome or (config.home.homeDirectory + "/.cache")}/mail-sync"
+    mkdir -p "$STAMP_DIR"
+    date +%s >"$STAMP_DIR/last"
 
     # mu indexing is intentionally left to mu4e/Emacs to avoid lock contention.
     # If needed, create a separate timer to run `mu index` out-of-band.
   '';
 in {
+  imports = [ ./imapnotify.nix ];
   options = {
     hub.mail = {
       enable = mkOption {
@@ -216,8 +219,7 @@ in {
     home.packages = with pkgs; [
       mu
       gmailOAuthHelper
-      goimapnotify
-    ] ++ [ mailOnNewWork ];
+    ];
     programs = {
       # at activation it want to init db
       # but mu isn't in the path => home package instead
@@ -234,51 +236,7 @@ SyncState "*"
       };
     };
 
-    # goimapnotify config for 'work' (XOAUTH2). Triggers our oneshot service on new mail.
-    home.file.".config/goimapnotify/work.yml" = {
-      text = ''
-        host: imap.gmail.com
-        port: 993
-        tls: true
-        username: hubert.behaghel@veriff.net
-        auth: XOAUTH2
-        # Command must output a raw access token; the XOAUTH2 mech will build the SASL payload
-        passwordcmd: "OAUTH_PASS_PREFIX=veriff/mail ${gmailOAuthHelper}/bin/gmail-oauth2-token token"
-        mailboxes:
-          - name: INBOX
-            onNewMail: "systemctl --user start mail-on-new-work.service"
-        # Optional keepalive; Gmail may drop idle around 29m
-        idleTimeout: 29m
-        keepAlive: 5m
-      '';
-    };
-
-    # Long-running IDLE client for work account
-    systemd.user.services."imap-idle-work" = {
-      Unit = {
-        Description = "IMAP IDLE for work (goimapnotify)";
-        After = [ "network-online.target" ];
-        Wants = [ "network-online.target" ];
-      };
-      Service = {
-        Type = "simple";
-        ExecStart = "${pkgs.goimapnotify}/bin/goimapnotify -conf ${config.home.homeDirectory}/.config/goimapnotify/work.yml";
-        Restart = "always";
-        RestartSec = 5;
-      };
-      Install = { WantedBy = [ "default.target" ]; };
-    };
-
-    # One-shot handler to run on new mail
-    systemd.user.services."mail-on-new-work" = {
-      Unit = { Description = "On new mail (work): fetch + index"; };
-      Service = {
-        Type = "oneshot";
-        ExecStart = "${mailOnNewWork}/bin/mail-on-new-work";
-      };
-      Install = { WantedBy = [ ]; };
-    };
-
+    # goimapnotify moved to modules/home/mail/imapnotify.nix
 
     accounts.email = {
       maildirBasePath = maildir;
@@ -286,20 +244,23 @@ SyncState "*"
     };
 
 
-    # Periodic sync + index using systemd -- user units
+    # Fire-and-forget style sync service, triggered by timer only
     systemd.user.services.mail-sync = {
       Unit = {
         Description = "Fetch mail (mbsync) and index (mu)";
         After = [ "network-online.target" ];
         Wants = [ "network-online.target" ];
+        X-RestartIfChanged = false;
       };
       Service = {
         Type = "oneshot";
         ExecStart = toString syncScript;
       };
-      Install = { WantedBy = [ "default.target" ]; };
+      # Do not hook into default.target; only the timer triggers it.
+      Install = { WantedBy = [ ]; };
     };
 
+    # Timer triggers the mail-sync service periodically
     systemd.user.timers.mail-sync = {
       Unit = { Description = "Periodic mail sync"; };
       Timer = {
@@ -307,6 +268,45 @@ SyncState "*"
         OnUnitActiveSec = cfg.interval;
         Persistent = true;
         Unit = "mail-sync.service";
+      };
+      Install = { WantedBy = [ "timers.target" ]; };
+    };
+
+    # Health check: alert if mail sync appears stale
+    systemd.user.services.mail-sync-health = {
+      Unit = { Description = "Mail sync health check"; }; 
+      Service = {
+        Type = "oneshot";
+        ExecStart = toString (pkgs.writeShellScript "mail-sync-health" ''
+          set -eu
+          cache_dir="${config.xdg.cacheHome or (config.home.homeDirectory + "/.cache")}/mail-sync"
+          stamp="$cache_dir/last"
+          now=$(date +%s)
+          # parse interval like 10m/1h into seconds
+          parse() { s="$1"; case "$s" in *m) echo $(( ''${s%m} * 60 ));; *h) echo $(( ''${s%h} * 3600 ));; *s) echo ''${s%s};; *) echo "$s";; esac; }
+          interval_sec=$(parse "${cfg.interval}") || interval_sec=600
+          # consider stale if older than 3x interval
+          threshold=$(( interval_sec * 3 ))
+          last=0
+          [ -f "$stamp" ] && last=$(cat "$stamp" 2>/dev/null || echo 0)
+          age=$(( now - last ))
+          if [ "$last" -eq 0 ] || [ "$age" -gt "$threshold" ]; then
+            if command -v notify-send >/dev/null 2>&1; then
+              notify-send "📭 Mail sync stale" "Last run: $([ "$last" -eq 0 ] && echo unknown || date -d @"$last")\nAttempting a sync now." -i mail-unread || true
+            fi
+            systemctl --user start mail-sync.service || true
+          fi
+        '');
+      };
+      Install = { WantedBy = [ ]; };
+    };
+    systemd.user.timers.mail-sync-health = {
+      Unit = { Description = "Periodic mail sync health check"; };
+      Timer = {
+        OnBootSec = "5m";
+        OnUnitActiveSec = cfg.interval;
+        Persistent = true;
+        Unit = "mail-sync-health.service";
       };
       Install = { WantedBy = [ "timers.target" ]; };
     };
