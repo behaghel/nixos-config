@@ -1,6 +1,6 @@
 # UNIX Shell
 alias ls="ls --color"
-alias e="emacsclient"
+alias e="emacsclient -a \"\""
 alias p="cd $PROJECTS_DIR"
 alias httpd="ruby -run -e httpd . -p 5000"
 alias lst="tree -Car . | less -r"

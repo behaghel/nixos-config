@@ -97,9 +97,6 @@
       # Rename current window with prefix + l
       bind l command-prompt -I "#W" "rename-window '%%'"
 
-      # Enter copy-mode directly with Alt-Enter (avoids using the prefix)
-      bind -n M-Enter copy-mode
-
       # Extra paste shortcut: prefix + Ctrl-y
       bind C-y paste-buffer
 

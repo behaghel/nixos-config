@@ -32,8 +32,6 @@ with lib;
     initContent = ''
       # Emacs tramp mode compatibility
       [[ $TERM == "tramp" ]] && unsetopt zle && PS1='$ ' && return
-      # password-store completion broken
-      fpath=(${pkgs.pass}/share/zsh/site-functions $fpath)
       source ~/.aliases
       for i in ~/.config/profile.d/*.profile; do
         source $i
@@ -46,6 +44,11 @@ with lib;
 
       export -U PATH=~/.nix-profile/bin''${PATH:+:$PATH}
       export -U PATH=/etc/profiles/per-user/$USER/bin''${PATH:+:$PATH}
+    '';
+    completionInit = ''
+      fpath=(${pkgs.pass}/share/zsh/site-functions $fpath)
+      autoload -Uz compinit
+      compinit
     '';
   };
   xdg.configFile."zsh.d/gpg.zsh".source = ./.config/zsh.d/gpg.zsh;
