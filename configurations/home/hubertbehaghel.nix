@@ -10,6 +10,8 @@ in
     self.homeModules.dev
     self.homeModules.browserpass
     self.homeModules.emacs
+    self.homeModules.dropbox
+    self.homeModules."video-editing"
   ];
   # Defined by /modules/home/me.nix
   # And used all around in /modules/home/*
@@ -26,6 +28,8 @@ in
   ];
 
   hub.mail.enable = true;
+  hub.dropbox.enable = true;
+  hub.videoEditing.enable = true;
   # Enable IMAP IDLE notifier (goimapnotify) for work mailbox
   hub.mail.imapnotify = {
     enable = true;

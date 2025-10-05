@@ -13,6 +13,8 @@
     # Enables 'nix run' to activate.
     packages.default = self'.packages.activate;
 
+    checks.video-editing = import ../../tests/video-editing.nix { inherit pkgs; };
+
     # Flake inputs we want to update periodically
     # Run: `nix run .#update`.
     nixos-unified = {

@@ -3,6 +3,10 @@
 
 This directory contains Home Manager modules for user-specific configurations.
 
+## Video Editing Helpers
+
+See `modules/home/video-editing/README.md` for CLI helpers that denoise audio (`video-denoise`) and automatically trim filler words from talking-head footage (`video-trim-fillers`).
+
 ## Emacs Configuration Workflow
 
 The Emacs configuration uses a hybrid approach that preserves Emacs' dynamic philosophy while leveraging Nix flakes for reproducible package management.
