@@ -133,6 +133,10 @@ The TJM major mode should cover:
 4. Concatenate the processed streams into the requested output.
 5. Produce an updated manifest with the effective segments (for auditing) and an optional WebVTT/SRT export for review tools.
 
+Use `--subtitles` to emit a WebVTT file (defaults to `<output>.vtt` when no path is supplied). The generated track is muxed into the MP4 unless you add `--no-subtitle-mux`.
+
+Pass `--preserve-short-gaps <seconds>` to retain intra-source pauses shorter than the provided duration. This helps keep conversational pacing when your edited segments were originally separated by small silences.
+
 Because the manifest references multiple sources, the CLI can also emit **edit decision lists** (EDL/XML) as a debugging output so other NLEs can ingest the same cut.
 
 ## 5. Relationship to Existing Formats
@@ -141,22 +145,75 @@ Because the manifest references multiple sources, the CLI can also emit **edit d
 - `aeneas` outputs JSON with precise alignment; we can convert that JSON to TJM directly.
 - Some tools (e.g., Gentle, WhisperX) also emit word-level JSON—again convertible into TJM without precision loss.
 
-## 6. B-roll Overlays
+## 6. Markers & B-roll Overlays
+
+Marker segments let you label points in the timeline without affecting playback:
+
+```json
+{
+  "id": "mark-001",
+  "kind": "marker",
+  "title": "Chapter 1 – Overview",
+  "notes": "Displayed in the Emacs outline"
+}
+```
+
+- `kind = "marker"` tells renderers/editors this entry is non-destructive.
+- `title` (or `text`) is what `video-text-edit` prints alongside the timestamp after rendering.
+- Markers inherit their timestamp from the cumulative runtime that precedes them; optional `start`/`source` fields can still be used by editors for navigation but are not required.
+- Marker entries coexist with ordinary segments; the main pipeline ignores them during trimming/concatenation while continuing to honour short-gap preservation rules.
 
 The `broll` object lets editors specify replacement visuals on a per-segment basis. Syntax sketch:
 
 ```json
 "broll": {
   "file": "broll/team-celebration.mp4",
-  "mode": "replace",
-  "audio": "source",        // keep original narration
-  "start_offset": 1.2,        // optional offset into the b-roll clip
-  "duration": 5.0,            // optional explicit duration
+  "mode": "pip",
+  "audio": "source",          // keep original narration
+  "start_offset": "0:00:01.200", // optional offset (number or string)
+  "duration": 5.0,              // optional explicit duration (number or string)
+  "still": false,               // set true to treat file as a single-frame image
+  "continue": false,            // when true on the following segment, keep playing
   "position": {"x": 0.05, "y": 0.05, "width": 0.3} // for picture-in-picture
 }
 ```
 
-The CLI can interpret these to build the appropriate FFmpeg filter graph (overlay filters, scaling, muting, etc.). Tags (`tags: ["broll"]`) can drive conditional behaviour inside Emacs (e.g., highlight segments needing overlay footage).
+The CLI can interpret these to build the appropriate FFmpeg filter graph (overlay filters, scaling, muting, etc.). When `still` is true the renderer loops the image for the segment duration and normalises its frame rate/format before substitution. `mode = "pip"` scales the asset according to `position.width` and overlays it at `position.x`/`position.y` (fractions of the frame), defaulting to the original narration unless `audio = "broll"`. Set `continue = true` on the subsequent segment to keep the same b-roll file/mode running without restarting it (useful for long overlays split across text edits). Tags (`tags: ["broll"]`) can drive conditional behaviour inside Emacs (e.g., highlight segments needing overlay footage).
+
+Markers can drive b-roll too. Provide a `broll` block plus an explicit `duration` (or `broll.duration`) and `video-text-edit` renders the overlay for that many seconds even though the marker itself carries no source footage. This is how we cover intro/outro cards: create a marker segment with `title`, point it at the reusable overlay, and let the renderer drop the prepared clip into the timeline while still printing the marker timestamp in the log.
+
+Each `broll` entry also accepts:
+
+- `placeholders`: a map of dynamic strings that b-roll templates can render (e.g., `{ "title": "Weekly Update", "date": "2025-03-17" }`).
+- `overlays`: optional drawtext instructions attached inline when you want to keep the metadata local to the manifest.
+
+To promote reuse, the `file` attribute may reference a JSON template instead of a media asset. Template files ship the static rendering recipe:
+
+```jsonc
+{
+  "template": "broll/intro.mp4",
+  "overlays": [
+    { "placeholder": "title", "font": "~/.fonts/IBMPlexSans-Bold.ttf", "x": "(w-text_w)/2", "y": "h*0.62", "fontsize": 92, "color": "white" },
+    { "placeholder": "date", "font": "~/.fonts/IBMPlexSans-Regular.ttf", "x": "(w-text_w)/2", "y": "h*0.72", "fontsize": 52, "color": "0x9AA5B1" }
+  ],
+  "placeholders": { "title": "Placeholder Title", "date": "2025-01-01" }
+}
+```
+
+Editors then override the fields they care about from the manifest:
+
+```json
+"broll": {
+  "file": "templates/intro-card.json",
+  "duration": 6,
+  "placeholders": {
+    "title": "Release 1.7 Highlights",
+    "date": "2025-03-17"
+  }
+}
+```
+
+Templates can still be customised per segment by setting `overlays`/`placeholders` directly in the manifest; those values override the defaults from the template. This makes it possible to reuse intro/outro layouts while swapping text for each video and keeps placeholder handling consistent across talking-head segments and marker cards.
 
 ## 7. Next Steps
 

@@ -10,17 +10,20 @@ pkgs.writeShellApplication {
 
     usage() {
       cat <<'USAGE'
-Usage: video-denoise [-m model-path] [-f extra-filter] INPUT [OUTPUT]
+Usage: video-denoise [-m model-path] [-f extra-filter] [-C] INPUT [OUTPUT]
 
 Apply RNNoise-based denoising to the primary audio stream of INPUT.
 When OUTPUT is omitted, the result is written next to INPUT using the pattern
 <basename>.denoise.<ext> (or <basename>.denoise if no extension).
-When INPUT is a video, the video stream is copied untouched and only audio is processed.
+
+By default the video stream is re-encoded (libx264) so audio/video timestamps stay in sync.
+Pass -C to copy the original video stream instead.
 
 Options:
   -m MODEL   Optional RNNoise model path passed to ffmpeg's arnndn filter.
              Defaults to ARNNDN_MODEL env var or the module's configured default.
   -f FILTER  Additional ffmpeg audio filters to append after denoising.
+  -C         Copy the original video stream instead of re-encoding it.
   -h         Show this help.
 USAGE
     }
@@ -28,11 +31,13 @@ USAGE
     default_model="${defaultModelPath}"
     model="''${ARNNDN_MODEL-}"
     extra_filter=""
+    copy_video=0
 
-    while getopts ":m:f:h" opt; do
+    while getopts ":m:f:hC" opt; do
       case "''${opt}" in
         m) model="''${OPTARG}" ;;
         f) extra_filter="''${OPTARG}" ;;
+        C) copy_video=1 ;;
         h)
           usage
           exit 0
@@ -99,6 +104,8 @@ USAGE
       filter="arnndn=m=''${model}"
     fi
 
+    filter="''${filter},aresample=async=1:first_pts=0"
+
     if [ -n "''${extra_filter}" ]; then
       filter="''${filter},''${extra_filter}"
     fi
@@ -109,12 +116,27 @@ USAGE
     fi
 
     if [ "''${has_video}" -eq 1 ]; then
-      ${ffmpeg}/bin/ffmpeg \
-        -y -i "''${input}" \
-        -filter:a "''${filter}" \
-        -c:v copy \
-        -c:a aac \
-        "''${output}"
+      if [ "''${copy_video}" -eq 1 ]; then
+        ${ffmpeg}/bin/ffmpeg \
+          -y -i "''${input}" \
+          -filter:a "''${filter}" \
+          -c:v copy \
+          -vsync passthrough \
+          -c:a aac \
+          -movflags +faststart \
+          "''${output}"
+      else
+        ${ffmpeg}/bin/ffmpeg \
+          -y -i "''${input}" \
+          -filter:a "''${filter}" \
+          -c:v libx264 \
+          -preset medium \
+          -crf 18 \
+          -pix_fmt yuv420p \
+          -c:a aac \
+          -movflags +faststart \
+          "''${output}"
+      fi
     else
       ${ffmpeg}/bin/ffmpeg \
         -y -i "''${input}" \

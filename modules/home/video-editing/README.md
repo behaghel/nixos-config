@@ -8,7 +8,7 @@ This Home Manager module installs CLI helpers aimed at streamlining quick post-p
 - `video-trim-fillers` – transcribe audio with `faster-whisper`, drop filler words from the timeline, and re-encode the result.
 - `video-batch` – orchestrate the denoise/trim pipeline across one or more files with a single command.
 - `video-transcribe` – generate a multi-source Textual Join Manifest (`.tjm.json`) with per-word timestamps ready for text-based editing.
-- `video-text-edit` – read a TJM file and render a new MP4 that follows the edited segment order (including simple b-roll substitution).
+- `video-text-edit` – read a TJM file, render a new MP4 that follows the edited segment order (including simple b-roll / picture-in-picture substitution), optionally emit/mux WebVTT subtitles, and preserve short intra-source pauses on demand.
 
 ## Usage Examples
 
@@ -16,10 +16,10 @@ This Home Manager module installs CLI helpers aimed at streamlining quick post-p
 ```bash
 video-denoise raw/pocket3_take01.mp4
 ```
-- Audio is denoised with RNNoise.
-- Video is copied (`-c:v copy`), so the process is fast and visually lossless.
+- Audio is denoised with RNNoise; video is re-encoded (libx264, CRF 18) so timestamps stay perfectly in sync.
 - Output defaults to `raw/pocket3_take01.denoise.mp4` (same directory, `.denoise` suffix).
 - Supplying an explicit output path automatically creates its parent directory.
+- Add `-C` if you really want to copy the original video stream; use only when you’re sure the source is constant-frame-rate.
 
 Fine‑tune with an explicit model or extra filters:
 ```bash
@@ -65,10 +65,15 @@ video-transcribe --output transcripts/weekly.tjm.json raw/*.MP4 --model small.en
 
 ### 5. Render edits from a TJM file
 ```bash
-video-text-edit transcripts/weekly-edited.tjm.json --output edits/weekly-cut.mp4
+video-text-edit transcripts/weekly-edited.tjm.json --output edits/weekly-cut.mp4 --subtitles --preserve-short-gaps 0.5
 ```
 - Generates temporary trimmed segments and concatenates them in manifest order.
 - Simple b-roll replacement is supported: set the `broll` object in the manifest to point to an overlay clip (current mode `replace` with `audio` = `source` or `broll`).
+- `--subtitles` writes `edits/weekly-cut.vtt` by default and muxes it into the MP4; pass a path (`--subtitles captions/review.vtt`) or disable muxing with `--no-subtitle-mux`.
+- `--preserve-short-gaps` keeps the original footage for intra-source pauses shorter than the provided number of seconds, which helps retain natural breathing room between segments.
+- TJM `broll` blocks accept numeric or `HH:MM:SS.mmm` offsets; set `still = true` to feed in a single image and the renderer will loop it for the segment duration. `mode = "pip"` scales/overlays the asset at the given `position`, `continue = true` keeps the overlay running into the next segment when it references the same asset/mode, and source audio is used unless you opt into `"audio": "broll"`.
+- Dynamic overlays are supported everywhere a `broll` block appears. Either inline a `placeholders` map plus `overlays` instructions, or point `file` at a JSON template that defines the reusable clip alongside its drawtext layers. Marker segments can reference those templates as well, letting you drop intro/outro cards with per-video text straight from the manifest.
+- Add `kind = "marker"` segments to label chapters. They do not alter media output; `video-text-edit` will list their titles with rendered timestamps at the end of the run.
 
 ## Configuration Knobs
 
