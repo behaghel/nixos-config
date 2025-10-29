@@ -1,10 +1,17 @@
 
 { pkgs, flake, ... }:
 
+let
+  firefoxPackage =
+    if pkgs.stdenv.isDarwin then pkgs.firefox-bin else pkgs.firefox;
+  nurNoPkgs = import flake.inputs.nur {
+    nurpkgs = import flake.inputs.nixpkgs { system = pkgs.stdenv.hostPlatform.system; };
+  };
+in
 {
   programs.firefox = {
     enable = true;
-    package = pkgs.nivApps.Firefox;
+    package = firefoxPackage;
     profiles =
       let settings = {
             "app.update.auto" = true;
@@ -13,10 +20,7 @@
             # reopen windows and tabs on startup
             "browser.startup.page" = 3;
           };
-          nur-no-pkgs = import flake.inputs.nur {
-            nurpkgs = import flake.inputs.nixpkgs { system = "aarch64-darwin"; };
-          };
-          extensions = with nur-no-pkgs.repos.rycee.firefox-addons; [
+          extensions = with nurNoPkgs.repos.rycee.firefox-addons; [
             ublock-origin
             browserpass
             org-capture

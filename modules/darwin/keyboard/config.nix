@@ -27,6 +27,7 @@
             "Keyboard Left Alt" = "Keyboard Left GUI";
             # altgr
             "Keyboard Right GUI" = "Keyboard Right Alt";
+            "Keyboard Right Alt" = "Keyboard Right GUI";
           } // commonMappings;
       }
     ];

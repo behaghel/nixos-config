@@ -29,7 +29,6 @@ in
       ../../modules/home/emacs
       ../../modules/home/password-store
       ../../modules/home/dircolors
-      ../../modules/home/macos-apps
     ];
   };
 }

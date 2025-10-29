@@ -21,7 +21,6 @@ in
     ./zsh-completion-fix.nix
     ./keyboard
     ./system-defaults.nix
-    ./skhd
-    ./nivApps
+    ./homebrew-apps.nix
   ];
 }

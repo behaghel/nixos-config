@@ -3,6 +3,14 @@
 with lib;
 let
   cfg = attrByPath [ "services" "local-modules" "nix-darwin" "keyboard" ] { } config;
+  cfgMappingsList =
+    if cfg.mappings == null then
+      [ ]
+    else if builtins.isList cfg.mappings then
+      cfg.mappings
+    else
+      [ cfg.mappings ];
+  hasDeviceMappings = cfgMappingsList != [ ];
 
   globalKeyMappings = { }
     // (if cfg.remapCapsLockToControl then { "Keyboard Caps Lock" = "Keyboard Left Control"; } else { })
@@ -99,6 +107,12 @@ in
       description = "Whether to remap the Tilde key on non-us keyboards.";
     };
 
+    services.local-modules.nix-darwin.keyboard.bepo.enable = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Install the bépo keyboard layout and make it the default input source.";
+    };
+
     services.local-modules.nix-darwin.keyboard.mappings = mkOption {
       type = types.nullOr (types.either mappingOptions (types.listOf mappingOptions));
       default = null;
@@ -134,7 +148,8 @@ in
     };
   };
 
-  config = {
+  config = mkMerge [
+    {
 
     assertions =
       let
@@ -145,7 +160,7 @@ in
       in
       (
         flatten
-          (optionals (cfg.mappings != null)
+          (optionals hasDeviceMappings
             (
               map
                 ({ productId, mappings, ... }:
@@ -157,7 +172,7 @@ in
                     mappings
                   )
                 )
-                cfg.mappings
+                cfgMappingsList
             ) ++ (
             mapAttrsToList
               (src: dest: [
@@ -167,8 +182,12 @@ in
               globalKeyMappings
           )) ++ [
           {
-            assertion = !(cfg.mappings != null && (length (attrNames globalKeyMappings) > 0));
+            assertion = !(hasDeviceMappings && (length (attrNames globalKeyMappings) > 0));
             message = "Configuring both global and device-specific key mappings is not reliable, please use one or the other.";
+          }
+          {
+            assertion = !(cfg.remapCapsLockToControl && cfg.remapCapsLockToEscape);
+            message = "Cannot remap Caps Lock to both Control and Escape; pick one.";
           }
         ]
       );
@@ -176,12 +195,12 @@ in
     warnings = [ ]
       ++ (
       optional
-        (!cfg.enableKeyMapping && (cfg.mappings != null || globalKeyMappings != { }))
+        (!cfg.enableKeyMapping && (hasDeviceMappings || globalKeyMappings != { }))
         "services.local-modules.nix-darwin.keyboard.enableKeyMapping is false, keyboard mappings will not be configured."
     )
       ++ (
       optional
-        (cfg.enableKeyMapping && (cfg.mappings == null && globalKeyMappings == { }))
+        (cfg.enableKeyMapping && (!hasDeviceMappings && globalKeyMappings == { }))
         "services.local-modules.nix-darwin.keyboard.enableKeyMapping is true but you have not configured any key mappings."
     );
 
@@ -224,7 +243,7 @@ in
             serviceConfig.RunAtLoad = true;
           });
         }
-      else if (cfg.enableKeyMapping && cfg.mappings != null) then
+      else if (cfg.enableKeyMapping && hasDeviceMappings) then
         (listToAttrs (map
           ({ mappings
            , productId
@@ -285,8 +304,33 @@ in
             serviceConfig.RunAtLoad = true;
           })
           ))
-          cfg.mappings
+          cfgMappingsList
         )) else { };
     services.local-modules.nix-darwin.keyboard = import ./config.nix;
-  };
+    }
+    (mkIf cfg.bepo.enable {
+      home-manager.users.${config.me.username}.home.file."Library/Keyboard Layouts/bepo.keylayout" = {
+        source = ./bepo.keylayout;
+      };
+
+      home-manager.users.${config.me.username}.home.activation.setBepoKeyboardLayout = ''
+        if [ "$(uname -s)" != "Darwin" ]; then
+          exit 0
+        fi
+
+        set -euo pipefail
+
+        defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
+          "InputSourceKind" "Keyboard Layout" \
+          "KeyboardLayout ID" -6538 \
+          "KeyboardLayout Name" "bépo"
+
+        defaults write com.apple.HIToolbox AppleSelectedInputSources -array \
+          '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
+
+        defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
+          '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
+      '';
+    })
+  ];
 }

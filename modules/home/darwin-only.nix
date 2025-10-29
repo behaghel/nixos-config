@@ -1,6 +1,6 @@
 {
   imports = [
-    ./darwin/bepo.nix
-    ./darwin/niv-apps.nix
+    ./darwin/apps.nix
+    ./darwin/aerospace.nix
   ];
 }
