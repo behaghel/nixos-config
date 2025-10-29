@@ -1,5 +1,4 @@
-
-{ pkgs, ... }:
+{ pkgs, lib, ... }:
 let
   # Script to set up Emacs configuration by cloning from GitHub
   emacs-config-setup = pkgs.writeShellApplication {
