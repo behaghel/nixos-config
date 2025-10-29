@@ -6,7 +6,7 @@ let
   openFirefoxProfile = profile:
     "exec-and-forget /usr/bin/open -na ${lib.escapeShellArg "${hmApps}/Firefox.app"} --args -P ${lib.escapeShellArg profile}";
 in
-{
+lib.mkIf pkgs.stdenv.isDarwin {
   home.file.".config/aerospace/aerospace.toml".text = ''
 after-startup-command = []
 start-at-login = false
