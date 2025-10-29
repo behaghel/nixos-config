@@ -9,6 +9,7 @@ let
     "zotero"
     "amazon-kindle"
     "glaxnimate"
+    "ghostty"
     "yubico-yubikey-manager"
     "nikitabobko/tap/aerospace"
   ];
