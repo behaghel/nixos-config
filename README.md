@@ -14,6 +14,17 @@ git config core.hooksPath githooks
 
 Use `nix flake check` to evaluate the defined system configurations and verify formatting.
 
+## Prerequisite: Install Nix
+
+This repository assumes Nix is available before you run any of the `nix run` or `nix develop` commands. The maintainer recommends the [Determinate Systems Nix installer](https://github.com/DeterminateSystems/nix-installer) because it handles multi-user setup cleanly on both macOS and Linux:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
+  | sh -s -- install
+```
+
+Follow the on-screen prompts, restart your shell, and verify with `nix --version`. If you prefer the upstream installer, the official instructions remain at <https://nixos.org/download>.
+
 ## Adding NixOS Host Configurations
 
 To add a new NixOS host configuration to this repository:
@@ -34,6 +45,9 @@ To add a new NixOS host configuration to this repository:
 ## Workflow
 
 This repository follows the [nixos-unified](https://nixos-unified.org/#why) conventions. nixos-unified exposes several `nix run` commands to manage the configuration throughout its life cycle.
+
+### Hardware tokens
+- [YubiKey setup notes](docs/yubikey.md) – ties the upstream drduh guide into this repo’s GnuPG/SSH configuration.
 
 ### Activate
 Run `nix run .#activate` once on a new machine to set up links and defaults.

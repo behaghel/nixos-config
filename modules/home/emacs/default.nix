@@ -72,48 +72,49 @@ in
   # Add the setup script to your environment
   home.packages = [ emacs-config-setup ];
 
-  # Install desktop entry for proper application integration
-  xdg.desktopEntries.emacs = {
-    name = "GNU Emacs";
-    genericName = "Text Editor";
-    comment = "Edit text";
-    exec = "emacs %F";
-    icon = "emacs";
-    type = "Application";
-    terminal = false;
-    startupNotify = true;
-    categories = [ "Development" "TextEditor" ];
-    mimeType = [
-      "text/english"
-      "text/plain"
-      "text/x-makefile"
-      "text/x-c++hdr"
-      "text/x-c++src"
-      "text/x-chdr"
-      "text/x-csrc"
-      "text/x-java"
-      "text/x-moc"
-      "text/x-pascal"
-      "text/x-tcl"
-      "text/x-tex"
-      "application/x-shellscript"
-      "text/x-c"
-      "text/x-c++"
-    ];
-  };
+  # Install desktop entries on Linux platforms only
+  xdg.desktopEntries = lib.mkIf pkgs.stdenv.isLinux {
+    emacs = {
+      name = "GNU Emacs";
+      genericName = "Text Editor";
+      comment = "Edit text";
+      exec = "emacs %F";
+      icon = "emacs";
+      type = "Application";
+      terminal = false;
+      startupNotify = true;
+      categories = [ "Development" "TextEditor" ];
+      mimeType = [
+        "text/english"
+        "text/plain"
+        "text/x-makefile"
+        "text/x-c++hdr"
+        "text/x-c++src"
+        "text/x-chdr"
+        "text/x-csrc"
+        "text/x-java"
+        "text/x-moc"
+        "text/x-pascal"
+        "text/x-tcl"
+        "text/x-tex"
+        "application/x-shellscript"
+        "text/x-c"
+        "text/x-c++"
+      ];
+    };
 
-  # Optional: a desktop entry for emacsclient (connects to daemon)
-  xdg.desktopEntries.emacsclient = {
-    name = "Emacs Client";
-    genericName = "Text Editor";
-    comment = "Edit text using a running Emacs server";
-    exec = "emacsclient -c -a \"\" %F";
-    icon = "emacs";
-    type = "Application";
-    terminal = false;
-    startupNotify = true;
-    categories = [ "Development" "Utility" "TextEditor" ];
-    mimeType = [ "text/plain" ];
+    emacsclient = {
+      name = "Emacs Client";
+      genericName = "Text Editor";
+      comment = "Edit text using a running Emacs server";
+      exec = "emacsclient -c -a \"\" %F";
+      icon = "emacs";
+      type = "Application";
+      terminal = false;
+      startupNotify = true;
+      categories = [ "Development" "Utility" "TextEditor" ];
+      mimeType = [ "text/plain" ];
+    };
   };
 
   # Auto-setup on activation if .emacs.d doesn't exist
