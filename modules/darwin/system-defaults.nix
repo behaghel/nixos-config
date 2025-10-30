@@ -1,6 +1,6 @@
 {pkgs, ...}:
 {
-  security.pam.enableSudoTouchIdAuth = true;
+  security.pam.services.sudo_local.touchIdAuth = true;
   system = {
     # Used for backwards compatibility, please read the changelog before changing.
     # $ darwin-rebuild changelog
@@ -46,6 +46,4 @@
       SoftwareUpdate.AutomaticallyInstallMacOSUpdates = false;
     };
   };
-  # Auto upgrade nix package and the daemon service.
-  services.nix-daemon.enable = true;
 }
