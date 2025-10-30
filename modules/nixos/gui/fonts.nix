@@ -22,7 +22,7 @@
       nerd-fonts.hack
       nerd-fonts.inconsolata
       nerd-fonts.jetbrains-mono
-      nerd-fonts.hasklig
+      nerd-fonts.hasklug
       nerd-fonts.meslo
       nerd-fonts.noto
       font-awesome
