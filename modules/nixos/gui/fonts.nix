@@ -17,10 +17,14 @@
       # coding fonts
       source-sans-pro
       source-serif-pro
-      (nerdfonts.override {
-        enableWindowsFonts = true;
-        fonts = [ "Iosevka" "FiraCode" "Hack" "Inconsolata" "JetBrainsMono" "Hasklig" "Meslo" "Noto" ];
-      })
+      nerd-fonts.iosevka
+      nerd-fonts.fira-code
+      nerd-fonts.hack
+      nerd-fonts.inconsolata
+      nerd-fonts.jet-brains-mono
+      nerd-fonts.hasklig
+      nerd-fonts.meslo
+      nerd-fonts.noto
       font-awesome
     ];
   };
