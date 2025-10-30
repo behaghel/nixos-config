@@ -16,8 +16,8 @@
     pinentry.package = if pkgs.stdenv.isDarwin then pkgs.pinentry_mac else pkgs.pinentry-gtk2;
     extraConfig = lib.mkAfter ''
       enable-ssh-support
-      # Touch-required authentication is handled on the token. Leave commented if you want defaults.
-      # use-standard-socket
+      allow-loopback-pinentry
+      use-standard-socket
     '';
   };
 }
