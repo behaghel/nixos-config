@@ -10,6 +10,8 @@ let
     "amazon-kindle"
     "glaxnimate"
     "ghostty"
+    "iterm2"
+    "notunes"
     "yubico-yubikey-manager"
     "nikitabobko/tap/aerospace"
   ];

@@ -6,17 +6,13 @@ lib.mkIf pkgs.stdenv.isDarwin (
   in
   {
     home.packages =
-      (with pkgs;
-        [
-          terminal-notifier
-          coreutils
-          glaxnimate
-          yubikey-manager
-          yubikey-personalization
-          notunes
-          iterm2
-        ]
-      )
+      (with pkgs; [
+        terminal-notifier
+        coreutils
+        glaxnimate
+        yubikey-manager
+        yubikey-personalization
+      ])
       ++ lib.optional ghosttyAvailable ghosttyPkg;
   }
 )
