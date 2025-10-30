@@ -17,14 +17,14 @@
       # coding fonts
       source-sans-pro
       source-serif-pro
-      nerd-fonts.iosevka
-      nerd-fonts.fira-code
-      nerd-fonts.hack
-      nerd-fonts.inconsolata
-      nerd-fonts.jetbrains-mono
-      nerd-fonts.hasklug
-      nerd-fonts.meslo
-      nerd-fonts.noto
+      nerd-fonts.Iosevka
+      nerd-fonts.FiraCode
+      nerd-fonts.Hack
+      nerd-fonts.Inconsolata
+      nerd-fonts.JetBrainsMono
+      nerd-fonts.Hasklig
+      nerd-fonts.Meslo
+      nerd-fonts.Noto
       font-awesome
     ];
   };
