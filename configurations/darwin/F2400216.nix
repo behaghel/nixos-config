@@ -11,6 +11,7 @@ in
   ];
 
   nixpkgs.hostPlatform = "aarch64-darwin";
+  nixpkgs.config.allowUnfree = true;
   networking.hostName = "F2400216";
 
   system.stateVersion = 4;
