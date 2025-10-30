@@ -14,6 +14,7 @@ in
   networking.hostName = "F2400216";
 
   system.stateVersion = 4;
+  system.primaryUser = "hubertbehaghel";
 
   environment.systemPackages = [ pkgs.jdk21_headless ];
 }
