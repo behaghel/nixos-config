@@ -1,7 +1,7 @@
 # Configuration common to all macOS systems
 { flake, ... }:
 let
-  inherit (flake) inputs;
+  inherit (flake) inputs config;
   inherit (inputs) self;
 in
 {
@@ -14,6 +14,7 @@ in
   ];
 
   config = {
+    nixpkgs.overlays = import ../../overlays/default.nix { inherit inputs; };
     home-manager.sharedModules = [
       self.homeModules.default
       self.homeModules.darwin-only
