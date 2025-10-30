@@ -21,7 +21,7 @@
       nerd-fonts.fira-code
       nerd-fonts.hack
       nerd-fonts.inconsolata
-      nerd-fonts.jet-brains-mono
+      nerd-fonts.jetbrains-mono
       nerd-fonts.hasklig
       nerd-fonts.meslo
       nerd-fonts.noto
