@@ -1,6 +1,10 @@
 { config, pkgs, lib, ... }:
 let
-  ghosttyBin = lib.getExe pkgs.ghostty;
+  ghosttyPkg = pkgs.ghostty;
+  ghosttyAvailable = !(ghosttyPkg.meta.broken or false);
+  ghosttyCommand =
+    if ghosttyAvailable then lib.getExe ghosttyPkg
+    else "/usr/bin/open -na Ghostty";
   hmApps = "${config.home.homeDirectory}/Applications/Home Manager Apps";
   openApp = app: "exec-and-forget /usr/bin/open -na ${lib.escapeShellArg app}";
   openFirefoxProfile = profile:
@@ -27,9 +31,8 @@ automatically-unhide-macos-hidden-apps = false
     outer.bottom = 0
     outer.top = 0
     outer.right = 0
-
 [mode.main.binding]
-    alt-enter = "exec-and-forget ${ghosttyBin}"
+    alt-enter = "exec-and-forget ${ghosttyCommand}"
     alt-shift-enter = "${openApp "${hmApps}/Kitty.app"}"
     alt-b = "${openFirefoxProfile "home"}"
     alt-shift-b = "${openFirefoxProfile "work"}"
