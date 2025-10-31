@@ -10,6 +10,7 @@ in
     ./zsh-completion-fix.nix
     ./keyboard
     ./system-defaults.nix
+    ./homebrew-apps.nix
   ];
 
   config = {

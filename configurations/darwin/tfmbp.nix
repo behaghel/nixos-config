@@ -21,4 +21,13 @@ in
   myusers = [ "hub" ];
 
   environment.systemPackages = [ pkgs.jdk21_headless ]; # for languagetools from Emacs
+
+  hub.darwin.apps = {
+    enable = true;
+    casks = [
+      "anki"
+      "zotero"
+      "1password"
+    ];
+  };
 }

@@ -23,9 +23,16 @@ in
     pkgs.jdk21_headless
   ];
 
-  homebrew.casks = [
-    "anki"
-    "zotero"
-    "1password"
-  ];
+  hub.darwin.apps = {
+    enable = true;
+    casks = [
+      "anki"
+      "zotero"
+      "1password"
+      "ghostty"
+      "iterm2"
+      "notunes"
+      "vlc"
+    ];
+  };
 }
