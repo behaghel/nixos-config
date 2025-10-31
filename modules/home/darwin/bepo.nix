@@ -26,10 +26,6 @@ in
       /bin/cp "${layoutPath}" "$layout_tmp"
       /bin/mv "$layout_tmp" "$layout_target"
       /usr/bin/xattr -d com.apple.quarantine "$layout_target" 2>/dev/null || true
-
-      PLIST="$HOME/Library/Preferences/com.apple.HIToolbox.plist"
-      PLIST_HOST="$HOME/Library/Preferences/ByHost/com.apple.HIToolbox.$( /usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice | awk -F\\\" '/IOPlatformUUID/{print $(NF-1)}' ).plist"
-
       /usr/bin/defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
         "InputSourceKind" "Keyboard Layout" \
         "KeyboardLayout ID" -6538 \
