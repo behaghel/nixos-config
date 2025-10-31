@@ -16,14 +16,19 @@ Use `nix flake check` to evaluate the defined system configurations and verify f
 
 ## Prerequisite: Install Nix
 
-This repository assumes Nix is available before you run any of the `nix run` or `nix develop` commands. The maintainer recommends the [Determinate Systems Nix installer](https://github.com/DeterminateSystems/nix-installer) because it handles multi-user setup cleanly on both macOS and Linux:
+This repository assumes Nix (or Lix) is available before you run any of the `nix run` or `nix develop` commands. For nix-darwin hosts we recommend the [Lix installer](https://lix.systems/install/), which provides a compatible multi-user setup:
 
 ```bash
-curl --proto '=https' --tlsv1.2 -sSf -L https://install.determinate.systems/nix \
-  | sh -s -- install
+curl --proto '=https' --tlsv1.2 -sSf https://install.lix.systems/lix | sh -s -- install
 ```
 
-Follow the on-screen prompts, restart your shell, and verify with `nix --version`. If you prefer the upstream installer, the official instructions remain at <https://nixos.org/download>.
+If you previously installed Determinate Nix, remove it first:
+
+```bash
+sudo /Library/determinate/uninstaller
+```
+
+After installing Lix, restart your shell and verify with `nix --version`.
 
 ## Adding NixOS Host Configurations
 

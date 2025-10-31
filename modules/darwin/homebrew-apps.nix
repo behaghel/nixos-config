@@ -7,7 +7,6 @@ let
     "anki"
     "vlc"
     "zotero"
-    "kindle"
     "ghostty"
     "iterm2"
     "notunes"

@@ -107,12 +107,6 @@ in
       description = "Whether to remap the Tilde key on non-us keyboards.";
     };
 
-    services.local-modules.nix-darwin.keyboard.bepo.enable = mkOption {
-      type = types.bool;
-      default = false;
-      description = "Install the bépo keyboard layout and make it the default input source.";
-    };
-
     services.local-modules.nix-darwin.keyboard.mappings = mkOption {
       type = types.nullOr (types.either mappingOptions (types.listOf mappingOptions));
       default = null;
@@ -308,29 +302,5 @@ in
         )) else { };
     services.local-modules.nix-darwin.keyboard = import ./config.nix;
     }
-    (mkIf cfg.bepo.enable {
-      home-manager.users.${config.me.username}.home.file."Library/Keyboard Layouts/bepo.keylayout" = {
-        source = ./bepo.keylayout;
-      };
-
-      home-manager.users.${config.me.username}.home.activation.setBepoKeyboardLayout = ''
-        if [ "$(uname -s)" != "Darwin" ]; then
-          exit 0
-        fi
-
-        set -euo pipefail
-
-        defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
-          "InputSourceKind" "Keyboard Layout" \
-          "KeyboardLayout ID" -6538 \
-          "KeyboardLayout Name" "bépo"
-
-        defaults write com.apple.HIToolbox AppleSelectedInputSources -array \
-          '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
-
-        defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
-          '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
-      '';
-    })
   ];
 }

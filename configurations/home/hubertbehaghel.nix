@@ -16,6 +16,7 @@ in
       self.homeModules.linux-only
       self.homeModules.darwin-only
     ];
+  services.local-modules.nix-darwin.keyboard.bepo.enable = true;
 
   # Defined by /modules/home/me.nix
   # And used all around in /modules/home/*
