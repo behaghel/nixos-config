@@ -11,16 +11,20 @@ in
   };
 
   config = lib.mkIf (pkgs.stdenv.isDarwin && cfg.enable) {
-    home.file."Library/Keyboard Layouts/bepo.keylayout" = {
-      source = layoutPath;
-    };
-
-    home.activation.setBepoKeyboardLayout = ''
+    home.activation.installBepoLayout = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
       if [ "$(uname -s)" != "Darwin" ]; then
         exit 0
       fi
 
       set -euo pipefail
+
+      layout_dir="$HOME/Library/Keyboard Layouts"
+      layout_target="$layout_dir/bepo.keylayout"
+      layout_tmp="$layout_target.tmp"
+
+      /bin/mkdir -p "$layout_dir"
+      /bin/cp "${layoutPath}" "$layout_tmp"
+      /bin/mv "$layout_tmp" "$layout_target"
 
       /usr/bin/defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
         "InputSourceKind" "Keyboard Layout" \
@@ -32,6 +36,8 @@ in
 
       /usr/bin/defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
         '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
+
+      /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
     '';
   };
 }
