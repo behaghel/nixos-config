@@ -33,6 +33,7 @@ in
       "iterm2"
       "notunes"
       "vlc"
+      "dropbox"
     ];
   };
 }
