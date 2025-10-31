@@ -22,15 +22,15 @@ in
 
       set -euo pipefail
 
-      defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
+      /usr/bin/defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
         "InputSourceKind" "Keyboard Layout" \
         "KeyboardLayout ID" -6538 \
         "KeyboardLayout Name" "bépo"
 
-      defaults write com.apple.HIToolbox AppleSelectedInputSources -array \
+      /usr/bin/defaults write com.apple.HIToolbox AppleSelectedInputSources -array \
         '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
 
-      defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
+      /usr/bin/defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
         '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
     '';
   };
