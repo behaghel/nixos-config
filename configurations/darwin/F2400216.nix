@@ -19,7 +19,5 @@ in
   # Users provisioned on this host
   myusers = [ "hubertbehaghel" ];
 
-  services.local-modules.nix-darwin.keyboard.bepo.enable = true;
-
   environment.systemPackages = [ pkgs.jdk21_headless ];
 }
