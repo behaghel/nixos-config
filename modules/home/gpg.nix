@@ -11,8 +11,10 @@
     enableSshSupport = true;
     grabKeyboardAndMouse = true;
     enableScDaemon = true;
-    defaultCacheTtl = 7200;
-    defaultCacheTtlSsh = 7200;
+    defaultCacheTtl = 900;
+    defaultCacheTtlSsh = 900;
+    maxCacheTtl = 3600;
+    maxCacheTtlSsh = 3600;
     pinentry.package = if pkgs.stdenv.isDarwin then pkgs.pinentry_mac else pkgs.pinentry-gtk2;
     extraConfig = lib.mkAfter ''
       enable-ssh-support

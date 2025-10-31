@@ -19,5 +19,13 @@ in
   # Users provisioned on this host
   myusers = [ "hubertbehaghel" ];
 
-  environment.systemPackages = [ pkgs.jdk21_headless ];
+  environment.systemPackages = [
+    pkgs.jdk21_headless
+  ];
+
+  homebrew.casks = [
+    "anki"
+    "zotero"
+    "1password"
+  ];
 }

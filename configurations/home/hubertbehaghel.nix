@@ -11,6 +11,7 @@ in
       self.homeModules.dev
       self.homeModules.browserpass
       self.homeModules.emacs
+      self.homeModules.password-store
       self.homeModules."video-editing"
       self.homeModules.dropbox
       self.homeModules.linux-only
@@ -26,13 +27,11 @@ in
     email = "hubert.behaghel@veriff.net";
   };
 
-  home.packages =
-    (with pkgs; [
-      gemini-cli
-      claude-code
-      codex
-    ])
-    ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs._1password-gui ];
+  home.packages = with pkgs; [
+    gemini-cli
+    claude-code
+    codex
+  ];
 
   hub.mail = {
     enable = true;
