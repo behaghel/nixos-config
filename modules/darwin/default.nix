@@ -10,14 +10,9 @@ in
     ./zsh-completion-fix.nix
     ./keyboard
     ./system-defaults.nix
-    ./homebrew-apps.nix
   ];
 
   config = {
     nixpkgs.overlays = import ../../overlays/default.nix { inherit inputs; };
-    home-manager.sharedModules = [
-      self.homeModules.default
-      self.homeModules.darwin-only
-    ];
   };
 }

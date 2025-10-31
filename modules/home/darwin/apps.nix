@@ -9,7 +9,6 @@ lib.mkIf pkgs.stdenv.isDarwin (
       (with pkgs; [
         terminal-notifier
         coreutils
-        glaxnimate
         yubikey-manager
         yubikey-personalization
       ])
