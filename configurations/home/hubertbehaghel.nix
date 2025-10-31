@@ -32,7 +32,7 @@ in
       claude-code
       codex
     ])
-    ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs._1password-client ];
+    ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs._1password-gui ];
 
   hub.mail = {
     enable = true;
