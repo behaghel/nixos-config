@@ -18,17 +18,7 @@ in
   # $ darwin-rebuild changelog
   system.stateVersion = 4;
 
-  environment.systemPackages = [ pkgs.jdk21_headless ]; # for languagetools from Emacs
+  myusers = [ "hub" ];
 
-  home-manager.users.${flake.config.me.username} = {
-    imports = [
-      ../../modules/home/firefox
-      ../../modules/home/kitty
-      ../../modules/home/alacritty
-      ../../modules/home/texlive
-      ../../modules/home/emacs
-      ../../modules/home/password-store
-      ../../modules/home/dircolors
-    ];
-  };
+  environment.systemPackages = [ pkgs.jdk21_headless ]; # for languagetools from Emacs
 }

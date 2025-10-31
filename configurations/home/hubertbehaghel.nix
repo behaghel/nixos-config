@@ -26,11 +26,13 @@ in
     email = "hubert.behaghel@veriff.net";
   };
 
-  home.packages = with pkgs; [
-    gemini-cli
-    claude-code
-    codex
-  ];
+  home.packages =
+    (with pkgs; [
+      gemini-cli
+      claude-code
+      codex
+    ])
+    ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs._1password-client ];
 
   hub.mail = {
     enable = true;
