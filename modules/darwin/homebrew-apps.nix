@@ -7,13 +7,10 @@ let
     "anki"
     "vlc"
     "zotero"
-    "amazon-kindle"
-    "glaxnimate"
+    "kindle"
     "ghostty"
     "iterm2"
     "notunes"
-    "yubico-yubikey-manager"
-    "nikitabobko/tap/aerospace"
   ];
 in
 {
