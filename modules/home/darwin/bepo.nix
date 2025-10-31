@@ -25,6 +25,7 @@ in
       /bin/mkdir -p "$layout_dir"
       /bin/cp "${layoutPath}" "$layout_tmp"
       /bin/mv "$layout_tmp" "$layout_target"
+      /usr/bin/xattr -d com.apple.quarantine "$layout_target" 2>/dev/null || true
 
       /usr/bin/defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
         "InputSourceKind" "Keyboard Layout" \
@@ -36,6 +37,12 @@ in
 
       /usr/bin/defaults write com.apple.HIToolbox AppleEnabledInputSources -array \
         '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
+
+      /usr/bin/defaults write com.apple.HIToolbox AppleInputSourceHistory -array \
+        '{ "InputSourceKind" = "Keyboard Layout"; "KeyboardLayout ID" = -6538; "KeyboardLayout Name" = "bépo"; }'
+
+      /usr/bin/defaults write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string "com.apple.keylayout.bepo"
+      /usr/bin/defaults -currentHost write com.apple.HIToolbox AppleCurrentKeyboardLayoutInputSourceID -string "com.apple.keylayout.bepo"
 
       /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
     '';
