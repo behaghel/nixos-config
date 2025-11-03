@@ -42,7 +42,6 @@
     ALTERNATE_EDITOR = "";
     # Make Git use the terminal client explicitly
     GIT_EDITOR = "emacsclient -t";
-  } // lib.optionalAttrs pkgs.stdenv.isDarwin {
     SSH_AUTH_SOCK = "${config.home.homeDirectory}/.gnupg/S.gpg-agent.ssh";
   };
 

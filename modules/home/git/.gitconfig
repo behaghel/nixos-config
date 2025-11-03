@@ -21,7 +21,7 @@
 [user]
         name = Hubert Behaghel
 	email = behaghel@gmail.com
-	signingkey = 99C4064A79317DDE
+	signingkey = 5137D6FF80B95202
 [filter "hawser"]
 	clean = git hawser clean %f
 	smudge = git hawser smudge %f
