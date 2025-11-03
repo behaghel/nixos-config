@@ -11,7 +11,6 @@ in
     ./keyboard
     ./system-defaults.nix
     ./homebrew-apps.nix
-    ./yubikey.nix
   ];
 
   config = {
