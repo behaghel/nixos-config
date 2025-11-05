@@ -1,5 +1,8 @@
 { pkgs, lib, config, options, ... }:
 let
+  cfg = config.programs.gpg;
+  expectSmartcard = cfg.expectSmartcard;
+
   yubikeyKey = ../../keys/5137D6FF80B95202-2025-11-02.asc;
   keyMetadata = pkgs.runCommand "yubikey-key-metadata"
     { buildInputs = [ pkgs.gnupg pkgs.gawk ]; }
@@ -56,98 +59,114 @@ let
     else
       pkgs.gnupg;
   gpgPackage = systemGpgWrapper;
+
+  pcscLib =
+    if expectSmartcard && useSystemGpg then
+      lib.findFirst
+        (path: builtins.pathExists path)
+        null
+        [
+          "/usr/lib/x86_64-linux-gnu/libpcsclite.so.1"
+          "/usr/lib/libpcsclite.so.1"
+          "/lib/x86_64-linux-gnu/libpcsclite.so.1"
+        ]
+    else
+      null;
 in
 {
-  home.packages =
-    let
-      base = [
-        pinentryPackage
-      ];
-      nixGpgDeps =
-        [
-          pkgs.gnupg
-          pkgs.yubikey-personalization
-          pkgs.yubikey-manager
-        ]
-        ++ lib.optionals pkgs.stdenv.isLinux [
-          pkgs.pcsclite
-          pkgs.ccid
-        ];
-    in
-    if useSystemGpg then
-      base
-    else
-      base ++ nixGpgDeps;
-
-  programs.gpg =
-    let
-      pcscLib =
-        if useSystemGpg then
-          lib.findFirst
-            (path: builtins.pathExists path)
-            null
-            [
-              "/usr/lib/x86_64-linux-gnu/libpcsclite.so.1"
-              "/usr/lib/libpcsclite.so.1"
-              "/lib/x86_64-linux-gnu/libpcsclite.so.1"
-            ]
-        else
-          null;
-      base = {
-        enable = true;
-        package = gpgPackage;
-        settings = {
-          "default-key" = primaryKeyId;
-          "default-recipient-self" = true;
-          "auto-key-locate" = "local";
-          "keyserver" = "hkps://keys.openpgp.org";
-          "throw-keyids" = true;
-        };
-        scdaemonSettings =
-          lib.optionalAttrs (pcscLib != null) {
-            "disable-ccid" = true;
-            "pcsc-driver" = pcscLib;
-          };
-      };
-      dirmngrCfg =
-        lib.optionalAttrs (lib.hasAttrByPath [ "programs" "gpg" "dirmngr" ] options) {
-          dirmngr.enable = lib.mkForce (!useSystemGpg);
-        };
-    in
-    base // dirmngrCfg;
-
-  services.gpg-agent = {
-    enable = true;
-    enableSshSupport = true;
-    enableExtraSocket = true;
-    grabKeyboardAndMouse = true;
-    enableScDaemon = true;
-    defaultCacheTtl = 900;
-    defaultCacheTtlSsh = 900;
-    maxCacheTtl = 3600;
-    maxCacheTtlSsh = 3600;
-    pinentry.package = pinentryPackage;
-    enableZshIntegration = true;
-    enableBashIntegration = true;
-    enableFishIntegration = true;
-    enableNushellIntegration = true;
-    extraConfig = ''
-      allow-loopback-pinentry
+  options.programs.gpg.expectSmartcard = lib.mkOption {
+    type = lib.types.bool;
+    default = true;
+    description = ''
+      Whether smartcard-backed subkeys (e.g., YubiKey) are required.
+      When disabled, smartcard-specific tweaks such as scdaemon configuration
+      and background card checks are skipped.
     '';
   };
 
-  home.activation.importYubikeyPublicKey =
-    let
-      gpgBin = "${gpgPackage}/bin/gpg";
-      escapedKey = lib.escapeShellArg yubikeyKey;
-      ownertrustEntry = "${primaryFingerprint}:6:";
-    in
-    lib.hm.dag.entryAfter [ "linkGeneration" ] ''
-      if ! ${gpgBin} --list-keys --with-colons ${primaryKeyId} >/dev/null 2>&1; then
-        run ${gpgBin} --import ${escapedKey}
-      fi
-      if ! ${gpgBin} --export-ownertrust | grep -q '^${primaryFingerprint}:'; then
-        printf '%s\n' '${ownertrustEntry}' | ${gpgBin} --import-ownertrust >/dev/null
-      fi
-    '';
+  config = {
+    home.packages =
+      let
+        base = [
+          pinentryPackage
+        ];
+        smartcardDeps =
+          lib.optionals expectSmartcard (
+            [
+              pkgs.yubikey-personalization
+              pkgs.yubikey-manager
+            ]
+            ++ lib.optionals pkgs.stdenv.isLinux [
+              pkgs.pcsclite
+              pkgs.ccid
+            ]
+          );
+        nixGpgDeps =
+          [ pkgs.gnupg ] ++ smartcardDeps;
+      in
+      if useSystemGpg then
+        base ++ smartcardDeps
+      else
+        base ++ nixGpgDeps;
+
+    programs.gpg =
+      let
+        base = {
+          enable = true;
+          package = gpgPackage;
+          settings = {
+            "default-key" = primaryKeyId;
+            "default-recipient-self" = true;
+            "auto-key-locate" = "local";
+            "keyserver" = "hkps://keys.openpgp.org";
+            "throw-keyids" = true;
+          };
+          scdaemonSettings =
+            lib.optionalAttrs (pcscLib != null) {
+              "disable-ccid" = true;
+              "pcsc-driver" = pcscLib;
+            };
+        };
+        dirmngrCfg =
+          lib.optionalAttrs (lib.hasAttrByPath [ "programs" "gpg" "dirmngr" ] options) {
+            dirmngr.enable = lib.mkForce (!useSystemGpg);
+          };
+      in
+      base // dirmngrCfg;
+
+    services.gpg-agent = {
+      enable = true;
+      enableSshSupport = expectSmartcard;
+      enableExtraSocket = true;
+      grabKeyboardAndMouse = true;
+      enableScDaemon = expectSmartcard;
+      defaultCacheTtl = 900;
+      defaultCacheTtlSsh = 900;
+      maxCacheTtl = 3600;
+      maxCacheTtlSsh = 3600;
+      pinentry.package = pinentryPackage;
+      enableZshIntegration = true;
+      enableBashIntegration = true;
+      enableFishIntegration = true;
+      enableNushellIntegration = true;
+      extraConfig = ''
+        allow-loopback-pinentry
+      '';
+    };
+
+    home.activation.importYubikeyPublicKey =
+      let
+        gpgBin = "${gpgPackage}/bin/gpg";
+        escapedKey = lib.escapeShellArg yubikeyKey;
+        ownertrustEntry = "${primaryFingerprint}:6:";
+      in
+      lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+        if ! ${gpgBin} --list-keys --with-colons ${primaryKeyId} >/dev/null 2>&1; then
+          run ${gpgBin} --import ${escapedKey}
+        fi
+        if ! ${gpgBin} --export-ownertrust | grep -q '^${primaryFingerprint}:'; then
+          printf '%s\n' '${ownertrustEntry}' | ${gpgBin} --import-ownertrust >/dev/null
+        fi
+      '';
+  };
 }

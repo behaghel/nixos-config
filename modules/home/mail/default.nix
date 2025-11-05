@@ -165,10 +165,23 @@ let
     '';
   };
 
-  syncScript = pkgs.writeShellScript "mail-sync" ''
+  syncScript =
+    let
+      gpgBin = "${config.programs.gpg.package}/bin";
+      expectSmartcard = config.programs.gpg.expectSmartcard;
+      smartcardGuard = lib.optionalString expectSmartcard ''
+        if ! ${gpgBin}/gpg-connect-agent 'scd serialno' /bye 2>/dev/null | grep -q '^D '; then
+          if [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then
+            echo "mail-sync: smartcard not detected, skipping sync" >&2
+          fi
+          exit 0
+        fi
+      '';
+    in
+    pkgs.writeShellScript "mail-sync" ''
     set -eu
     if [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then set -x; fi
-    export PATH=${lib.makeBinPath [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.util-linux ]}:"$PATH"
+    export PATH=${lib.makeBinPath [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.util-linux config.programs.gpg.package ]}:"$PATH"
     MBSYNC_BIN="${pkgs.isync}/bin/mbsync"
     # Silence Cyrus SASL XOAUTH2 debug chatter
     export SASL_LOG_LEVEL=0
@@ -176,6 +189,7 @@ let
       echo "mail-sync: using mbsync: $MBSYNC_BIN" >&2
       if command -v ldd >/dev/null 2>&1; then ldd "$MBSYNC_BIN" >&2 || true; fi
     fi
+    ${smartcardGuard}
     # prevent overlapping runs
     LOCKFILE="${config.xdg.runtimeDir or "${config.home.homeDirectory}/.cache"}/mail-sync.lock"
     mkdir -p "$(dirname "$LOCKFILE")"

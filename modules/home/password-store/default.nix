@@ -8,17 +8,21 @@ let
   sshCommand = "${pkgs.openssh}/bin/ssh -F /dev/null";
   gpgPackage = config.programs.gpg.package;
   gpgBinary = "${gpgPackage}/bin/gpg";
+  expectSmartcard = config.programs.gpg.expectSmartcard;
   passPackage =
-    pkgs.pass.overrideAttrs (old: {
-      postInstall =
-        (old.postInstall or "")
-        + ''
-          substituteInPlace "$out/bin/pass" \
-            --replace 'GPG="gpg"' 'GPG="${gpgBinary}"' \
-            --replace 'which gpg2 &>/dev/null && GPG="gpg2"' '# gpg2 check disabled'
-        '';
-      doInstallCheck = false;
-    });
+    if expectSmartcard then
+      pkgs.pass.overrideAttrs (old: {
+        postInstall =
+          (old.postInstall or "")
+          + ''
+            substituteInPlace "$out/bin/pass" \
+              --replace 'GPG="gpg"' 'GPG="${gpgBinary}"' \
+              --replace 'which gpg2 &>/dev/null && GPG="gpg2"' '# gpg2 check disabled'
+          '';
+        doInstallCheck = false;
+      })
+    else
+      pkgs.pass;
 in
 {
   programs.password-store = {
