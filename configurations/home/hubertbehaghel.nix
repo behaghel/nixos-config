@@ -18,6 +18,7 @@ in
       self.homeModules.darwin-only
     ];
   services.local-modules.nix-darwin.keyboard.bepo.enable = true;
+  programs.gpg.useNixGPG = true;
 
   # Defined by /modules/home/me.nix
   # And used all around in /modules/home/*

@@ -32,6 +32,12 @@ full backups held offline). Everything below explains day-to-day usage on machin
    gpg --delete-secret-key <OLD_KEYID>
    ```
    You already have archival backups from provisioning.
+4. On Ubuntu, consider switching to the Nix-provided GnuPG stack for better smartcard hotplug support:
+   ```nix
+   programs.gpg.useNixGPG = true;
+   ```
+   Before enabling that option, run `scripts/ubuntu-use-nix-gpg.sh` (with sudo) to remove the distro `gnupg`
+   packages and enable `pcscd`. Afterwards, re-run `nix run` to apply the change.
 
 ---
 

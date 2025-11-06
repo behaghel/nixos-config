@@ -2,6 +2,7 @@
 let
   cfg = config.programs.gpg;
   expectSmartcard = cfg.expectSmartcard;
+  useNixGPG = cfg.useNixGPG;
 
   yubikeyKey = ../../keys/5137D6FF80B95202-2025-11-02.asc;
   keyMetadata = pkgs.runCommand "yubikey-key-metadata"
@@ -32,7 +33,7 @@ let
   pinentryPackage =
     if pkgs.stdenv.isDarwin then pkgs.pinentry_mac else pkgs.pinentry-gtk2;
   useSystemGpg =
-    pkgs.stdenv.isLinux && !builtins.pathExists "/etc/NIXOS";
+    !useNixGPG && pkgs.stdenv.isLinux && !builtins.pathExists "/etc/NIXOS";
   systemGpgWrapper =
     if useSystemGpg then
       let
@@ -58,20 +59,25 @@ let
       }
     else
       pkgs.gnupg;
-  gpgPackage = systemGpgWrapper;
+  gpgPackage = if useNixGPG then pkgs.gnupg else systemGpgWrapper;
 
-  pcscLib =
-    if expectSmartcard && useSystemGpg then
-      lib.findFirst
-        (path: builtins.pathExists path)
-        null
-        [
-          "/usr/lib/x86_64-linux-gnu/libpcsclite.so.1"
-          "/usr/lib/libpcsclite.so.1"
-          "/lib/x86_64-linux-gnu/libpcsclite.so.1"
-        ]
+  pcscliteLib = lib.getLib pkgs.pcsclite;
+  systemPcscPath =
+    if pkgs.stdenv.isx86_64 && pkgs.stdenv.isLinux then
+      "/usr/lib/x86_64-linux-gnu/libpcsclite.so.1"
+    else if pkgs.stdenv.isLinux then
+      "/usr/lib/libpcsclite.so.1"
     else
       null;
+  pcscLib =
+    if !expectSmartcard then
+      null
+    else if useSystemGpg then
+      systemPcscPath
+    else if pkgs.stdenv.isLinux && !builtins.pathExists "/etc/NIXOS" then
+      systemPcscPath
+    else
+      "${pcscliteLib}/lib/libpcsclite.so.1";
 in
 {
   options.programs.gpg.expectSmartcard = lib.mkOption {
@@ -81,6 +87,16 @@ in
       Whether smartcard-backed subkeys (e.g., YubiKey) are required.
       When disabled, smartcard-specific tweaks such as scdaemon configuration
       and background card checks are skipped.
+    '';
+  };
+  options.programs.gpg.useNixGPG = lib.mkOption {
+    type = lib.types.bool;
+    default = (!pkgs.stdenv.isLinux) || builtins.pathExists "/etc/NIXOS";
+    description = ''
+      Use the GnuPG build provided by Nix instead of the host's system packages.
+      On Ubuntu this pulls in a newer gpg/scdaemon/pinentry stack from nixpkgs;
+      ensure the system packages are removed via `scripts/ubuntu-use-nix-gpg.sh`
+      before enabling this option.
     '';
   };
 
@@ -125,6 +141,7 @@ in
             lib.optionalAttrs (pcscLib != null) {
               "disable-ccid" = true;
               "pcsc-driver" = pcscLib;
+              "pcsc-shared" = true;
             };
         };
         dirmngrCfg =
@@ -136,14 +153,14 @@ in
 
     services.gpg-agent = {
       enable = true;
-      enableSshSupport = expectSmartcard;
       enableExtraSocket = true;
       grabKeyboardAndMouse = true;
       enableScDaemon = expectSmartcard;
-      defaultCacheTtl = 900;
-      defaultCacheTtlSsh = 900;
-      maxCacheTtl = 3600;
-      maxCacheTtlSsh = 3600;
+      enableSshSupport = expectSmartcard;
+      defaultCacheTtl = 43200;
+      defaultCacheTtlSsh = 43200;
+      maxCacheTtl = 86400;
+      maxCacheTtlSsh = 86400;
       pinentry.package = pinentryPackage;
       enableZshIntegration = true;
       enableBashIntegration = true;
