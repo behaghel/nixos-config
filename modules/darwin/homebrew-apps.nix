@@ -10,6 +10,9 @@ let
     "ghostty"
     "iterm2"
     "notunes"
+    "hammerspoon"
+    "grishka/grishka/neardrop"
+    "firefox"
   ];
 in
 {

@@ -1,5 +1,16 @@
 {
     enableKeyMapping = true;
+  spaces = {
+    directDesktopShortcuts = {
+      # Manage direct Ctrl+1..9 Desktop switching via Nix.
+      enable = true;
+      # Do not require Shift with digits (use Ctrl+<digit>), matching current behavior.
+      useShiftForDigits = false;
+    };
+  };
+  tilingShortcuts = {
+    enable = false;
+  };
     mappings = let
       commonMappings = { "Keyboard Caps Lock" = "Keyboard Escape"; };
     in [

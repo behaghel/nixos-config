@@ -80,6 +80,7 @@ let
   };
 in
 {
+  imports = [ ./shortcuts.nix ];
   options = {
     services.local-modules.nix-darwin.keyboard.enableKeyMapping = mkOption {
       type = types.bool;
@@ -115,6 +116,12 @@ in
       type = types.bool;
       default = true;
       description = "Enable direct desktop switching shortcuts (Ctrl+1..9).";
+    };
+
+    services.local-modules.nix-darwin.keyboard.spaces.directDesktopShortcuts.useShiftForDigits = mkOption {
+      type = types.bool;
+      default = true;
+      description = "On layouts where digits require Shift (e.g., bépo), set Ctrl+Shift modifiers for Desktop 1..9 so hotkeys fire reliably.";
     };
 
     services.local-modules.nix-darwin.keyboard.tilingShortcuts.enable = mkOption {
@@ -214,6 +221,49 @@ in
         "services.local-modules.nix-darwin.keyboard.enableKeyMapping is true but you have not configured any key mappings."
     );
 
+    # Enable shortcuts module (manages AppleSymbolicHotKeys)
+    system.keyboard.shortcuts.enable = true;
+    # Re-enable Spotlight (Cmd+Space)
+    system.keyboard.shortcuts.spotlight.search.enable = true;
+
+    # Ensure Mission Control shortcuts appear in System Settings based on
+    # configuration in services.local-modules.nix-darwin.keyboard.
+    system.defaults.CustomUserPreferences = let
+      ctrl = 262144;
+      shift = 131072;
+      ctrlMods = if cfg.spaces.directDesktopShortcuts.useShiftForDigits then (ctrl + shift) else ctrl;
+      digitKeycodes = [ 18 19 20 21 23 22 26 28 25 ];
+      mkDesktopEntry = id: keycode: {
+        enabled = true;
+        value = { type = "standard"; parameters = [ 0 keycode ctrlMods ]; };
+      };
+      desktopsAttrs = builtins.listToAttrs (lib.imap1 (i: kc:
+        lib.nameValuePair (toString (118 + (i - 1))) (mkDesktopEntry (118 + (i - 1)) kc)
+      ) digitKeycodes);
+      sks = config.system.keyboard.shortcuts;
+      base = {
+        AppleSymbolicHotKeys =
+          {}
+          // (lib.optionalAttrs (cfg.disableInputSourceHotkeys or false) {
+            "60" = { enabled = false; };
+            "61" = { enabled = false; };
+          })
+          // {
+            "64" = {
+              enabled = sks.spotlight.search.enable;
+              value = { type = "standard"; parameters = [ 32 49 1048576 ]; };
+            };
+            "79" = { enabled = true; value = { type = "standard"; parameters = [ 65535 123 262144 ]; }; };
+            "80" = { enabled = true; value = { type = "standard"; parameters = [ 65535 124 262144 ]; }; };
+            "81" = { enabled = true; value = { type = "standard"; parameters = [ 65535 123 262144 ]; }; };
+            "82" = { enabled = true; value = { type = "standard"; parameters = [ 65535 124 262144 ]; }; };
+          }
+          // (lib.optionalAttrs (cfg.spaces.directDesktopShortcuts.enable or false) desktopsAttrs);
+      };
+    in {
+      "com.apple.symbolichotkeys" = base;
+    };
+
     launchd.user.agents =
       let
         mkUserKeyMapping = mapping: builtins.toJSON ({
@@ -226,111 +276,12 @@ in
               mapping
           );
         });
-        mkDisableInputHotkeysAgent =
-          if pkgs.stdenv.isDarwin && (cfg.disableInputSourceHotkeys or false) then {
-            keyboard-hotkeys = {
-              serviceConfig.ProgramArguments = [
-                "${pkgs.writeScriptBin "disable-input-hotkeys" ''
-                  #!${pkgs.stdenv.shell}
-                  set -euo pipefail
+        # Per request: comment out all plist-based hotkey launch agents.
+        mkDisableInputHotkeysAgent = {};
 
-                  # Disable macOS shortcuts that steal Ctrl+Space from terminals
-                  PLIST=com.apple.symbolichotkeys
-                  PLIST_PATH="$HOME/Library/Preferences/$PLIST.plist"
+        mkDirectDesktopShortcutsAgent = {};
 
-                  /usr/bin/defaults read "$PLIST" >/dev/null 2>&1 || true
-
-                  if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
-                    for key in 60 61; do
-                      if /usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:$key" "$PLIST_PATH" >/dev/null 2>&1; then
-                        /usr/libexec/PlistBuddy -c "Set :AppleSymbolicHotKeys:$key:enabled false" "$PLIST_PATH" 2>/dev/null || true
-                      else
-                        /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:$key dict" "$PLIST_PATH" 2>/dev/null || true
-                        /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:$key:enabled bool false" "$PLIST_PATH" 2>/dev/null || true
-                      fi
-                    done
-                  else
-                    /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 60 '{ enabled = 0; }' || true
-                    /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 61 '{ enabled = 0; }' || true
-                  fi
-
-                  /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
-                ''}/bin/disable-input-hotkeys"
-              ];
-              serviceConfig.RunAtLoad = true;
-            };
-          } else {};
-
-        mkDirectDesktopShortcutsAgent =
-          if pkgs.stdenv.isDarwin && (cfg.spaces.directDesktopShortcuts.enable or false) then {
-            keyboard-desktops = {
-              serviceConfig.ProgramArguments = [
-                "${pkgs.writeScriptBin "configure-desktop-shortcuts" ''
-                  #!${pkgs.stdenv.shell}
-                  set -euo pipefail
-
-                  PLIST=com.apple.symbolichotkeys
-                  # Keycodes for digits 1..9 in macOS (US layout):
-                  # 1:18 2:19 3:20 4:21 5:23 6:22 7:26 8:28 9:25
-                  # ASCII codes for '1'..'9' are 49..57.
-                  ids=(118 119 120 121 122 123 124 125 126)
-                  keycodes=(18 19 20 21 23 22 26 28 25)
-
-                  for i in "''${!ids[@]}"; do
-                    id="''${ids[$i]}"
-                    kc="''${keycodes[$i]}"
-                    ascii=$((49 + i))
-                    /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add "$id" "{ enabled = 1; value = { parameters = ( $ascii, $kc, 262144 ); type = standard; }; }" || true
-                  done
-
-                  # Ensure left/right space navigation is on (IDs 79,80)
-                  /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 79 '{ enabled = 1; }' || true
-                  /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 80 '{ enabled = 1; }' || true
-
-                  /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
-                ''}/bin/configure-desktop-shortcuts"
-              ];
-              serviceConfig.RunAtLoad = true;
-              serviceConfig.StandardOutPath = "/tmp/keyboard-desktops.log";
-              serviceConfig.StandardErrorPath = "/tmp/keyboard-desktops.log";
-            };
-          } else {};
-
-        mkTilingShortcutsAgent =
-          if pkgs.stdenv.isDarwin && (cfg.tilingShortcuts.enable or false) then {
-            keyboard-tiling = {
-              serviceConfig.ProgramArguments = [
-                "${pkgs.writeScriptBin "configure-tiling-shortcuts" ''
-                  #!${pkgs.stdenv.shell}
-                  set -euo pipefail
-
-                  # Bind native window tiling/menu actions to Ctrl+Option+Cmd chords.
-                  # Modifiers: ^ (Ctrl), ~ (Option), @ (Command)
-                  # Arrows use their Unicode glyphs.
-                  add_shortcut() {
-                    local title="$1"; shift
-                    local chord="$1"; shift
-                    /usr/bin/defaults write -g NSUserKeyEquivalents -dict-add "$title" -string "$chord" || true
-                  }
-
-                  add_shortcut "Move to Left Side of Screen"  "^~@←"
-                  add_shortcut "Move to Right Side of Screen" "^~@→"
-                  # Legacy menu titles for compatibility
-                  add_shortcut "Tile Window to Left of Screen"  "^~@←"
-                  add_shortcut "Tile Window to Right of Screen" "^~@→"
-
-                  add_shortcut "Make Larger"  "^~@="
-                  add_shortcut "Make Smaller" "^~@-"
-                  add_shortcut "Center Window" "^~@c"
-
-                  /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
-                ''}/bin/configure-tiling-shortcuts"
-              ];
-              serviceConfig.RunAtLoad = true;
-              serviceConfig.StandardOutPath = "/tmp/keyboard-tiling.log";
-              serviceConfig.StandardErrorPath = "/tmp/keyboard-tiling.log";
-            };
-          } else {};
+        mkTilingShortcutsAgent = {};
       in
       (if (cfg.enableKeyMapping && length (attrNames globalKeyMappings) > 0) then
         {

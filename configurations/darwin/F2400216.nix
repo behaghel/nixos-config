@@ -34,6 +34,9 @@ in
       "notunes"
       "vlc"
       "dropbox"
+      "hammerspoon"
+      "grishka/grishka/neardrop"
+      "firefox"
     ];
   };
 }

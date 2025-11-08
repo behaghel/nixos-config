@@ -39,6 +39,11 @@ with lib;
       for i in ~/.config/zsh.d/*.zsh; do
         source $i
       done
+      # Ensure Ctrl+Space (NUL, ^@) accepts zsh-autosuggestions in common keymaps.
+      # Some terminals send NUL for Ctrl+Space; bind that explicitly.
+      bindkey -M emacs '^@' autosuggest-accept
+      bindkey -M viins '^@' autosuggest-accept
+      # Back-compat: also bind caret+space representation if the terminal reports it
       bindkey '^ ' autosuggest-accept
       ZSH_AUTOSUGGEST_HIGHLIGHT_STYLE='fg=23'
 

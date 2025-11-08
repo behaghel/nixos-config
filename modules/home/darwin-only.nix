@@ -4,6 +4,7 @@
     ./darwin/apps.nix
     ./darwin/bepo.nix
     ./ghostty
+    ./hammerspoon
   ];
 
   # Verify Home Manager's launch agents after setupLaunchAgents.
