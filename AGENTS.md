@@ -43,6 +43,33 @@
 - Do not commit secrets. Prefer external secret stores (e.g., `password-store`, GPG) and import at runtime.
 - Pin inputs via `flake.lock`; update with `nix run .#update` and review diffs.
 
+## macOS Keyboard Remapping Notes (Sonoma/Sequoia)
+
+- Internal keyboard IDs: On macOS 14/15 the Apple Internal Keyboard often reports VendorID/ProductID as 0/0 at boot and after sleep. Prefer matching by `Product` with `Built-In = 1` when applying `hidutil` mappings.
+- Global vs per-device mapping: A global `hidutil property --set` overwrites per-device mappings. Apply device-specific mappings only, and avoid a subsequent global write (except for a minimal safety-net if explicitly desired).
+- LaunchAgents: Use a user LaunchAgent that:
+  - Re-applies periodically (e.g., `StartInterval = 15`) to survive re-enumeration.
+  - Reacts to HID/USB match events via `LaunchEvents` in combination with the `xpc_set_event_stream_handler` helper.
+  - Uses a retry loop (≥60s) before giving up at login so early boot races don’t drop mappings.
+- Diagnostics:
+  - Global mapping: `hidutil property --get 'UserKeyMapping'`
+  - Built-in per-device mapping: `hidutil property --matching '{ "Product": "Apple Internal Keyboard / Trackpad", "Built-In": 1 }' --get 'UserKeyMapping'`
+  - Agent status: `launchctl print "gui/$(id -u)/org.nixos.keyboard-<productId>" | rg 'state =|last exit code|runs|program ='`
+  - Logs: `~/Library/Logs/keyboard-<productId>.log` and `/tmp/keyboard-<productId>.log` (from LaunchAgent StandardOut/Err)
+- Known pitfall fixed here: Using a Nix boolean directly in a shell condition caused the fallback to never run. Ensure Nix emits `true`/`false` strings when used within shell `if`.
+
+## LaunchAgent Verification Pattern
+
+- Purpose: GUI LaunchAgents can silently fail to load, especially after upgrades or plist changes. Verifying and bootstrapping them improves reliability without requiring a logout.
+- Pattern: After agents are installed, iterate plists in `~/Library/LaunchAgents`, read their `Label`, and ensure each is loaded with `launchctl print gui/$UID/$LABEL`. If missing, `launchctl bootstrap gui/$UID $PLIST`.
+- Our implementation: See `modules/home/darwin-only.nix` target `home.activation.verifyLaunchAgents`.
+  - It tolerates different plist parsers (`PlistBuddy`, `plutil`, `defaults`).
+  - Emits a concise per-agent status and bootstraps missing ones.
+- Recommended usage for new agents:
+  - Rely on this verification step instead of ad‑hoc manual `launchctl bootstrap`.
+  - Ensure your agent has a unique, stable `Label` and is idempotent at `RunAtLoad`.
+  - Direct stdout/err to a file (e.g., `/tmp/<label>.log`) to aid first-run debugging.
+
 ## Mail Module Notes
 - Gmail folders are locale-specific: this repo intentionally respects per‑account Gmail IMAP folder names based on the account language (e.g., French: `[Gmail]/Messages envoy&AOk-s`, `[Gmail]/Corbeille`, `[Gmail]/Brouillons`; English: `[Gmail]/Sent Mail`, `[Gmail]/Trash`, `[Gmail]/Draft[s]`).
 - Modified UTF‑7: IMAP folder names seen in logs/config may appear in IMAP Modified UTF‑7 (e.g., `envoy&AOk-s`). This is expected and handled by isync/mbsync.

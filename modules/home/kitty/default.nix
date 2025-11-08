@@ -23,6 +23,14 @@
       "alt+y" = "{";
       "alt+x" = "}";
       "alt+è" = "`";
+      # Send Meta-ctsr for tmux pane navigation when pressing Cmd on macOS
+      # This preserves finger memory: Cmd+c/t/s/r -> M-c/t/s/r to tmux
+      "cmd+c" = "send_text all \x1bc";
+      "cmd+t" = "send_text all \x1bt";
+      "cmd+s" = "send_text all \x1bs";
+      "cmd+r" = "send_text all \x1br";
+      # Optional: ensure Ctrl+Space reaches the shell as NUL (zsh '^ ')
+      "ctrl+space" = "send_text all \x00";
     };
     extraConfig = ''
     mouse_map left click ungrabbed mouse_handle_click selection link prompt

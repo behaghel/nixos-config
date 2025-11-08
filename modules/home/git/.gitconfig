@@ -35,6 +35,7 @@
 [diff "gpg"]
 	textconv = gpg --no-tty --decrypt
 
+
 [includeIf "gitdir:~/ws/mns/"]
     path = ~/ws/mns/.gitconfig
 

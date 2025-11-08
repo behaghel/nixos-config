@@ -23,9 +23,24 @@ in
       layout_tmp="$layout_target.tmp"
 
       /bin/mkdir -p "$layout_dir"
-      /bin/cp "${layoutPath}" "$layout_tmp"
-      /bin/mv "$layout_tmp" "$layout_target"
-      /usr/bin/xattr -d com.apple.quarantine "$layout_target" 2>/dev/null || true
+      # Install/update non-interactively: skip if identical, force replace otherwise.
+      if [ -f "$layout_target" ]; then
+        if /usr/bin/cmp -s "$layout_target" "${layoutPath}"; then
+          : # already up to date
+        else
+          /bin/cp "${layoutPath}" "$layout_tmp"
+          /bin/chmod 0644 "$layout_tmp" 2>/dev/null || true
+          /usr/bin/xattr -d com.apple.quarantine "$layout_tmp" 2>/dev/null || true
+          /usr/bin/chflags nouchg "$layout_target" 2>/dev/null || true
+          /bin/mv -f "$layout_tmp" "$layout_target"
+          /usr/bin/xattr -d com.apple.quarantine "$layout_target" 2>/dev/null || true
+        fi
+      else
+        /bin/cp "${layoutPath}" "$layout_tmp"
+        /bin/chmod 0644 "$layout_tmp" 2>/dev/null || true
+        /bin/mv -f "$layout_tmp" "$layout_target"
+        /usr/bin/xattr -d com.apple.quarantine "$layout_target" 2>/dev/null || true
+      fi
       /usr/bin/defaults write com.apple.HIToolbox AppleDefaultAsciiInputSource -dict \
         "InputSourceKind" "Keyboard Layout" \
         "KeyboardLayout ID" -6538 \
@@ -46,5 +61,7 @@ in
       /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
       /usr/bin/defaults read com.apple.HIToolbox >/dev/null 2>&1 || true
     '';
+
+    # Hotkey disabling moved to nix-darwin keyboard module (user LaunchAgent).
   };
 }

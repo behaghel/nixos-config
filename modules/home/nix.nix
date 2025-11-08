@@ -20,6 +20,7 @@ in
   home.file."~/.config/nix/nix.conf".text = "";
 
   programs = {
+    home-manager.enable = true;
     nix-index = {
       enable = true;
       enableZshIntegration = true;

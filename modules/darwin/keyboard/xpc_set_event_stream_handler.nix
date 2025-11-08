@@ -28,7 +28,7 @@ stdenv.mkDerivation {
 
   meta = with lib; {
     description = "Consume a com.apple.iokit.matching event, then run the executable specified in the first parameter.";
-    homepage = https://github.com/snosrap/xpc_set_event_stream_handler;
+    homepage = "https://github.com/snosrap/xpc_set_event_stream_handler";
     platforms = platforms.darwin;
     license = [ licenses.mit ];
     maintainers = [ maintainers.eqyiel ];

@@ -34,9 +34,13 @@ in
   };
 
   home.activation.ensurePasswordStore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    set -euo pipefail
     if [ ! -d "${passwordStoreDir}/.git" ]; then
       rm -rf "${passwordStoreDir}"
-      GIT_SSH_COMMAND="${sshCommand}" ${gitBin} clone "${repoUrl}" "${passwordStoreDir}"
+      if ! GIT_SSH_COMMAND="${sshCommand}" ${gitBin} clone "${repoUrl}" "${passwordStoreDir}"; then
+        echo "ERROR: Failed to clone password store from ${repoUrl}" >&2
+        exit 1
+      fi
     fi
   '';
 }

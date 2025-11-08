@@ -45,12 +45,10 @@ let
 
   isValidKeyMapping = key: elem key keyMappingTableKeys;
 
-  xpc_set_event_stream_handler =
-    pkgs.callPackage
-      ./xpc_set_event_stream_handler.nix
-      {
-        inherit (pkgs.darwin.apple_sdk.frameworks) Foundation;
-      };
+  # Note: We previously used an external helper (xpc_set_event_stream_handler)
+  # to consume IOKit matching events. Modern launchd supports LaunchEvents
+  # directly; we rely on LaunchEvents and drop the helper to avoid legacy SDK
+  # build issues on recent nixpkgs.
 
   mappingOptions = types.submodule {
     options = {
@@ -105,6 +103,12 @@ in
       type = types.bool;
       default = false;
       description = "Whether to remap the Tilde key on non-us keyboards.";
+    };
+
+    services.local-modules.nix-darwin.keyboard.disableInputSourceHotkeys = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Disable macOS input source switch hotkeys (e.g., Ctrl+Space) that interfere with terminal/editor usage.";
     };
 
     services.local-modules.nix-darwin.keyboard.mappings = mkOption {
@@ -210,12 +214,45 @@ in
               mapping
           );
         });
+        mkDisableInputHotkeysAgent =
+          if pkgs.stdenv.isDarwin && (cfg.disableInputSourceHotkeys or false) then {
+            keyboard-hotkeys = {
+              serviceConfig.ProgramArguments = [
+                "${pkgs.writeScriptBin "disable-input-hotkeys" ''
+                  #!${pkgs.stdenv.shell}
+                  set -euo pipefail
+
+                  # Disable macOS shortcuts that steal Ctrl+Space from terminals
+                  PLIST=com.apple.symbolichotkeys
+                  PLIST_PATH="$HOME/Library/Preferences/$PLIST.plist"
+
+                  /usr/bin/defaults read "$PLIST" >/dev/null 2>&1 || true
+
+                  if command -v /usr/libexec/PlistBuddy >/dev/null 2>&1; then
+                    for key in 60 61; do
+                      if /usr/libexec/PlistBuddy -c "Print :AppleSymbolicHotKeys:$key" "$PLIST_PATH" >/dev/null 2>&1; then
+                        /usr/libexec/PlistBuddy -c "Set :AppleSymbolicHotKeys:$key:enabled false" "$PLIST_PATH" 2>/dev/null || true
+                      else
+                        /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:$key dict" "$PLIST_PATH" 2>/dev/null || true
+                        /usr/libexec/PlistBuddy -c "Add :AppleSymbolicHotKeys:$key:enabled bool false" "$PLIST_PATH" 2>/dev/null || true
+                      fi
+                    done
+                  else
+                    /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 60 '{ enabled = 0; }' || true
+                    /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 61 '{ enabled = 0; }' || true
+                  fi
+
+                  /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
+                ''}/bin/disable-input-hotkeys"
+              ];
+              serviceConfig.RunAtLoad = true;
+            };
+          } else {};
       in
-      if (cfg.enableKeyMapping && length (attrNames globalKeyMappings) > 0) then
+      (if (cfg.enableKeyMapping && length (attrNames globalKeyMappings) > 0) then
         {
           keyboard = ({
             serviceConfig.ProgramArguments = [
-              "${xpc_set_event_stream_handler}/bin/xpc_set_event_stream_handler"
               "${pkgs.writeScriptBin "apply-keybindings" ''
                   #!${pkgs.stdenv.shell}
                   set -euo pipefail
@@ -224,6 +261,8 @@ in
                   hidutil property --set '${mkUserKeyMapping globalKeyMappings}' > /dev/null
                 ''}/bin/apply-keybindings"
             ];
+            # Periodically re-apply to handle post-boot and re-enumeration quirks.
+            serviceConfig.StartInterval = 60;
             serviceConfig.LaunchEvents = {
               "com.apple.iokit.matching" = {
                 "com.apple.usb.device" = {
@@ -243,8 +282,15 @@ in
            , productId
            , vendorId
            , ...
-           }: (nameValuePair "keyboard-${toString productId}" ({
-            serviceConfig.ProgramArguments = [
+           }:
+           let
+             hasCapsEscape = (
+               (mappings ? "Keyboard Caps Lock") && (mappings."Keyboard Caps Lock" == "Keyboard Escape")
+             );
+             capsOnlyJSON = if hasCapsEscape then mkUserKeyMapping { "Keyboard Caps Lock" = "Keyboard Escape"; } else null;
+             isAppleInternal = (vendorId == 1452 && productId == 833);
+           in (nameValuePair "keyboard-${toString productId}" ({
+             serviceConfig.ProgramArguments = [
               "${pkgs.writeScriptBin "apply-keybindings" (
                 let intToHexString = value:
                   pkgs.runCommand "${toString value}-to-hex-string"
@@ -253,13 +299,17 @@ in
                   #!${pkgs.stdenv.shell}
                   set -euxo pipefail
 
+                  LOG_DIR="$HOME/Library/Logs"
+                  LOG_FILE="$LOG_DIR/keyboard-${toString productId}.log"
+                  /bin/mkdir -p "$LOG_DIR" 2>/dev/null || true
+
                   # Sometimes it takes a moment for the keyboard to be
                   # visible to hidutil, even when the script is launched
                   # with "LaunchEvents".
                   function retry () {
                     local attempt=1
-                    local max_attempts=10
-                    local delay=0.2
+                    local max_attempts=60
+                    local delay=1
 
                     while true; do
                       "$@" && break || {
@@ -267,7 +317,9 @@ in
                           attempt=$((attempt + 1))
                           sleep $delay
                         else
-                          exit 1
+                          # Do not exit the script here; return non-zero
+                          # so callers can handle fallback paths.
+                          return 1
                         fi
                       }
                     done
@@ -285,21 +337,55 @@ in
                       grep $(<${intToHexString productId})
                   }
 
-                  echo "$(date) configuring keyboard ${toString productId} ($(<${intToHexString productId}))..." >&2
+                  function internal_keyboard_present () {
+                    hidutil list --matching keyboard | grep -q 'Apple Internal Keyboard / Trackpad'
+                  }
 
-                  retry get_vendor_id
-                  retry get_product_id
+                  echo "$(date) configuring keyboard ${toString productId} ($(<${intToHexString productId}))..." | tee -a "$LOG_FILE" >&2
 
-                  hidutil property --matching '${builtins.toJSON { ProductID = productId; }}' --set '${mkUserKeyMapping mappings}' > /dev/null
+                  # Vendor ID may be 0 for internal keyboards post-boot; don't hard-fail.
+                  retry get_vendor_id || true
+                  if retry get_product_id; then
+                    echo "$(date) matched ProductID ${toString productId}; applying device-specific mappings" | tee -a "$LOG_FILE" >&2
+                    hidutil property --matching '${builtins.toJSON { ProductID = productId; }}' --set '${mkUserKeyMapping mappings}' > /dev/null
+                    echo "$(date) per-device mapping now (by ProductID): $(hidutil property --matching '${builtins.toJSON { ProductID = productId; }}' --get 'UserKeyMapping' 2>/dev/null | tr -d '\n')" | tee -a "$LOG_FILE" >&2
+                  else
+                    # Fallback by product name only for Apple Internal keyboard where IDs can be 0
+                    if internal_keyboard_present && ${if isAppleInternal then "true" else "false"}; then
+                      echo "$(date) Product/Vendor ID not reported; applying by Product name (internal keyboard)" | tee -a "$LOG_FILE" >&2
+                      hidutil property --matching '{ "Product": "Apple Internal Keyboard / Trackpad", "Built-In": 1 }' --set '${mkUserKeyMapping mappings}' > /dev/null
+                      echo "$(date) per-device mapping now (by Product+Built-In): $(hidutil property --matching '{ \"Product\": \"Apple Internal Keyboard / Trackpad\", \"Built-In\": 1 }' --get 'UserKeyMapping' 2>/dev/null | tr -d '\n')" | tee -a "$LOG_FILE" >&2
+                    else
+                      echo "$(date) WARNING: Could not identify target keyboard for mapping ${toString productId}. Skipping." | tee -a "$LOG_FILE" >&2
+                    fi
+                  fi
+                  echo "$(date) current UserKeyMapping: $(hidutil property --get 'UserKeyMapping' 2>/dev/null | tr -d '\n')" | tee -a "$LOG_FILE" >&2
                 ''
                 )}/bin/apply-keybindings"
             ];
-            serviceConfig.StartInterval = 15000;
+            # Re-apply periodically to handle device re-enumeration after sleep/wake.
+            serviceConfig.StartInterval = 15;
             serviceConfig.RunAtLoad = true;
+            serviceConfig.KeepAlive = { SuccessfulExit = false; };
+            # Also react to USB device matching events (helps external keyboards)
+            serviceConfig.LaunchEvents = {
+              "com.apple.iokit.matching" = {
+                "com.apple.usb.device" = {
+                  IOMatchLaunchStream = true;
+                  IOProviderClass = "IOUSBDevice";
+                  idProduct = "*";
+                  idVendor = "*";
+                };
+              };
+            };
+            # Conservative logging paths (script also logs to ~/Library/Logs)
+            serviceConfig.StandardOutPath = "/tmp/keyboard-${toString productId}.log";
+            serviceConfig.StandardErrorPath = "/tmp/keyboard-${toString productId}.log";
           })
           ))
           cfgMappingsList
-        )) else { };
+        )) else { })
+      // mkDisableInputHotkeysAgent;
     services.local-modules.nix-darwin.keyboard = import ./config.nix;
     }
   ];

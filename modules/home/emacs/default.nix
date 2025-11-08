@@ -118,6 +118,7 @@ in
 
   # Auto-setup on activation if .emacs.d doesn't exist
   home.activation.setupEmacsConfig = ''
+    set -euo pipefail
     if [ ! -d "$HOME/.emacs.d" ] || [ -L "$HOME/.emacs.d" ]; then
       ${emacs-config-setup}/bin/emacs-config-setup
     fi
