@@ -82,6 +82,14 @@
 - Embed Nix expressions once: don’t double‑interpolate variables inside `${ ... }`. Correct: `export PATH=${lib.makeBinPath [ pkgs.foo myTool ]}:"$PATH"` (note `myTool`, not `${myTool}` inside the list).
 - Mixed example (mail sync): `export PATH=${lib.makeBinPath [ isyncWithGsasl pkgs.mu ]}:"$PATH"` and later `"${isyncWithGsasl}/bin/mbsync" ...`.
 
+Common pitfall: Bash arrays inside Nix strings
+- Symptom: Nix evaluation fails with errors like `syntax error, unexpected '@'` or `$` expansion gets eaten by Nix.
+- Cause: Bash array expansions such as `${!ids[@]}`, `${ids[$i]}` inside a Nix string are interpreted by Nix unless escaped.
+- Fix: Escape every shell `${...}` as `''${...}` inside the Nix string.
+  - Incorrect: `for i in "${!ids[@]}"; do id="${ids[$i]}"; ...`
+  - Correct:   `for i in "''${!ids[@]}"; do id="''${ids[$i]}"; ...`
+  - Also escape standalone `${var}` and any `${...}` appearing in `awk`, here-strings, etc.
+
 ## Shell Scripting Notes
 - Booleans: avoid constant tests like `[ "1" = "true" ]`. Use a runtime flag and test it, for example `FLAG="''${ENV_FLAG:-1}"; if [ -n "''${FLAG}" ]; then ... fi`.
 - Nix → shell interpolation: in Nix strings, escape shell `${...}` as `''${...}` so Nix doesn’t try to interpolate shell parameters.

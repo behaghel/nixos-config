@@ -111,6 +111,18 @@ in
       description = "Disable macOS input source switch hotkeys (e.g., Ctrl+Space) that interfere with terminal/editor usage.";
     };
 
+    services.local-modules.nix-darwin.keyboard.spaces.directDesktopShortcuts.enable = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Enable direct desktop switching shortcuts (Ctrl+1..9).";
+    };
+
+    services.local-modules.nix-darwin.keyboard.tilingShortcuts.enable = mkOption {
+      type = types.bool;
+      default = true;
+      description = "Enable native window tiling shortcuts (Ctrl+Option+Cmd+Arrows/=/-/C).";
+    };
+
     services.local-modules.nix-darwin.keyboard.mappings = mkOption {
       type = types.nullOr (types.either mappingOptions (types.listOf mappingOptions));
       default = null;
@@ -246,6 +258,77 @@ in
                 ''}/bin/disable-input-hotkeys"
               ];
               serviceConfig.RunAtLoad = true;
+            };
+          } else {};
+
+        mkDirectDesktopShortcutsAgent =
+          if pkgs.stdenv.isDarwin && (cfg.spaces.directDesktopShortcuts.enable or false) then {
+            keyboard-desktops = {
+              serviceConfig.ProgramArguments = [
+                "${pkgs.writeScriptBin "configure-desktop-shortcuts" ''
+                  #!${pkgs.stdenv.shell}
+                  set -euo pipefail
+
+                  PLIST=com.apple.symbolichotkeys
+                  # Keycodes for digits 1..9 in macOS (US layout):
+                  # 1:18 2:19 3:20 4:21 5:23 6:22 7:26 8:28 9:25
+                  # ASCII codes for '1'..'9' are 49..57.
+                  ids=(118 119 120 121 122 123 124 125 126)
+                  keycodes=(18 19 20 21 23 22 26 28 25)
+
+                  for i in "''${!ids[@]}"; do
+                    id="''${ids[$i]}"
+                    kc="''${keycodes[$i]}"
+                    ascii=$((49 + i))
+                    /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add "$id" "{ enabled = 1; value = { parameters = ( $ascii, $kc, 262144 ); type = standard; }; }" || true
+                  done
+
+                  # Ensure left/right space navigation is on (IDs 79,80)
+                  /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 79 '{ enabled = 1; }' || true
+                  /usr/bin/defaults write "$PLIST" AppleSymbolicHotKeys -dict-add 80 '{ enabled = 1; }' || true
+
+                  /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
+                ''}/bin/configure-desktop-shortcuts"
+              ];
+              serviceConfig.RunAtLoad = true;
+              serviceConfig.StandardOutPath = "/tmp/keyboard-desktops.log";
+              serviceConfig.StandardErrorPath = "/tmp/keyboard-desktops.log";
+            };
+          } else {};
+
+        mkTilingShortcutsAgent =
+          if pkgs.stdenv.isDarwin && (cfg.tilingShortcuts.enable or false) then {
+            keyboard-tiling = {
+              serviceConfig.ProgramArguments = [
+                "${pkgs.writeScriptBin "configure-tiling-shortcuts" ''
+                  #!${pkgs.stdenv.shell}
+                  set -euo pipefail
+
+                  # Bind native window tiling/menu actions to Ctrl+Option+Cmd chords.
+                  # Modifiers: ^ (Ctrl), ~ (Option), @ (Command)
+                  # Arrows use their Unicode glyphs.
+                  add_shortcut() {
+                    local title="$1"; shift
+                    local chord="$1"; shift
+                    /usr/bin/defaults write -g NSUserKeyEquivalents -dict-add "$title" -string "$chord" || true
+                  }
+
+                  add_shortcut "Move to Left Side of Screen"  "^~@←"
+                  add_shortcut "Move to Right Side of Screen" "^~@→"
+                  # Legacy menu titles for compatibility
+                  add_shortcut "Tile Window to Left of Screen"  "^~@←"
+                  add_shortcut "Tile Window to Right of Screen" "^~@→"
+
+                  add_shortcut "Make Larger"  "^~@="
+                  add_shortcut "Make Smaller" "^~@-"
+                  add_shortcut "Center Window" "^~@c"
+
+                  /usr/bin/killall -u "$USER" cfprefsd 2>/dev/null || true
+                ''}/bin/configure-tiling-shortcuts"
+              ];
+              serviceConfig.RunAtLoad = true;
+              serviceConfig.StandardOutPath = "/tmp/keyboard-tiling.log";
+              serviceConfig.StandardErrorPath = "/tmp/keyboard-tiling.log";
             };
           } else {};
       in
@@ -385,7 +468,9 @@ in
           ))
           cfgMappingsList
         )) else { })
-      // mkDisableInputHotkeysAgent;
+      // mkDisableInputHotkeysAgent
+      // mkDirectDesktopShortcutsAgent
+      // mkTilingShortcutsAgent;
     services.local-modules.nix-darwin.keyboard = import ./config.nix;
     }
   ];

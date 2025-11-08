@@ -24,8 +24,11 @@ in
 
         # Ensure Ctrl+Space is delivered as NUL to the terminal
         keybind = ctrl+space=text:\x00
+
+        # Enter tmux copy-mode with Cmd+. by sending Meta+.
+        # tmux binds M-. to copy-mode in our config.
+        keybind = super+period=esc:.
       '';
     };
   };
 }
-
