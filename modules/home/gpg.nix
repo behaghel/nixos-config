@@ -3,6 +3,7 @@ let
   cfg = config.programs.gpg;
   expectSmartcard = cfg.expectSmartcard;
   useNixGPG = cfg.useNixGPG;
+  isDarwin = pkgs.stdenv.isDarwin;
 
   yubikeyKey = ../../keys/5137D6FF80B95202-2025-11-02.asc;
   keyMetadata = pkgs.runCommand "yubikey-key-metadata"
@@ -71,6 +72,9 @@ let
       null;
   pcscLib =
     if !expectSmartcard then
+      null
+    else if isDarwin then
+      # On macOS, use the system PCSC (PCSC.framework). Do not set pcsc-driver.
       null
     else if useSystemGpg then
       systemPcscPath
@@ -169,6 +173,44 @@ in
       extraConfig = ''
         allow-loopback-pinentry
       '';
+    };
+
+    # On macOS, ensure GUI apps (Emacs, etc.) see the SSH agent socket by
+    # exporting it into the user launchd environment at login and periodically.
+    # This avoids ssh-askpass fallbacks for Git over SSH from GUI contexts.
+    #
+    # We still keep shell session variables via HM integrations, but GUI apps
+    # launched by launchd do not inherit shell rc files.
+    #
+    # The darwin-only module also performs a one-shot export during activation;
+    # this agent ensures the env is present after login and survives reboots.
+    launchd.agents.sshEnv = lib.mkIf pkgs.stdenv.isDarwin {
+      enable = true;
+      config = {
+        Label = "org.nixos.ssh-env";
+        ProgramArguments = [
+          "/bin/sh"
+          "-lc"
+          ''
+            set -euo pipefail
+            sock="$HOME/.gnupg/S.gpg-agent.ssh"
+            uid="$(/usr/bin/id -u)"
+            # Set for current bootstrap (GUI agent domain) and ensure Aqua domain has it.
+            /bin/launchctl setenv SSH_AUTH_SOCK "$sock"
+            /bin/launchctl setenv SSH_ASKPASS /usr/bin/true
+            /bin/launchctl setenv GIT_ASKPASS /usr/bin/true
+            /bin/launchctl setenv SSH_ASKPASS_REQUIRE never
+            /bin/launchctl asuser "''${uid}" /bin/launchctl setenv SSH_AUTH_SOCK "''${sock}" || true
+            /bin/launchctl asuser "''${uid}" /bin/launchctl setenv SSH_ASKPASS /usr/bin/true || true
+            /bin/launchctl asuser "''${uid}" /bin/launchctl setenv GIT_ASKPASS /usr/bin/true || true
+            /bin/launchctl asuser "''${uid}" /bin/launchctl setenv SSH_ASKPASS_REQUIRE never || true
+          ''
+        ];
+        RunAtLoad = true;
+        StartInterval = 60;
+        StandardOutPath = "${config.home.homeDirectory}/Library/Logs/ssh-env.log";
+        StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/ssh-env.log";
+      };
     };
 
     home.activation.importYubikeyPublicKey =

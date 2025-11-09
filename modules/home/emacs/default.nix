@@ -53,9 +53,11 @@ let
   };
 in
 {
+  # Prefer the macOS "MacPort" build on Darwin for better UI perf.
+  # Fallback cleanly if the overlay is unavailable.
   programs.emacs = {
     enable = true;
-    package = pkgs.emacs-unstable;
+    package = if pkgs.stdenv.isDarwin then (pkgs.emacs-29-macport or pkgs.emacs-unstable) else pkgs.emacs-unstable;
     # Install mu4e from emacsPackages (nixpkgs builds it to match pkgs.mu)
     extraPackages = epkgs: [ epkgs.mu4e ];
   };
@@ -63,12 +65,12 @@ in
   # Use Home Manager's built-in Emacs user service (daemon)
   services.emacs = {
     enable = true;
-    package = pkgs.emacs-unstable;
+    package = if pkgs.stdenv.isDarwin then (pkgs.emacs-29-macport or pkgs.emacs-unstable) else pkgs.emacs-unstable;
     # Session defaults handled in modules/home/shell/default.nix
     defaultEditor = false;
   };
 
-  # Add the setup script to your environment
+  # Add the setup script to your environment (+ fonts on Darwin)
   home.packages = [ emacs-config-setup ];
 
   # Install desktop entries on Linux platforms only

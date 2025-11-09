@@ -8,6 +8,7 @@
     ./gpg.nix
     ./starship.nix
     ./git
+    ./ssh
     ./nix.nix
     ./tmux
     # ./dropbox

@@ -3,6 +3,7 @@
   imports = [
     ./darwin/apps.nix
     ./darwin/bepo.nix
+    ./darwin/fonts.nix
     ./ghostty
     ./hammerspoon
   ];
@@ -63,10 +64,27 @@
     # and avoids noisy X11 askpass fallbacks.
     home.activation.exportSshEnv = lib.hm.dag.entryAfter [ "setupLaunchAgents" ] ''
       set -euo pipefail
-      /bin/launchctl setenv SSH_AUTH_SOCK "$HOME/.gnupg/S.gpg-agent.ssh"
+      sock="$HOME/.gnupg/S.gpg-agent.ssh"
+      /bin/launchctl setenv SSH_AUTH_SOCK "$sock"
       /bin/launchctl setenv SSH_ASKPASS /usr/bin/true
       /bin/launchctl setenv GIT_ASKPASS /usr/bin/true
       /bin/launchctl setenv SSH_ASKPASS_REQUIRE never
+      # Provide a predictable PATH and UTF-8 locale to GUI apps (Emacs, etc.).
+      PATH_VAL="${lib.makeBinPath [ pkgs.git pkgs.ripgrep pkgs.gnugrep pkgs.findutils pkgs.coreutils ]}:/usr/bin:/bin:/usr/sbin:/sbin"
+      /bin/launchctl setenv PATH "$PATH_VAL"
+      /bin/launchctl setenv LANG en_US.UTF-8
+      /bin/launchctl setenv LC_ALL en_US.UTF-8
+      # Also ensure the GUI (Aqua) domain has the env set, so GUI apps see it.
+      uid="$(/usr/bin/id -u)"
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv SSH_AUTH_SOCK "$sock" || true
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv SSH_ASKPASS /usr/bin/true || true
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv GIT_ASKPASS /usr/bin/true || true
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv SSH_ASKPASS_REQUIRE never || true
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv PATH "$PATH_VAL" || true
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv LANG en_US.UTF-8 || true
+      /bin/launchctl asuser "$uid" /bin/launchctl setenv LC_ALL en_US.UTF-8 || true
     '';
+
+    # (no one-off cleanup tasks here; user prefers manual/explicit cleanup)
   };
 }

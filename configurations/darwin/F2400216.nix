@@ -39,4 +39,7 @@ in
       "firefox"
     ];
   };
+
+  # Use Touch ID for sudo on macOS (new option name in nix-darwin).
+  security.pam.services.sudo_local.touchIdAuth = true;
 }

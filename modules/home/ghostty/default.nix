@@ -7,20 +7,21 @@ let
 in
 {
   config = lib.mkIf isDarwin {
-    # Minimal Ghostty config to forward Cmd+ctsr as Meta-ctsr for tmux pane nav
-    # and ensure Ctrl+Space reaches the shell (NUL) for zsh autosuggest.
+    # Minimal Ghostty config to forward Cmd+ctsr (and Cmd+Shift+c/r) as Meta-ctsr
+    # for tmux navigation, and ensure Ctrl+Space reaches the shell (NUL).
     home.file."${ghosttyConfigPath}" = {
       text = ''
-        # tmux pane navigation (BEPO): Cmd+c/t/s/r -> ESC c/t/s/r
-        # Note: this overrides the default copy (Cmd+C) and new tab (Cmd+T).
-        # You can still copy via Cmd+Shift+C (explicitly mapped below).
+        # tmux navigation (BÉPO): map Cmd+c/t/s/r -> ESC c/t/s/r
+        # and also map Cmd+Shift+c/r -> ESC c/r for prev/next window.
         keybind = super+c=esc:c
         keybind = super+t=esc:t
         keybind = super+s=esc:s
         keybind = super+r=esc:r
+        # Preserve Shift by sending uppercase (ESC C/R) so tmux can bind M-C/M-R
+        keybind = super+shift+c=esc:C
+        keybind = super+shift+r=esc:R
 
-        # Provide an alternative copy binding since Cmd+C is repurposed above.
-        keybind = super+shift+c=copy_to_clipboard
+        # Avoid consuming Cmd+Shift+C/T for tmux; keep paste bindings below.
         # Ensure paste is always available via Cmd+V
         keybind = super+v=paste_from_clipboard
         keybind = super+shift+v=paste_from_selection

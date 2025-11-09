@@ -1,4 +1,4 @@
-{ lib, pkgs, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   isDarwin = pkgs.stdenv.isDarwin;
@@ -33,5 +33,25 @@ in
 
       hs.alert.show("Hammerspoon ready", 0.3)
     '';
+
+    # Ensure Hammerspoon launches at login for the GUI session.
+    launchd.agents.hammerspoon = {
+      enable = true;
+      config = {
+        Label = "org.nixos.hammerspoon";
+        ProgramArguments = [
+          "/bin/sh"
+          "-lc"
+          ''
+            # Launch quietly if installed; ignore failures if missing.
+            /usr/bin/open -gj -a "Hammerspoon" || true
+          ''
+        ];
+        RunAtLoad = true;
+        KeepAlive = false;
+        StandardOutPath = "${config.home.homeDirectory}/Library/Logs/hammerspoon-launch.log";
+        StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/hammerspoon-launch.log";
+      };
+    };
   };
 }
