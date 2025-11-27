@@ -2,17 +2,21 @@
 {
   programs.git = {
     enable = true;
-    userName = config.me.fullname;
-    userEmail = config.me.email;
     ignores = [ "*~" "*.swp" ];
-    delta = {
-      enable = true;
-      options = {
-        features = "decorations";
-        navigate = true;
-        light = false;
-        side-by-side = true;
-      };
+    settings.user = {
+      name = config.me.fullname;
+      email = config.me.email;
+    };
+  };
+
+  programs.delta = {
+    enable = true;
+    enableGitIntegration = true;
+    options = {
+      features = "decorations";
+      navigate = true;
+      light = false;
+      side-by-side = true;
     };
   };
 

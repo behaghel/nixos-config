@@ -21,6 +21,9 @@
     bind -T copy-mode-vi s send -X cursor-up
     bind -T copy-mode-vi r send -X cursor-right
 
+    # Additional BEPO motion helpers
+    bind -T copy-mode-vi é send -X next-word
+
     # Optional: remap 'h' similar to Vim 'f/t' motions (tmux supports 'jump-to-forward/backward')
     bind -T copy-mode-vi h send -X jump-to-forward
     bind -T copy-mode-vi H send -X jump-to-backward

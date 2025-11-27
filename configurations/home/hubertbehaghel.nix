@@ -48,6 +48,8 @@ in
     enable = true;
   };
 
+  targets.genericLinux.enable = isLinux;
+
   hub.videoEditing = {
     enable = true;
     fillerWords = [ "uh" "um" "and you know" "and so" "and so for us" "so for us" "you know" "kind of" "a bit" "a bit of" "it's like" "and well" "to be completely honest" "yeah" ];
