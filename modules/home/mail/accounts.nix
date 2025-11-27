@@ -38,7 +38,7 @@ let
         enable = true; create = "maildir"; remove = "none"; expunge = "both";
         groups.${name}.channels = {
           inbox  = { patterns = [ "INBOX" ];                           extraConfig = { CopyArrivalDate = "yes"; Sync = "All"; }; };
-          all    = { farPattern = farAll;      nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
+          # all    = { farPattern = farAll;      nearPattern = "archive"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Push"; }; };
           starred= { farPattern = farStarred;  nearPattern = "starred"; extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
           trash  = { farPattern = farTrash;    nearPattern = "trash";   extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "All"; }; };
           sent   = { farPattern = farSent;     nearPattern = "sent";    extraConfig = { CopyArrivalDate = "yes"; Create = "Near"; Sync = "Pull"; }; };
@@ -90,6 +90,7 @@ let
       passwordCommand = "OAUTH_PASS_PREFIX=veriff/mail ${gmailOAuthHelper}/bin/gmail-oauth2-token token";
     } // { primary = false; };
   };
+
 in
 {
   inherit mailAccounts;

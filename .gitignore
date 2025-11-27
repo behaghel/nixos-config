@@ -1,3 +1,25 @@
 *.~undo-tree~
 /.direnv/
 /result
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# devenv
+.devenv/
+devenv.local.nix
+.devenv.flake.nix
+.pre-commit-config.yaml

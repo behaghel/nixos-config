@@ -2,15 +2,19 @@
 
 let
   isDarwin = pkgs.stdenv.isDarwin;
+  ghosttyPkg = pkgs.ghostty;
+  ghosttyAvailable = !(ghosttyPkg.meta.broken or false);
   # macOS config path for Ghostty
   ghosttyConfigPath = "Library/Application Support/com.mitchellh.ghostty/config";
+  ghosttyTerminfo = "${ghosttyPkg.terminfo}/share/terminfo/x/xterm-ghostty";
 in
 {
-  config = lib.mkIf isDarwin {
-    # Minimal Ghostty config to forward Cmd+ctsr (and Cmd+Shift+c/r) as Meta-ctsr
-    # for tmux navigation, and ensure Ctrl+Space reaches the shell (NUL).
-    home.file."${ghosttyConfigPath}" = {
-      text = ''
+  config = lib.mkMerge [
+    (lib.mkIf isDarwin {
+      # Minimal Ghostty config to forward Cmd+ctsr (and Cmd+Shift+c/r) as Meta-ctsr
+      # for tmux navigation, and ensure Ctrl+Space reaches the shell (NUL).
+      home.file."${ghosttyConfigPath}" = {
+        text = ''
         # tmux navigation (BÉPO): map Cmd+c/t/s/r -> ESC c/t/s/r
         # and also map Cmd+Shift+c/r -> ESC c/r for prev/next window.
         keybind = super+c=esc:c
@@ -72,6 +76,11 @@ in
         # Handy: reload Ghostty configuration
         keybind = super+shift+period=reload_config
       '';
-    };
-  };
+      };
+    })
+    (lib.mkIf ghosttyAvailable {
+      # Provide terminfo entry so ncurses tools (e.g., emacsclient -t) understand TERM=xterm-ghostty.
+      home.file.".terminfo/x/xterm-ghostty".source = ghosttyTerminfo;
+    })
+  ];
 }

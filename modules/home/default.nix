@@ -8,6 +8,7 @@
     ./gpg.nix
     ./starship.nix
     ./git
+    ./ghostty
     ./ssh
     ./nix.nix
     ./tmux

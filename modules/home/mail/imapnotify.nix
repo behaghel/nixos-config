@@ -3,6 +3,18 @@ with lib;
 
 let
   cfg = config.hub.mail.imapnotify or {};
+  fullSyncEnabled = cfg.fullSync or false;
+  mailCfg = config.hub.mail or {};
+  stampFile = mailCfg.stampFile or null;
+  stampUpdateSnippet =
+    if (!fullSyncEnabled && stampFile != null) then ''
+          stamp_file=${lib.escapeShellArg stampFile}
+          stamp_dir="$(dirname "$stamp_file")"
+          mkdir -p "$stamp_dir"
+          tmp="$stamp_dir/.last.$$"
+          date +%s >"$tmp"
+          mv "$tmp" "$stamp_file"
+        '' else "";
   accounts = config.accounts.email.accounts or {};
   maildirBase = config.accounts.email.maildirBasePath or (config.home.homeDirectory + "/Mail");
 
@@ -30,7 +42,9 @@ let
         export SASL_LOG_LEVEL=0
         # Sync only this account's group ("-a" means all; do not use here).
         # Do not fail the unit if mbsync returns non-zero.
-        if ! "${pkgs.isync}/bin/mbsync" ${name}; then
+        if "${pkgs.isync}/bin/mbsync" ${name}; then
+${stampUpdateSnippet}
+        else
           echo "warning: mbsync returned non-zero for ${name}; proceeding anyway" >&2
         fi
         # Optional desktop notification based on latest Maildir message
