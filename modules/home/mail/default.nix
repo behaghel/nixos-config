@@ -6,6 +6,7 @@ let
   cacheDir = "${config.xdg.cacheHome or (config.home.homeDirectory + "/.cache")}/mail-sync";
   stampFile = "${cacheDir}/last";
   alertStampFile = "${cacheDir}/last-alert";
+  statusFile = "${cacheDir}/status.json";
   passCacheDir = "${cacheDir}/pass";
   passCacheTtl = 14400; # 4 hours
 
@@ -24,8 +25,23 @@ let
   syncArtefacts = import ./sync.nix {
     inherit pkgs lib config maildir;
     stampFile = cfg.stampFile;
+    statusFile = cfg.statusFile;
   };
   inherit (syncArtefacts) mailSyncScript mailSyncAutocorrectScript;
+  mailTrayScript = syncArtefacts.mailTrayScript;
+  trayLauncher = pkgs.writeShellScript "mail-sync-tray-launch" ''
+    set -euo pipefail
+    RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+    export XDG_RUNTIME_DIR="$RUNTIME_DIR"
+    export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$RUNTIME_DIR/bus}"
+    if [ -z "''${WAYLAND_DISPLAY-}" ] && [ -S "$RUNTIME_DIR/wayland-0" ]; then
+      export WAYLAND_DISPLAY="wayland-0"
+    fi
+    if [ -z "''${DISPLAY-}" ] && [ -S /tmp/.X11-unix/X0 ]; then
+      export DISPLAY=":0"
+    fi
+    exec ${mailTrayScript}/bin/mail-tray
+  '';
 in {
   imports = [ ./imapnotify.nix ];
 
@@ -59,12 +75,19 @@ in {
       default = alertStampFile;
       readOnly = true;
     };
+    statusFile = mkOption {
+      description = "File storing last mail-sync attempt, success, and status.";
+      type = types.str;
+      default = statusFile;
+      readOnly = true;
+    };
   };
 
   config = mkIf cfg.enable {
     home.packages = with pkgs; [
       mu
       gmailOAuthHelper
+      mailTrayScript
     ];
 
     programs = {
@@ -178,6 +201,30 @@ SyncState "*"
         Unit = "mail-sync-health.service";
       };
       Install = { WantedBy = [ "timers.target" ]; };
+    };
+
+    systemd.user.services.mail-sync-tray = lib.mkIf pkgs.stdenv.isLinux {
+      Unit = {
+        Description = "Mail sync tray status";
+        After = [ "graphical-session.target" ];
+        PartOf = [ "graphical-session.target" ];
+      };
+      Service = {
+        Type = "simple";
+        ExecStart = "${trayLauncher}";
+        Environment = [
+          "MAIL_SYNC_STATUS_FILE=${cfg.statusFile}"
+          "MAIL_SYNC_STAMP_FILE=${cfg.stampFile}"
+          "MAIL_SYNC_MAILDIR=${maildir}"
+          "MAIL_SYNC_INTERVAL=${cfg.interval}"
+          "PYSTRAY_BACKEND=appindicator"
+          "GI_TYPELIB_PATH=${mailTrayScript.giTypelibPath}"
+          "MAIL_TRAY_GI_TYPELIB_PATH=${mailTrayScript.giTypelibPath}"
+          "LD_LIBRARY_PATH=${mailTrayScript.giLibraryPath}:$LD_LIBRARY_PATH"
+          "PATH=${pkgs.mu}/bin:$PATH"
+        ];
+      };
+      Install = { WantedBy = [ "graphical-session.target" ]; };
     };
 
     home.shellAliases = {

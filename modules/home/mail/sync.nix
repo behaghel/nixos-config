@@ -1,4 +1,4 @@
-{ pkgs, lib, config, maildir, stampFile }:
+{ pkgs, lib, config, maildir, stampFile, statusFile }:
 let
   gpgBin = "${config.programs.gpg.package}/bin";
   expectSmartcard = config.programs.gpg.expectSmartcard;
@@ -13,6 +13,7 @@ let
         if [ "$VERBOSE" = 1 ] || [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then
           echo "mail-sync: smartcard not detected, skipping sync" >&2
         fi
+        write_status "missing-smartcard" "smartcard missing" "$last_success" "$last_attempt"
         exit 0
       fi
     fi
@@ -27,8 +28,10 @@ let
     MBSYNC_BIN="''${MAIL_SYNC_MBSYNC_BIN-${pkgs.isync}/bin/mbsync}"
     MAILDIR_DEFAULT="${maildir}"
     STAMP_DEFAULT="${stampFile}"
+    STATUS_DEFAULT="${statusFile}"
     MAILDIR="''${MAIL_SYNC_MAILDIR-$MAILDIR_DEFAULT}"
     STAMP_FILE="''${MAIL_SYNC_STAMP_FILE-$STAMP_DEFAULT}"
+    STATUS_FILE="''${MAIL_SYNC_STATUS_FILE-$STATUS_DEFAULT}"
     AUTOCORRECT_BIN="''${MAIL_SYNC_AUTOCORRECT_BIN-${mailSyncAutocorrectScript}/bin/mail-sync-autocorrect}"
     AUTOCORRECT_FLAG="''${MAIL_SYNC_AUTOCORRECT:-0}"
     AUTOCORRECT_DRY_RUN="''${MAIL_SYNC_AUTOCORRECT_DRY_RUN:-0}"
@@ -59,6 +62,21 @@ USAGE
       fi
       printf '%s\n' "$log" | env MAIL_SYNC_ROOT="$MAILDIR" \
         "$AUTOCORRECT_BIN" $args
+    }
+
+    write_status() {
+      local status="$1"
+      local message="$2"
+      local success_ts="$3"
+      local attempt_ts="$4"
+      local target="$STATUS_FILE"
+      local dir
+      dir="$(dirname "$target")"
+      mkdir -p "$dir"
+      cat >"$target.tmp" <<EOF
+{"status":"$status","message":"$message","last_attempt":$attempt_ts,"last_success":$success_ts}
+EOF
+      mv "$target.tmp" "$target"
     }
 
     LOCKFILE_DEFAULT="${config.xdg.runtimeDir or (config.home.homeDirectory + "/.cache")}/mail-sync.lock"
@@ -132,6 +150,10 @@ USAGE
       echo "mail-sync: using mbsync: $MBSYNC_BIN" >&2
       if command -v ldd >/dev/null 2>&1; then ldd "$MBSYNC_BIN" >&2 || true; fi
     fi
+    last_attempt=$(date +%s)
+    last_success=0
+    [ -f "$STAMP_FILE" ] && last_success=$(cat "$STAMP_FILE" 2>/dev/null || echo 0)
+    write_status "running" "starting" "$last_success" "$last_attempt"
     ${smartcardGuard}
 
     mkdir -p "$MAILDIR"
@@ -207,6 +229,7 @@ USAGE
       else
         /usr/bin/osascript -e 'display notification "Mail sync failed" with title "Mail"' 2>/dev/null || true
       fi
+      write_status "failed" "sync failed" "$last_success" "$last_attempt"
       exit 1
     done
     if [ "$VERBOSE" = 1 ] || [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then
@@ -215,7 +238,30 @@ USAGE
 
     if [ "$NOTIFY_SUCCESS" = 1 ] && command -v notify-send >/dev/null 2>&1; then
       new_total=$(printf '%s\n' "$sync_log" | awk 'match($0,/Near: \+([0-9]+)/,m){sum+=m[1]} END{print sum+0}')
-      notify-send "📬 Mail synced" "Fetched $new_total new messages" -i mail-read || true
+      if [ "$new_total" -gt 0 ] 2>/dev/null; then
+        latest_path="$(find "$MAILDIR" -type f -printf '%T@ %p\n' 2>/dev/null | sort -nr | head -n1 | cut -d' ' -f2-)"
+        latest_info=""
+        if [ -n "$latest_path" ] && [ -r "$latest_path" ]; then
+          latest_info="$(python3 - "$latest_path" -c 'import email, sys, pathlib
+p = pathlib.Path(sys.argv[1])
+try:
+    with p.open("rb") as f:
+        msg = email.message_from_binary_file(f)
+    sender = (msg.get("From","") or "").strip()
+    subject = (msg.get("Subject","") or "").strip()
+    parts = [x for x in (sender, subject) if x]
+    if parts:
+        print(" -- ".join(parts))
+except Exception:
+    pass
+')"
+        fi
+        body="Fetched $new_total new messages"
+        if [ -n "$latest_info" ]; then
+          body="$body"$'\n'"$latest_info"
+        fi
+        notify-send "📬 Mail synced" "$body" -i mail-read || true
+      fi
     fi
 
     STAMP_DIR="$(dirname "$STAMP_FILE")"
@@ -223,6 +269,8 @@ USAGE
     tmp="$STAMP_DIR/.last.$$"
     date +%s >"$tmp"
     mv "$tmp" "$STAMP_FILE"
+    last_success=$(cat "$STAMP_FILE" 2>/dev/null || echo "$last_attempt")
+    write_status "ok" "synced" "$last_success" "$last_attempt"
 
     if [ "$VERBOSE" = 1 ]; then
       echo "mail-sync: completed successfully" >&2
@@ -231,4 +279,7 @@ USAGE
 in
 {
   inherit mailSyncScript mailSyncAutocorrectScript;
+  mailTrayScript = import ./tray-script.nix {
+    inherit pkgs lib;
+  };
 }

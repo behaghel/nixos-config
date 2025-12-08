@@ -37,6 +37,7 @@ in (import ./modules/home/mail/sync.nix {
   config = dummyConfig;
   maildir = "/tmp/mail-sync-tests";
   stampFile = "/tmp/mail-sync-tests/stamp";
+  statusFile = "/tmp/mail-sync-tests/status.json";
 }).mailSyncScript
 EOF
 )
