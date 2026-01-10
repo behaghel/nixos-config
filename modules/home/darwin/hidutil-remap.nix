@@ -69,13 +69,17 @@ let
     {
       enable = true;
       config = {
+        Label = "org.nixos.keyboard-${toString productId}";
         ProgramArguments = [ "${script}/bin/apply-keybindings" ];
         RunAtLoad = true;
         StartInterval = 15; # retry periodically to survive re-plugs
+        StandardOutPath = "/tmp/keyboard-${toString productId}.log";
+        StandardErrorPath = "/tmp/keyboard-${toString productId}.log";
       };
     };
 in
 lib.mkIf (pkgs.stdenv.isDarwin && (cfg.enableKeyMapping or false)) {
-  services.launchd.agents = lib.listToAttrs (map (m: lib.nameValuePair "hm-keyboard-${toString m.productId}" (mkAgent m)) cfg.mappings);
+  launchd.agents = lib.listToAttrs (
+    map (m: lib.nameValuePair "org.nixos.keyboard-${toString m.productId}" (mkAgent m)) cfg.mappings
+  );
 }
-

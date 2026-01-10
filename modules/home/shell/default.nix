@@ -55,6 +55,7 @@
       # ncdu      # du++
       moreutils # ts, etc.
       tree
+      imagemagick
 
       # asciinema # screencast your terminal
 

@@ -20,19 +20,19 @@ let
     ]
     ++ lib.optionals isLinux [ pkgs.libappindicator-gtk3 ]
   );
-  trayDevPackages = with pkgs; [
-    python3Packages.pytest
-    python3Packages.pystray
-    python3Packages.pillow
-    python3Packages.pygobject3
-  ] ++ lib.optionals isLinux [
-    gtk3
-    gdk-pixbuf
-    libappindicator-gtk3
-    pango
-    cairo
-    gobject-introspection
-  ];
+  trayDevPackages = with pkgs;
+    [ python3Packages.pytest ]
+    ++ lib.optionals isLinux [
+      python3Packages.pystray
+      python3Packages.pillow
+      python3Packages.pygobject3
+      gtk3
+      gdk-pixbuf
+      libappindicator-gtk3
+      pango
+      cairo
+      gobject-introspection
+    ];
 in
 {
   packages = with pkgs; [

@@ -23,3 +23,7 @@ Thumbs.db
 devenv.local.nix
 .devenv.flake.nix
 .pre-commit-config.yaml
+*.qcow2
+/keys/*_ed25519
+/artifacts/
+/.cache/

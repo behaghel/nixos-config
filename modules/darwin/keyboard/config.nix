@@ -1,4 +1,7 @@
-{
+rec {
+    # Key remap toggles (Realforce): set to true to swap GUI<->Alt on left/right.
+    swapLeftGuiAlt = true;
+    swapRightGuiAlt = false;
     enableKeyMapping = true;
   spaces = {
     directDesktopShortcuts = {
@@ -13,6 +16,7 @@
   };
     mappings = let
       commonMappings = { "Keyboard Caps Lock" = "Keyboard Escape"; };
+      optAttrs = cond: attrs: if cond then attrs else {};
     in [
       {
         # builtin keyboard
@@ -33,13 +37,15 @@
         vendorId = 2131;
         productId = 292;
         mappings =
-          { # cmd <=> alt
+          (optAttrs swapLeftGuiAlt {
             "Keyboard Left GUI" = "Keyboard Left Alt";
             "Keyboard Left Alt" = "Keyboard Left GUI";
-            # altgr
+          }) //
+          (optAttrs swapRightGuiAlt {
             "Keyboard Right GUI" = "Keyboard Right Alt";
             "Keyboard Right Alt" = "Keyboard Right GUI";
-          } // commonMappings;
+          }) //
+          commonMappings;
       }
     ];
 }

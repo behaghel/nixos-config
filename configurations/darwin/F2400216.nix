@@ -8,6 +8,7 @@ in
   imports = [
     self.darwinModules.default
     ../../modules/nixos/gui/fonts.nix
+    ../../modules/darwin/utm-builder.nix
   ];
 
   nixpkgs.hostPlatform = "aarch64-darwin";
@@ -21,6 +22,7 @@ in
 
   environment.systemPackages = [
     pkgs.jdk21_headless
+    pkgs.qemu
   ];
 
   hub.darwin.apps = {
@@ -37,9 +39,35 @@ in
       "hammerspoon"
       "grishka/grishka/neardrop"
       "firefox"
+      "gimp"
+      "utm"
     ];
   };
 
-  # Use Touch ID for sudo on macOS (new option name in nix-darwin).
-  security.pam.services.sudo_local.touchIdAuth = true;
+  # No Touch ID override for sudo; fall back to default PAM stack.
+
+  nix.linux-builder.enable = true;
+
+  hub.darwin.utmBuilder = {
+    enable = true;
+    imagePath = "/var/lib/utm-builder/builder-x86_64-25.11.qcow2";
+    port = 2223;
+    cpus = 4;
+    memoryMB = 4096;
+    privateKeySource = ../../keys/utm-builder_ed25519;
+    additionalBuilders = [
+      "ssh-ng://builder@builder-arm aarch64-linux /etc/nix/builder_ed25519 2 1 kvm,benchmark,big-parallel"
+    ];
+    sshConfigExtra = ''
+Host builder-arm
+  Hostname 127.0.0.1
+  Port 31022
+  IdentityFile /etc/nix/builder_ed25519
+  IdentitiesOnly yes
+'';
+  };
+
+  # Make Home Manager share the system pkgs (avoids rebuilding stdenv/toolchain twice).
+  home-manager.useGlobalPkgs = true;
+  home-manager.useUserPackages = true;
 }

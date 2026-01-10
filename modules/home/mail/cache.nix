@@ -8,7 +8,19 @@ let
     mkdir -p "$cache_dir"
     lock_file="$cache_dir/.pass-lock"
     exec 9>"$lock_file"
-    flock -x 9
+    if command -v flock >/dev/null 2>&1; then
+      flock -x 9
+    else
+      lockdir="$lock_file.d"
+      tries=0
+      # Busy-wait with mkdir-based lock (portable) with a short retry loop
+      while ! mkdir "$lockdir" 2>/dev/null; do
+        tries=$((tries + 1))
+        [ $tries -ge 30 ] && break
+        sleep 1
+      done
+      trap 'rmdir "$lockdir" 2>/dev/null || true' EXIT INT TERM
+    fi
     key=$(printf '%s' "$entry" | sha256sum | awk '{print $1}')
     cache_file="$cache_dir/$key"
     now=$(date +%s)
@@ -47,7 +59,18 @@ let
       mkdir -p "$cache_dir"
       lock_file="$cache_dir/.oauth-lock"
       exec 9>"$lock_file"
-      flock -x 9
+      if command -v flock >/dev/null 2>&1; then
+        flock -x 9
+      else
+        lockdir="$lock_file.d"
+        tries=0
+        while ! mkdir "$lockdir" 2>/dev/null; do
+          tries=$((tries + 1))
+          [ $tries -ge 30 ] && break
+          sleep 1
+        done
+        trap 'rmdir "$lockdir" 2>/dev/null || true' EXIT INT TERM
+      fi
 
       pass_cached() {
         key="$1"

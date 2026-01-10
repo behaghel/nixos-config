@@ -20,7 +20,11 @@ in
 
   myusers = [ "hub" ];
 
-  environment.systemPackages = [ pkgs.jdk21_headless ]; # for languagetools from Emacs
+  nix.linux-builder.enable = true;
+
+  environment.systemPackages = [
+    pkgs.jdk21_headless # for languagetools from Emacs
+  ];
 
   hub.darwin.apps = {
     enable = true;
@@ -28,6 +32,9 @@ in
       "anki"
       "zotero"
       "1password"
+      "gimp"
     ];
   };
+
+  # No Touch ID override for sudo; fall back to default PAM stack.
 }

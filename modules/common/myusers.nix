@@ -1,4 +1,3 @@
-# List of users for darwin or nixos system and their top-level configuration.
 { flake, pkgs, lib, config, ... }:
 let
   inherit (flake.inputs) self;
@@ -14,9 +13,9 @@ in
       default =
         let
           dirContents = builtins.readDir (self + /configurations/home);
-          fileNames = builtins.attrNames dirContents; # Extracts keys: [ "hubertbehaghel.nix" ]
-          regularFiles = builtins.filter (name: dirContents.${name} == "regular") fileNames; # Filters for regular files
-          baseNames = map (name: builtins.replaceStrings [ ".nix" ] [ "" ] name) regularFiles; # Removes .nix extension
+          fileNames = builtins.attrNames dirContents;
+          regularFiles = builtins.filter (name: dirContents.${name} == "regular") fileNames;
+          baseNames = map (name: builtins.replaceStrings [ ".nix" ] [ "" ] name) regularFiles;
         in
         baseNames;
     };
@@ -26,10 +25,9 @@ in
     # For home-manager to work.
     # https://github.com/nix-community/home-manager/issues/4026#issuecomment-1565487545
     users.users = mapListToAttrs config.myusers (name:
-      lib.optionalAttrs pkgs.stdenv.isDarwin
-        {
-          home = "/Users/${name}";
-        } // lib.optionalAttrs pkgs.stdenv.isLinux {
+      lib.optionalAttrs pkgs.stdenv.isDarwin {
+        home = "/Users/${name}";
+      } // lib.optionalAttrs pkgs.stdenv.isLinux {
         isNormalUser = true;
       }
     );

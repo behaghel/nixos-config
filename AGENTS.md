@@ -23,6 +23,7 @@
 
 ### Agent Activation Policy
 - Always ask the user before running `nix run` (activation) or otherwise applying the configuration. The user prefers to trigger activation manually. Only proceed without asking if explicit permission was given in the current session.
+- Never run `sudo` commands yourself; ask the user to run them when needed.
 
 ## nixos-unified Autowiring
 - Default run target: `modules/flake/toplevel.nix` sets `apps.default` and `packages.default` so `nix run` executes the activation app for the current user (via `modules/flake/activate-home.nix`).
@@ -48,6 +49,16 @@
 ## Security & Configuration Tips
 - Do not commit secrets. Prefer external secret stores (e.g., `password-store`, GPG) and import at runtime.
 - Pin inputs via `flake.lock`; update with `nix run .#update` and review diffs.
+
+## Launchd Notes (darwin)
+
+- When defining daemons in nix-darwin, set command arguments under `serviceConfig.ProgramArguments` (not `programArguments`). Put `EnvironmentVariables` inside `serviceConfig` as well.
+
+## Nix Builders Gotcha
+
+- If you change `nix.settings.builders` to a semicolon-separated list, ensure the old `builders = …key…` entry is removed from `/etc/nix/nix.conf` or the client will keep using the stale value. One-time cleanup:
+  - `sudo sed -i '' '/^builders =/d;/^ssh-key/d' /etc/nix/nix.conf`
+  - Then rerun activation (or set `NIX_CONFIG="builders = …"` for that run) so the new value is written.
 
 ## macOS Keyboard Remapping Notes (Sonoma/Sequoia)
 

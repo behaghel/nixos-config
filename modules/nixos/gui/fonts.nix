@@ -7,7 +7,7 @@
       liberation_ttf
       roboto
       raleway
-      ubuntu_font_family
+      ubuntu-classic
       # unfree
       # corefonts
       # helvetica-neue-lt-std

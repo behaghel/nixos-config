@@ -104,6 +104,17 @@ in
     '';
   };
 
+  # Require PIN on every use (no agent caching)
+  options.programs.gpg.requirePinAlways = lib.mkOption {
+    type = lib.types.bool;
+    default = false;
+    description = ''
+      When true, gpg-agent will not cache your card PIN: every signing,
+      decrypt, or SSH auth via gpg-agent will prompt for the PIN.
+      Useful if you want positive confirmation instead of relying on touch.
+    '';
+  };
+
   config = {
     home.packages =
       let
@@ -139,7 +150,8 @@ in
             "default-recipient-self" = true;
             "auto-key-locate" = "local";
             "keyserver" = "hkps://keys.openpgp.org";
-            "throw-keyids" = true;
+            # Keep key IDs visible so mobile clients (e.g., OpenKeyChain) can decrypt.
+            "throw-keyids" = false;
           };
           scdaemonSettings =
             lib.optionalAttrs (pcscLib != null) {
@@ -158,13 +170,14 @@ in
     services.gpg-agent = {
       enable = true;
       enableExtraSocket = true;
-      grabKeyboardAndMouse = true;
+      # On macOS, grabbing keyboard/mouse can interfere with GUI prompts.
+      grabKeyboardAndMouse = lib.mkIf pkgs.stdenv.isDarwin false;
       enableScDaemon = expectSmartcard;
       enableSshSupport = expectSmartcard;
-      defaultCacheTtl = 43200;
-      defaultCacheTtlSsh = 43200;
-      maxCacheTtl = 86400;
-      maxCacheTtlSsh = 86400;
+      defaultCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 43200);
+      defaultCacheTtlSsh = lib.mkDefault (if cfg.requirePinAlways then 0 else 43200);
+      maxCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 86400);
+      maxCacheTtlSsh = lib.mkDefault (if cfg.requirePinAlways then 0 else 86400);
       pinentry.package = pinentryPackage;
       enableZshIntegration = true;
       enableBashIntegration = true;
@@ -228,4 +241,7 @@ in
         fi
       '';
   };
+
+  # Clean up legacy pinentry-program lines that used to live in gpg.conf.
+  # gpg.conf does not accept pinentry-program; gpg-agent handles it.
 }

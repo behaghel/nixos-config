@@ -28,8 +28,8 @@ let
     statusFile = cfg.statusFile;
   };
   inherit (syncArtefacts) mailSyncScript mailSyncAutocorrectScript;
-  mailTrayScript = syncArtefacts.mailTrayScript;
-  trayLauncher = pkgs.writeShellScript "mail-sync-tray-launch" ''
+  mailTrayScript = syncArtefacts.mailTrayScript or null;
+  trayLauncher = if pkgs.stdenv.isLinux then pkgs.writeShellScript "mail-sync-tray-launch" ''
     set -euo pipefail
     RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
     export XDG_RUNTIME_DIR="$RUNTIME_DIR"
@@ -41,7 +41,7 @@ let
       export DISPLAY=":0"
     fi
     exec ${mailTrayScript}/bin/mail-tray
-  '';
+  '' else null;
 in {
   imports = [ ./imapnotify.nix ];
 
@@ -84,11 +84,9 @@ in {
   };
 
   config = mkIf cfg.enable {
-    home.packages = with pkgs; [
-      mu
-      gmailOAuthHelper
-      mailTrayScript
-    ];
+    home.packages = with pkgs;
+      [ mu gmailOAuthHelper ]
+      ++ lib.optionals pkgs.stdenv.isLinux [ mailTrayScript ];
 
     programs = {
       mu.enable = false;
@@ -226,6 +224,81 @@ SyncState "*"
       };
       Install = { WantedBy = [ "graphical-session.target" ]; };
     };
+
+    # Darwin launchd agents: periodic sync + health monitor
+    launchd.agents = lib.mkIf pkgs.stdenv.isDarwin (
+      let
+        intervalSec =
+          let m = builtins.match "([0-9]+)([smh]?)" cfg.interval;
+          in if m == null then 600 else
+            let n = builtins.fromJSON (builtins.elemAt m 0);
+                u = builtins.elemAt m 1;
+                mul = if u == "h" then 3600 else if u == "m" then 60 else 1;
+            in n * mul;
+        healthScript = pkgs.writeShellScript "mail-sync-health-darwin" ''
+          set -euo pipefail
+          stamp=${lib.escapeShellArg cfg.stampFile}
+          alert_stamp=${lib.escapeShellArg cfg.alertStampFile}
+          mkdir -p "$(dirname "$stamp")" "$(dirname "$alert_stamp")"
+          now=$(date +%s)
+          interval_sec=${toString intervalSec}
+          threshold=$(( interval_sec * 3 ))
+          critical_threshold=14400
+          alert_interval=$(( interval_sec * 3 / 2 ))
+          [ "$alert_interval" -lt 900 ] && alert_interval=900
+          last=0
+          [ -f "$stamp" ] && last=$(cat "$stamp" 2>/dev/null || echo 0)
+          age=$(( now - last ))
+          last_alert=0
+          [ -f "$alert_stamp" ] && last_alert=$(cat "$alert_stamp" 2>/dev/null || echo 0)
+          date_str() { s="$1"; if [ "$s" -eq 0 ]; then echo unknown; else (date -d @"$s" 2>/dev/null || date -r "$s" 2>/dev/null || echo "$s"); fi; }
+          notify=0; urgency=normal
+          if [ "$last" -eq 0 ] || [ "$age" -gt "$threshold" ]; then
+            if [ $(( now - last_alert )) -ge "$alert_interval" ]; then
+              notify=1; [ "$age" -gt "$critical_threshold" ] && urgency=critical || true
+            fi
+            ("${mailSyncScript}/bin/mail-sync-run" || true) &
+            if [ "$notify" -eq 1 ]; then
+              msg="Last run: $(date_str "$last")"
+              if command -v terminal-notifier >/dev/null 2>&1; then
+                terminal-notifier -title "📭 Mail sync stale" -message "$msg" || true
+              else
+                /usr/bin/osascript -e "display notification \"$msg\" with title \"Mail sync stale\"" 2>/dev/null || true
+              fi
+              printf '%s\n' "$now" >"$alert_stamp.tmp" && mv "$alert_stamp.tmp" "$alert_stamp"
+            fi
+          fi
+        '';
+      in {
+        "mail-sync" = {
+          enable = true;
+          config = {
+            Label = "org.nixos.mail-sync";
+            ProgramArguments = [ "${mailSyncScript}/bin/mail-sync-run" ];
+            EnvironmentVariables = {
+              VERBOSE = "0";
+              MAIL_PASS_SUPPRESS_NOTIFY = "1";
+              MAIL_SYNC_AUTOCORRECT = "1";
+            };
+            RunAtLoad = true;
+            StartInterval = intervalSec;
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/mail-sync.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/mail-sync.log";
+          };
+        };
+        "mail-sync-health" = {
+          enable = true;
+          config = {
+            Label = "org.nixos.mail-sync-health";
+            ProgramArguments = [ "${healthScript}" ];
+            RunAtLoad = true;
+            StartInterval = intervalSec;
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/mail-sync-health.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/mail-sync-health.log";
+          };
+        };
+      }
+    );
 
     home.shellAliases = {
       mail-sync = "MAIL_SYNC_WAIT=1 ${mailSyncScript}/bin/mail-sync-run";

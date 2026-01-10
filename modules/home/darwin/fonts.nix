@@ -8,7 +8,7 @@ let
     liberation_ttf
     roboto
     raleway
-    ubuntu_font_family
+    ubuntu-classic
     # Personal/fonts used in Emacs
     etBook
     emacs-all-the-icons-fonts
@@ -48,4 +48,3 @@ in
     home.file = fontLinks;
   };
 }
-

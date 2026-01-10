@@ -2,8 +2,8 @@
 
 let
   isDarwin = pkgs.stdenv.isDarwin;
-  ghosttyPkg = pkgs.ghostty;
-  ghosttyAvailable = !(ghosttyPkg.meta.broken or false);
+  ghostty = import ./common.nix { inherit pkgs lib; };
+  inherit (ghostty) ghosttyPkg ghosttyAvailable;
   # macOS config path for Ghostty
   ghosttyConfigPath = "Library/Application Support/com.mitchellh.ghostty/config";
   ghosttyTerminfo = "${ghosttyPkg.terminfo}/share/terminfo/x/xterm-ghostty";
@@ -15,8 +15,10 @@ in
       # for tmux navigation, and ensure Ctrl+Space reaches the shell (NUL).
       home.file."${ghosttyConfigPath}" = {
         text = ''
-        # tmux navigation (BÉPO): map Cmd+c/t/s/r -> ESC c/t/s/r
-        # and also map Cmd+Shift+c/r -> ESC c/r for prev/next window.
+        # tmux navigation (BÉPO):
+        # - Cmd+c/t/s/r -> ESC c/t/s/r (Meta on BEPO nav keys)
+        # - Cmd+Shift+c/r -> ESC C/R (Meta-Shift for prev/next window)
+        # - Alt variants too: Alt+c/t/s/r and Alt+Shift+c/r
         keybind = super+c=esc:c
         keybind = super+t=esc:t
         keybind = super+s=esc:s
@@ -25,6 +27,14 @@ in
         keybind = super+shift+c=esc:C
         keybind = super+shift+r=esc:R
 
+        # Alt (Option) variants — map to the same Meta sequences
+        keybind = alt+c=esc:c
+        keybind = alt+t=esc:t
+        keybind = alt+s=esc:s
+        keybind = alt+r=esc:r
+        keybind = alt+shift+c=esc:C
+        keybind = alt+shift+r=esc:R
+
         # Avoid consuming Cmd+Shift+C/T for tmux; keep paste bindings below.
         # Ensure paste is always available via Cmd+V
         keybind = super+v=paste_from_clipboard
@@ -32,6 +42,11 @@ in
 
         # Ensure Ctrl+Space is delivered as NUL to the terminal
         keybind = ctrl+space=text:\x00
+
+        # Make Cmd+Enter behave like Option+Enter: send Meta-Enter (ESC + CR)
+        # This allows tmux bindings for M-Enter to work with either modifier.
+        keybind = alt+enter=text:\x1b\x0d
+        keybind = super+enter=text:\x1b\x0d
 
         # Enter tmux copy-mode with Cmd+/ by sending Meta+.
         # On Bépo, '.' collides with Cmd+V (period on V key). Slash avoids paste.

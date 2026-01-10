@@ -106,6 +106,20 @@ in
       description = "Whether to remap the Tilde key on non-us keyboards.";
     };
 
+    # Optional toggles to swap Command(Super) with Alt on left/right for a
+    # specific keyboard defined in config.nix. Mappings are applied only when
+    # enabled in that per-device config.
+    services.local-modules.nix-darwin.keyboard.swapLeftGuiAlt = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Swap Left GUI (Command) with Left Alt for selected devices.";
+    };
+    services.local-modules.nix-darwin.keyboard.swapRightGuiAlt = mkOption {
+      type = types.bool;
+      default = false;
+      description = "Swap Right GUI (Command) with Right Alt (AltGr) for selected devices.";
+    };
+
     services.local-modules.nix-darwin.keyboard.disableInputSourceHotkeys = mkOption {
       type = types.bool;
       default = true;

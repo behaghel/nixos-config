@@ -19,6 +19,8 @@ in
     ];
   services.local-modules.nix-darwin.keyboard.bepo.enable = true;
   programs.gpg.useNixGPG = true;
+  # On macOS, require PIN entry for every card operation (no agent caching)
+  programs.gpg.requirePinAlways = lib.mkIf (!isLinux) true;
 
   # Defined by /modules/home/me.nix
   # And used all around in /modules/home/*

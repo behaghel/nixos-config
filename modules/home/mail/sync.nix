@@ -4,7 +4,7 @@ let
   expectSmartcard = config.programs.gpg.expectSmartcard;
   isDarwin = pkgs.stdenv.isDarwin;
   runtimeInputs =
-    [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils config.programs.gpg.package ]
+    [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.gawk config.programs.gpg.package ]
     ++ lib.optionals (!isDarwin) [ pkgs.util-linux ]
     ++ lib.optionals isDarwin [ pkgs.terminal-notifier ];
   smartcardGuard = lib.optionalString expectSmartcard ''
@@ -24,7 +24,7 @@ let
   mailSyncScript = pkgs.writeShellScriptBin "mail-sync-run" ''
     set -euo pipefail
     VERBOSE="''${VERBOSE:-0}"
-    export PATH=${lib.makeBinPath [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.util-linux pkgs.gawk config.programs.gpg.package ]}:"$PATH"
+    export PATH=${lib.makeBinPath runtimeInputs}:"$PATH"
     MBSYNC_BIN="''${MAIL_SYNC_MBSYNC_BIN-${pkgs.isync}/bin/mbsync}"
     MAILDIR_DEFAULT="${maildir}"
     STAMP_DEFAULT="${stampFile}"
@@ -149,6 +149,13 @@ EOF
       set -x
       echo "mail-sync: using mbsync: $MBSYNC_BIN" >&2
       if command -v ldd >/dev/null 2>&1; then ldd "$MBSYNC_BIN" >&2 || true; fi
+    fi
+    # Ensure gpg-agent is up and associated with a UI session; improves pinentry reliability under launchd
+    if command -v gpgconf >/dev/null 2>&1; then
+      gpgconf --launch gpg-agent || true
+    fi
+    if command -v gpg-connect-agent >/dev/null 2>&1; then
+      gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
     fi
     last_attempt=$(date +%s)
     last_success=0
@@ -277,9 +284,9 @@ except Exception:
     fi
   '';
 in
-{
+({
   inherit mailSyncScript mailSyncAutocorrectScript;
-  mailTrayScript = import ./tray-script.nix {
-    inherit pkgs lib;
-  };
 }
+// lib.optionalAttrs pkgs.stdenv.isLinux {
+  mailTrayScript = import ./tray-script.nix { inherit pkgs lib; };
+})

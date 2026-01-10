@@ -1,8 +1,8 @@
 { pkgs, lib, ... }:
 lib.mkIf pkgs.stdenv.isDarwin (
   let
-    ghosttyPkg = pkgs.ghostty;
-    ghosttyAvailable = !(ghosttyPkg.meta.broken or false);
+    ghostty = import ../ghostty/common.nix { inherit pkgs lib; };
+    inherit (ghostty) ghosttyPkg ghosttyAvailable;
   in
   {
     home.packages =

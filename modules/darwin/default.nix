@@ -1,12 +1,12 @@
 # Configuration common to all macOS systems
-{ flake, ... }:
+{ flake, pkgs, ... }:
 let
   inherit (flake) inputs config;
   inherit (inputs) self;
 in
 {
   imports = [
-    self.nixosModules.common
+    ../common/myusers.nix
     ./zsh-completion-fix.nix
     ./keyboard
     ./system-defaults.nix

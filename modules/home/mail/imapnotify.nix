@@ -152,6 +152,25 @@ in {
   config = mkIf cfg.enable {
     home.packages = [ pkgs.goimapnotify ] ++ (if cfg.fullSync or false then [] else (map (n: mkOnNewScript n) selected));
     xdg.configFile = xdgFiles;
-    systemd.user.services = userServices;
+    systemd.user.services = lib.mkIf pkgs.stdenv.isLinux userServices;
+    launchd.agents = lib.mkIf pkgs.stdenv.isDarwin (
+      let
+        mkAgent = name: {
+          enable = true;
+          config = {
+            Label = "org.nixos.imap-notify-${name}";
+            ProgramArguments = [ "${pkgs.goimapnotify}/bin/goimapnotify" "-log-level" "info" "-conf" "${config.home.homeDirectory}/.config/goimapnotify/${name}.yml" ];
+            EnvironmentVariables = {
+              SASL_LOG_LEVEL = "0";
+              PATH = "${config.home.profileDirectory}/bin:/usr/bin:/bin:/usr/sbin:/sbin";
+            };
+            RunAtLoad = true;
+            KeepAlive = true;
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/imap-notify-${name}.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/imap-notify-${name}.log";
+          };
+        };
+      in builtins.listToAttrs (map (n: lib.nameValuePair "imap-notify-${n}" (mkAgent n)) selected)
+    );
   };
 }
