@@ -44,6 +44,14 @@ in
           openssh.authorizedKeys.keys = [ me.sshKey ];
         };
 
+        # Ensure the installer environment can pull emacs overlay binaries from Cachix.
+        nix.settings = {
+          substituters = lib.mkAfter [ "https://emacs.cachix.org" ];
+          trusted-public-keys = lib.mkAfter [
+            "emacs.cachix.org-1:TU3ITeTVpL41RDdfJnr3CGqoTrs1sCWlpPhPkG2EW7E="
+          ];
+        };
+
         # Headless monitoring defaults on the ISO.
         services.prometheus.exporters.node.enable = true;
         services.smartd.enable = true;
