@@ -104,10 +104,9 @@ in
     ];
   };
 
-  # Avoid building emacs-unstable locally on this low-power host; use a cached nixpkgs build.
-  # Use a cached nixpkgs Emacs build on this host to avoid overlay rebuilds.
-  home-manager.users.hub.programs.emacs.package = pkgs.emacs29;
-  home-manager.users.hub.services.emacs.package = pkgs.emacs29;
+  # Override Emacs to a cached build on this host (resolve duplicate option by forcing).
+  home-manager.users.hub.programs.emacs.package = lib.mkForce pkgs.emacs30;
+  home-manager.users.hub.services.emacs.package = lib.mkForce pkgs.emacs30;
 
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"
