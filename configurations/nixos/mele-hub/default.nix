@@ -151,6 +151,10 @@ in
       experimental-features = [ "nix-command" "flakes" ];
       auto-optimise-store = true;
       trusted-users = [ "root" "hub" ];
+      substituters = lib.mkAfter [ "https://emacs.cachix.org" ];
+      trusted-public-keys = lib.mkAfter [
+        "emacs.cachix.org-1:TU3ITeTVpL41RDdfJnr3CGqoTrs1sCWlpPhPkG2EW7E="
+      ];
     };
     gc = {
       automatic = true;
