@@ -8,8 +8,8 @@ let
   ccidNoKobil = pkgs.ccid.overrideAttrs (old: {
     # Drop the Kobil mIDentity helper call to avoid failing the udev absolute-path check.
     postInstall = (old.postInstall or "") + ''
-      substituteInPlace $out/lib/udev/rules.d/92_pcscd_ccid.rules \
-        --regexp-extended '/usr/sbin/Kobil_mIDentity_switch/d'
+      sed -i '/Kobil_mIDentity_switch/d' \
+        "$out/lib/udev/rules.d/92_pcscd_ccid.rules"
     '';
   });
 in

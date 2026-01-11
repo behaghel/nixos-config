@@ -45,8 +45,11 @@ drv_path=$(
 echo "Realising ${drv_path} via remote builders (may retry on transient failures)…"
 attempt=1
 out_path=""
+rm -f "${out_link}"
 while [ $attempt -le 5 ]; do
-  if out_path=$(NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 nix-store -r "${drv_path}" --option builders "${builders}" --max-jobs 1); then
+  if NIXPKGS_ALLOW_UNSUPPORTED_SYSTEM=1 \
+    nix-store -r "${drv_path}" --option builders "${builders}" --max-jobs 1 --add-root "${out_link}" --indirect >/dev/null; then
+    out_path=$(readlink -f "${out_link}")
     break
   fi
   echo "Attempt ${attempt} failed; retrying…"
@@ -58,9 +61,12 @@ if [ -z "${out_path}" ]; then
   exit 1
 fi
 
-rm -f "${out_link}"
-ln -s "${out_path}" "${out_link}"
+qcow_src=$(find "${out_path}" -maxdepth 1 -type f -name '*.qcow2' | sort | head -n 1)
+if [ -z "${qcow_src}" ]; then
+  echo "No qcow2 image found in ${out_path}" >&2
+  exit 1
+fi
 
 qcow_name="${out_dir}/builder-x86_64-${nixos_release}.qcow2"
-cp -f "${out_path}/nixos.qcow2" "${qcow_name}"
+cp -f "${qcow_src}" "${qcow_name}"
 echo "QCOW2 image available at ${out_link} (store path) and copied to ${qcow_name}"
