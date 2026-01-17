@@ -16,17 +16,18 @@
 - Connect keyboard/monitor and the prepared USB key, then boot the MeLE and select the USB device (often via F7/F11 boot menu).
 - In the live shell, set up networking if needed (e.g., `nmcli device wifi connect <ssid> password <pw>`), then pull this repo if it’s not already present.
 - Partition and install using the helper script on the ISO:
-  - Run `sudo /etc/install-mele-hub.sh /dev/<disk> [ROOT_GiB] [DATA_GiB] [SWAP_GiB]` (defaults: 200G root, 256G data, 8G swap).
-  - The script wipes the disk, creates EFI/root/syncthing/swap, formats, mounts `/mnt`, `/mnt/boot`, `/mnt/srv/syncthing`, and enables swap.
-  - Then run `nixos-install --flake .#mele-hub` from the repo root.
+  - Basic: `sudo /etc/install-mele-hub.sh /dev/<disk> [ROOT_GiB] [DATA_GiB] [SWAP_GiB]`
+  - One-shot install (build + install): add `--install` to also build and install `.#mele-hub` with the emacs Cachix enabled. Run from the repo root (or set `FLAKE_ROOT=/path/to/repo`):
+    - `sudo /etc/install-mele-hub.sh --install /dev/<disk> [ROOT_GiB] [DATA_GiB] [SWAP_GiB]`
+  - The script wipes the disk, creates EFI/root/syncthing/swap, formats, mounts `/mnt`, `/mnt/boot`, `/mnt/srv/syncthing`, and enables swap. With `--install` it also copies the built system closure to `/mnt` and runs `nixos-install --system …`.
 - After install completes, reboot without the USB key; the system should boot into the configured `mele-hub` profile with Syncthing enabled and SSH authorized keys pre-seeded.
 
 ## Troubleshooting
 - If the ISO build fails on remote builders, rerun with `KEYS_DIR=/path/to/keys` if keys are stored elsewhere.
 - Verify the USB write by re-plugging and checking `lsblk` shows the ISO9660 partition.
 
-## Remote monitoring & alerts (headless)
+## Observability
+- **Built-in Grafana (internal, open access):** Grafana listens on `http://<mele-hub-ip>:3000` with anonymous read-only access and a pre-provisioned "MeLE Hub Health" dashboard (uptime, CPU, memory, root disk, network, disk IO). Datasource is the local Prometheus (`127.0.0.1:9090`); node_exporter is bound to `127.0.0.1:9100`.
 - **Disk/health alerts (low overhead):** set up a simple cron/systemd timer that runs `df -h / /srv/syncthing` and posts to a webhook (e.g., healthchecks.io, ntfy, Apprise). One-liner example for a timer: `df -h /srv/syncthing | tail -n +2 | awk '$5+0 > 85 {print}'` and send if triggered.
-- **Node metrics:** the ISO enables `services.prometheus.exporters.node` by default; scrape with your Prometheus/Grafana stack and alert on `node_filesystem_avail_bytes` for `/` and `/srv/syncthing`.
 - **Disk SMART checks:** the ISO enables `services.smartd`; configure email/webhook notifications for failing drives.
 - **Process/service visibility:** `systemd` will restart Syncthing; expose logs via `journalctl -u syncthing@hub`. If you want remote access, consider a lightweight VPN (Tailscale/WireGuard) and monitor via Prometheus.

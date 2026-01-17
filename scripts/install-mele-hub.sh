@@ -3,12 +3,19 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Usage: install-mele-hub.sh /dev/nvme0n1 [ROOT_SIZE_GiB] [DATA_SIZE_GiB] [SWAP_SIZE_GiB]
+Usage: install-mele-hub.sh [--install] /dev/nvme0n1 [ROOT_SIZE_GiB] [DATA_SIZE_GiB] [SWAP_SIZE_GiB]
 
 - Default sizes: ROOT=200GiB, DATA=256GiB, SWAP=8GiB on a 512GiB disk.
 - WARNING: This will wipe the target disk. Double-check the device path.
+- Optional --install: after partitioning/mounting, build and install .#mele-hub using local flake (expects flake in current dir or /root/nixos-config).
 USAGE
 }
+
+install_after=false
+if [[ ${1-} == "--install" ]]; then
+  install_after=true
+  shift
+fi
 
 disk=${1-}
 root_size=${2-200}
@@ -56,4 +63,33 @@ mount "${partprefix}1" /mnt/boot
 mount "${partprefix}3" /mnt/srv/syncthing
 swapon "${partprefix}4"
 
-echo "Partitioning and mounts ready. Next: run nixos-install --flake .#mele-hub"
+if $install_after; then
+  echo "Building system closure (.#mele-hub) with emacs cachix substituter…"
+  # Locate flake root: prefer CWD, then /root/nixos-config
+  flake_root=${FLAKE_ROOT:-$(pwd)}
+  if [[ ! -f "$flake_root/flake.nix" ]] && [[ -f /root/nixos-config/flake.nix ]]; then
+    flake_root=/root/nixos-config
+  fi
+  if [[ ! -f "$flake_root/flake.nix" ]]; then
+    echo "Cannot find flake.nix. Run from the repo root or set FLAKE_ROOT." >&2
+    exit 1
+  fi
+
+  pushd "$flake_root" >/dev/null
+  emacs_cache="https://emacs.cachix.org"
+  emacs_key="emacs.cachix.org-1:TU3ITeTVpL41RDdfJnr3CGqoTrs1sCWlpPhPkG2EW7E="
+  system_path=$(nix build .#nixosConfigurations.mele-hub.config.system.build.toplevel \
+    --no-link --print-out-paths \
+    --option substituters "https://cache.nixos.org $emacs_cache" \
+    --option trusted-public-keys "cache.nixos.org-1:WN+BsXkbQHd7US2PpL7aIs/cgCi2lvZFG5pPjC3Q6N8= $emacs_key")
+  popd >/dev/null
+
+  echo "Copying system closure to target…"
+  nix copy --to /mnt "$system_path"
+
+  echo "Installing using prebuilt system…"
+  nixos-install --system "$system_path" --no-root-passwd
+  echo "Install complete. You can now reboot without the USB key."
+else
+  echo "Partitioning and mounts ready. Next: run nixos-install --flake .#mele-hub"
+fi

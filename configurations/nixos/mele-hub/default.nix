@@ -12,6 +12,9 @@ let
         "$out/lib/udev/rules.d/92_pcscd_ccid.rules"
     '';
   });
+  grafanaDashboardsPath = pkgs.linkFarm "grafana-dashboards" {
+    "mele-hub-health.json" = ./grafana/health.json;
+  };
 in
 {
   imports = [
@@ -38,6 +41,8 @@ in
   };
 
   time.timeZone = "UTC";
+  console.keyMap = "fr-bepo";
+  boot.initrd.consoleKeyMap = "fr-bepo";
 
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
@@ -70,6 +75,61 @@ in
       ];
     };
     fail2ban.enable = true;
+    prometheus = {
+      enable = true;
+      listenAddress = "127.0.0.1";
+      port = 9090;
+      globalConfig.scrape_interval = "15s";
+      scrapeConfigs = [
+        {
+          job_name = "node";
+          static_configs = [
+            { targets = [ "127.0.0.1:9100" ]; }
+          ];
+        }
+      ];
+      exporters.node = {
+        enable = true;
+        enabledCollectors = [ "systemd" "processes" ];
+        port = 9100;
+        listenAddress = "127.0.0.1";
+      };
+    };
+    grafana = {
+      enable = true;
+      settings = {
+        server = {
+          http_addr = "0.0.0.0";
+          http_port = 3000;
+          domain = "mele-hub";
+        };
+        auth.anonymous = {
+          enabled = true;
+          org_role = "Viewer";
+        };
+        auth.disable_login_form = true;
+        security.admin_user = "admin";
+      };
+      provision = {
+        enable = true;
+        datasources.settings.datasources = [
+          {
+            name = "Prometheus";
+            type = "prometheus";
+            access = "proxy";
+            url = "http://127.0.0.1:9090";
+            isDefault = true;
+            uid = "prometheus";
+          }
+        ];
+        dashboards.settings.providers = [
+          {
+            name = "local-dashboards";
+            options.path = grafanaDashboardsPath;
+          }
+        ];
+      };
+    };
     syncthing = {
       enable = true;
       user = "syncthing";
@@ -168,6 +228,8 @@ in
   };
 
   powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
+
+  networking.firewall.allowedTCPPorts = lib.mkAfter [ 3000 ];
 
   system.stateVersion = "24.11";
 }
