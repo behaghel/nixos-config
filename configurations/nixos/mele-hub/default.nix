@@ -55,6 +55,7 @@ in
   services = {
     tlp.enable = true;
     timesyncd.enable = true;
+    pcscd.enable = true;
     openssh = {
       enable = true;
       settings = {
@@ -189,7 +190,15 @@ in
   services.journald.storage = "persistent";
 
   programs.zsh.enable = true;
-  environment.systemPackages = [ pkgs.git ];
+  environment.systemPackages = with pkgs; [
+    git
+    ripgrep
+    fd
+    eza
+    bat
+    jq
+    curl
+  ];
 
   users = {
     users.hub = {
