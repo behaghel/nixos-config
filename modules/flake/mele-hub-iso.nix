@@ -62,7 +62,7 @@ in
         # Helper script baked into the ISO to automate partitioning and mounts.
         environment.etc."install-mele-hub.sh" = {
           mode = "0755";
-          source = ../../scripts/install-mele-hub.sh;
+          source = ./configurations/nixos/mele-hub/install-mele-hub.sh;
         };
 
         environment.systemPackages = [

@@ -22,6 +22,9 @@ root_size=${2-200}
 data_size=${3-256}
 swap_size=${4-8}
 
+repo_target=${REPO_TARGET:-/root/nixos-config}
+repo_origin=${GIT_ORIGIN:-git@github.com:behaghel/nixos-config.git}
+
 if [[ -z "${disk}" || ! -b "${disk}" ]]; then
   echo "Error: specify a valid block device (e.g., /dev/nvme0n1 or /dev/sda)." >&2
   usage
@@ -63,12 +66,14 @@ mount "${partprefix}1" /mnt/boot
 mount "${partprefix}3" /mnt/srv/syncthing
 swapon "${partprefix}4"
 
+echo "Skipping repo clone; ensure ${repo_target} contains the flake before --install."
+
 if $install_after; then
   echo "Building system closure (.#mele-hub) with emacs cachix substituter…"
-  # Locate flake root: prefer CWD, then /root/nixos-config
+  # Locate flake root: prefer CWD, then repo_target
   flake_root=${FLAKE_ROOT:-$(pwd)}
-  if [[ ! -f "$flake_root/flake.nix" ]] && [[ -f /root/nixos-config/flake.nix ]]; then
-    flake_root=/root/nixos-config
+  if [[ ! -f "$flake_root/flake.nix" ]] && [[ -f "$repo_target/flake.nix" ]]; then
+    flake_root="$repo_target"
   fi
   if [[ ! -f "$flake_root/flake.nix" ]]; then
     echo "Cannot find flake.nix. Run from the repo root or set FLAKE_ROOT." >&2

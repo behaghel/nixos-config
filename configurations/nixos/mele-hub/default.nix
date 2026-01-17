@@ -34,7 +34,7 @@ in
     useDHCP = lib.mkDefault true;
     firewall = {
       enable = true;
-      allowedTCPPorts = [ 22 22000 ];
+      allowedTCPPorts = [ 22 22000 3000 ];
       allowedUDPPorts = [ 22000 21027 ];
       logRefusedConnections = true;
     };
@@ -42,7 +42,7 @@ in
 
   time.timeZone = "UTC";
   console.keyMap = "fr-bepo";
-  boot.initrd.consoleKeyMap = "fr-bepo";
+  console.earlySetup = true;
 
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
@@ -104,10 +104,8 @@ in
           http_port = 3000;
           domain = "mele-hub";
         };
-        auth.anonymous = {
-          enabled = true;
-          org_role = "Viewer";
-        };
+        "auth.anonymous".enable = true;
+        "auth.anonymous".org_role = "Viewer";
         auth.disable_login_form = true;
         security.admin_user = "admin";
       };
@@ -168,6 +166,8 @@ in
   # Override Emacs to a cached build on this host (resolve duplicate option by forcing).
   home-manager.users.hub.programs.emacs.package = lib.mkForce pkgs.emacs30;
   home-manager.users.hub.services.emacs.package = lib.mkForce pkgs.emacs30;
+  # Console-friendly pinentry for YubiKey on this headless host.
+  home-manager.users.hub.services.gpg-agent.pinentryPackage = pkgs.pinentry-tty;
 
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"
@@ -238,8 +238,5 @@ in
   };
 
   powerManagement.cpuFreqGovernor = lib.mkDefault "powersave";
-
-  networking.firewall.allowedTCPPorts = lib.mkAfter [ 3000 ];
-
   system.stateVersion = "24.11";
 }
