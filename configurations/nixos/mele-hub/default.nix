@@ -167,7 +167,7 @@ in
   home-manager.users.hub.programs.emacs.package = lib.mkForce pkgs.emacs30;
   home-manager.users.hub.services.emacs.package = lib.mkForce pkgs.emacs30;
   # Console-friendly pinentry for YubiKey on this headless host.
-  home-manager.users.hub.services.gpg-agent.pinentryPackage = pkgs.pinentry-tty;
+  home-manager.users.hub.services.gpg-agent.pinentry.package = lib.mkForce pkgs.pinentry-tty;
 
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"
