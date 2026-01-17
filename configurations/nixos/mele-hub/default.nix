@@ -189,6 +189,7 @@ in
   services.journald.storage = "persistent";
 
   programs.zsh.enable = true;
+  environment.systemPackages = [ pkgs.git ];
 
   users = {
     users.hub = {
