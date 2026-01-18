@@ -31,6 +31,17 @@ let
     ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache
     ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune
   '';
+  resticHelper = pkgs.writeShellScriptBin "bkp" ''
+    set -euo pipefail
+    if [ ! -f /etc/restic.env ]; then
+      echo "restic env file missing: /etc/restic.env" >&2
+      exit 1
+    fi
+    set -a
+    source /etc/restic.env
+    set +a
+    exec ${pkgs.restic}/bin/restic "$@"
+  '';
 in
 {
   imports = [
@@ -215,6 +226,7 @@ in
     jq
     curl
     restic
+    resticHelper
   ];
 
   systemd.services.restic-backup-syncthing = {

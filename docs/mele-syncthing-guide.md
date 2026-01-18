@@ -31,3 +31,18 @@
 - **Disk/health alerts (low overhead):** set up a simple cron/systemd timer that runs `df -h / /srv/syncthing` and posts to a webhook (e.g., healthchecks.io, ntfy, Apprise). One-liner example for a timer: `df -h /srv/syncthing | tail -n +2 | awk '$5+0 > 85 {print}'` and send if triggered.
 - **Disk SMART checks:** the ISO enables `services.smartd`; configure email/webhook notifications for failing drives.
 - **Process/service visibility:** `systemd` will restart Syncthing; expose logs via `journalctl -u syncthing@hub`. If you want remote access, consider a lightweight VPN (Tailscale/WireGuard) and monitor via Prometheus.
+
+## Syncthing usage
+- Syncthing runs as the `syncthing` user with data in `/srv/syncthing`, config in `/var/lib/syncthing`, and GUI bound to `127.0.0.1:8384` (tunnel with `ssh -L 8384:127.0.0.1:8384 hub@<mele-ip>`).
+- Add remote devices via the GUI and share folders from `/srv/syncthing` as needed. Syncthing’s own file versioning creates `.stversions/`; backups exclude these.
+- Firewall allows TCP 22000 and UDP 21027 on the hub; peers must be able to reach those ports.
+
+## Backups (Restic to B2)
+- Secrets live in `/etc/restic.env` (root:root, 600) with `RESTIC_REPOSITORY`, `RESTIC_PASSWORD`, `AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`, `RESTIC_CACHE_DIR`. Choose a simple password (no shell quoting needed).
+- Helper CLI: `bkp …` (root path) wraps restic with the env file. Examples:
+  - `sudo bkp snapshots`
+  - `sudo bkp backup /srv/syncthing --tag manual`
+- Scheduled backup: systemd timer `restic-backup-syncthing.timer` (02:30 CET ± random delay) runs `restic backup /srv/syncthing --exclude-file=…` then `forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune`.
+- One-time init (after placing `/etc/restic.env` and choosing the password): `sudo bkp init` (or `restic init` via the helper) against the B2 bucket.
+- Restore (staging): `sudo mkdir -p /srv/restore-syncthing` then `sudo bkp restore latest --target /srv/restore-syncthing --verbose`.
+- Excludes: `**/.stversions/**` so Syncthing’s versioning copies don’t bloat backups.
