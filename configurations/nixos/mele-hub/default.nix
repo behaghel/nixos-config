@@ -42,13 +42,13 @@ let
     cat > /var/lib/node_exporter/textfile_collector/restic.prom <<EOF
 # HELP restic_last_backup_timestamp Unix time of last restic backup completion
 # TYPE restic_last_backup_timestamp gauge
-restic_last_backup_timestamp ${end_ts}
+restic_last_backup_timestamp ''${end_ts}
 # HELP restic_last_backup_status 0=success,1=failure
 # TYPE restic_last_backup_status gauge
-restic_last_backup_status ${status}
+restic_last_backup_status ''${status}
 # HELP restic_backup_duration_seconds Duration of last restic backup+prune
 # TYPE restic_backup_duration_seconds gauge
-restic_backup_duration_seconds ${duration}
+restic_backup_duration_seconds ''${duration}
 EOF
     exit ${status}
   '';
