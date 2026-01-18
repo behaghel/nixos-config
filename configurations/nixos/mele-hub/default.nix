@@ -255,34 +255,6 @@ in
         };
       };
     };
-    alertmanager = {
-      enable = true;
-      listenAddress = "127.0.0.1";
-      port = 9093;
-      configuration = {
-        global = {
-          smtp_smarthost = "smtp.gmail.com:465";
-          smtp_from = "behaghel@gmail.com";
-          smtp_require_tls = true;
-          smtp_auth_username = "behaghel@gmail.com";
-          smtp_auth_password_file = "/etc/alertmanager-smtp-pass";
-        };
-        route = {
-          receiver = "email";
-        };
-        receivers = [
-          {
-            name = "email";
-            email_configs = [
-              {
-                to = "behaghel@gmail.com";
-                send_resolved = true;
-              }
-            ];
-          }
-        ];
-      };
-    };
     grafana = {
       enable = true;
       settings = {
