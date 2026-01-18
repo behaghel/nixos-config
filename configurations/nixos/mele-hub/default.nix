@@ -18,6 +18,19 @@ let
   resticExcludes = pkgs.writeText "restic-syncthing-excludes.txt" ''
     **/.stversions/**
   '';
+  resticBackupScript = pkgs.writeShellScript "restic-backup-syncthing.sh" ''
+    set -euo pipefail
+    if [ ! -f /etc/restic.env ]; then
+      echo "restic env file missing: /etc/restic.env" >&2
+      exit 1
+    fi
+    set -a
+    source /etc/restic.env
+    set +a
+    ${pkgs.coreutils}/bin/mkdir -p /var/cache/restic
+    ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache
+    ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune
+  '';
 in
 {
   imports = [
@@ -210,16 +223,11 @@ in
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     serviceConfig = {
-      EnvironmentFile = [ "/etc/restic.env" ];
       Type = "oneshot";
       Nice = 10;
       IOSchedulingClass = "best-effort";
       IOSchedulingPriority = 7;
-      ExecStartPre = [ "${pkgs.coreutils}/bin/mkdir -p /var/cache/restic" ];
-      ExecStart = [
-        "${pkgs.restic}/bin/restic backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache"
-        "${pkgs.restic}/bin/restic forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune"
-      ];
+      ExecStart = [ resticBackupScript ];
     };
   };
 
