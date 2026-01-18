@@ -31,7 +31,7 @@ let
     ${pkgs.coreutils}/bin/mkdir -p /var/cache/restic /var/lib/node_exporter/textfile_collector
     start_ts=$(${pkgs.coreutils}/bin/date +%s)
     status=0
-    if ! ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache; then
+    if ! ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} /var/lib/syncthing --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache; then
       status=1
     fi
     if ! ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune; then
