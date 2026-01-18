@@ -15,6 +15,9 @@ let
   grafanaDashboardsPath = pkgs.linkFarm "grafana-dashboards" {
     "mele-hub-health.json" = ./grafana/health.json;
   };
+  resticExcludes = pkgs.writeText "restic-syncthing-excludes.txt" ''
+    **/.stversions/**
+  '';
 in
 {
   imports = [
@@ -198,7 +201,36 @@ in
     bat
     jq
     curl
+    restic
   ];
+
+  systemd.services.restic-backup-syncthing = {
+    description = "Restic backup of /srv/syncthing";
+    wantedBy = [ ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    environmentFile = "/etc/restic.env";
+    serviceConfig = {
+      Type = "oneshot";
+      Nice = 10;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      ExecStartPre = [ "${pkgs.coreutils}/bin/mkdir -p /var/cache/restic" ];
+      ExecStart = [
+        "${pkgs.restic}/bin/restic backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache"
+        "${pkgs.restic}/bin/restic forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune"
+      ];
+    };
+  };
+
+  systemd.timers.restic-backup-syncthing = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "02:30";
+      Persistent = true;
+      RandomizedDelaySec = "30m";
+    };
+  };
 
   users = {
     users.hub = {
