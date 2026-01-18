@@ -232,7 +232,7 @@ in
         port = 9093;
         configuration = {
           global = {
-            smtp_smarthost = "smtp.gmail.com:465";
+            smtp_smarthost = "smtp.gmail.com:587";
             smtp_from = "behaghel@gmail.com";
             smtp_require_tls = true;
             smtp_auth_username = "behaghel@gmail.com";
