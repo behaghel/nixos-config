@@ -70,6 +70,68 @@ in
     ./hardware-configuration.nix
   ];
 
+  # Alerting rules
+  alertsFile = pkgs.writeText "prometheus-alerts.yml" ''
+    groups:
+      - name: mele-hub
+        rules:
+          - alert: ResticBackupStale
+            expr: time() - restic_last_backup_timestamp > 172800
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "Restic backup stale"
+              description: "Last restic backup older than 48h"
+
+          - alert: ResticBackupFailed
+            expr: restic_last_backup_status == 1
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "Restic backup failing"
+              description: "Restic last run exited non-zero"
+
+          - alert: HighCPU
+            expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[10m])) > 0.95
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "High CPU utilization"
+              description: "CPU >95% for 10m"
+
+          - alert: DiskHighUsage
+            expr: (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|ramfs|autofs"} / node_filesystem_size_bytes{fstype!~"tmpfs|ramfs|autofs"}) > 0.85
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "Disk usage high"
+              description: "Mount {{ $labels.mountpoint }} above 85%"
+
+          - alert: SyncthingDown
+            expr: avg_over_time(up{job="syncthing"}[5m]) < 0.5
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "Syncthing scrape down"
+              description: "Syncthing metrics not responding"
+
+          - alert: SmartctlNoMetrics
+            expr: absent(up{job="smartctl"})
+            for: 15m
+            labels: { severity: warning }
+            annotations:
+              summary: "SMART exporter missing"
+              description: "No smartctl metrics scraped"
+
+          - alert: SmartctlFailing
+            expr: smartctl_device_smart_healthy == 0
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "SMART reports failing drive"
+              description: "Device {{ $labels.name }} SMART health failing"
+  '';
+
   nixpkgs = {
     hostPlatform = "x86_64-linux";
     overlays = import ../../../overlays/default.nix { inherit inputs; };
@@ -143,7 +205,14 @@ in
             { targets = [ "127.0.0.1:9091" ]; }
           ];
         }
+        {
+          job_name = "smartctl";
+          static_configs = [
+            { targets = [ "127.0.0.1:9633" ]; }
+          ];
+        }
       ];
+      ruleFiles = [ alertsFile ];
       exporters.node = {
         enable = true;
         enabledCollectors = [ "systemd" "processes" ];
@@ -151,6 +220,39 @@ in
         listenAddress = "127.0.0.1";
         extraFlags = [
           "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector"
+        ];
+      };
+      exporters.smartctl = {
+        enable = true;
+        listenAddress = "127.0.0.1";
+        port = 9633;
+      };
+    };
+    alertmanager = {
+      enable = true;
+      listenAddress = "127.0.0.1";
+      port = 9093;
+      configuration = {
+        global = {
+          smtp_smarthost = "smtp.gmail.com:465";
+          smtp_from = "behaghel@gmail.com";
+          smtp_require_tls = true;
+          smtp_auth_username = "behaghel@gmail.com";
+          smtp_auth_password_file = "/etc/alertmanager-smtp-pass";
+        };
+        route = {
+          receiver = "email";
+        };
+        receivers = [
+          {
+            name = "email";
+            email_configs = [
+              {
+                to = "behaghel@gmail.com";
+                send_resolved = true;
+              }
+            ];
+          }
         ];
       };
     };
