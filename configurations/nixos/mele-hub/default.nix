@@ -151,7 +151,6 @@ in
         listenAddress = "127.0.0.1";
         extraFlags = [
           "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector"
-          "--collector.smartmon"
         ];
       };
     };
