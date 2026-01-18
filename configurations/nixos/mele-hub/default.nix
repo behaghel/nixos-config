@@ -210,7 +210,7 @@ in
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
     serviceConfig = {
-      EnvironmentFile = [ "-/etc/restic.env" ];
+      EnvironmentFile = [ "/etc/restic.env" ];
       Type = "oneshot";
       Nice = 10;
       IOSchedulingClass = "best-effort";
