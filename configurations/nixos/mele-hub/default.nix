@@ -131,7 +131,7 @@ in
           http_port = 3000;
           domain = "mele-hub";
         };
-        "auth.anonymous".enable = true;
+        "auth.anonymous".enabled = true;
         "auth.anonymous".org_role = "Viewer";
         auth.disable_login_form = true;
         security.admin_user = "admin";
