@@ -50,7 +50,7 @@ restic_last_backup_status ''${status}
 # TYPE restic_backup_duration_seconds gauge
 restic_backup_duration_seconds ''${duration}
 EOF
-    exit ${status}
+    exit ''${status}
   '';
   resticHelper = pkgs.writeShellScriptBin "bkp" ''
     set -euo pipefail
