@@ -14,6 +14,7 @@ let
   });
   grafanaDashboardsPath = pkgs.linkFarm "grafana-dashboards" {
     "mele-hub-health.json" = ./grafana/health.json;
+    "syncthing-restic.json" = ./grafana/syncthing-restic.json;
   };
   resticExcludes = pkgs.writeText "restic-syncthing-excludes.txt" ''
     **/.stversions/**
@@ -27,9 +28,29 @@ let
     set -a
     source /etc/restic.env
     set +a
-    ${pkgs.coreutils}/bin/mkdir -p /var/cache/restic
-    ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache
-    ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune
+    ${pkgs.coreutils}/bin/mkdir -p /var/cache/restic /var/lib/node_exporter/textfile_collector
+    start_ts=$(${pkgs.coreutils}/bin/date +%s)
+    status=0
+    if ! ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache; then
+      status=1
+    fi
+    if ! ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune; then
+      status=1
+    fi
+    end_ts=$(${pkgs.coreutils}/bin/date +%s)
+    duration=$((end_ts - start_ts))
+    cat > /var/lib/node_exporter/textfile_collector/restic.prom <<EOF
+# HELP restic_last_backup_timestamp Unix time of last restic backup completion
+# TYPE restic_last_backup_timestamp gauge
+restic_last_backup_timestamp ${end_ts}
+# HELP restic_last_backup_status 0=success,1=failure
+# TYPE restic_last_backup_status gauge
+restic_last_backup_status ${status}
+# HELP restic_backup_duration_seconds Duration of last restic backup+prune
+# TYPE restic_backup_duration_seconds gauge
+restic_backup_duration_seconds ${duration}
+EOF
+    exit ${status}
   '';
   resticHelper = pkgs.writeShellScriptBin "bkp" ''
     set -euo pipefail
@@ -115,12 +136,19 @@ in
             { targets = [ "127.0.0.1:9100" ]; }
           ];
         }
+        {
+          job_name = "syncthing";
+          static_configs = [
+            { targets = [ "127.0.0.1:9091" ]; }
+          ];
+        }
       ];
       exporters.node = {
         enable = true;
         enabledCollectors = [ "systemd" "processes" ];
         port = 9100;
         listenAddress = "127.0.0.1";
+        extraFlags = [ "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector" ];
       };
     };
     grafana = {
@@ -175,6 +203,8 @@ in
           restartOnWakeup = true;
           urAccepted = -1; # accept upstream upgrade prompts automatically
           defaultFolderPath = syncthingDataDir;
+          prometheusEnabled = true;
+          prometheusAddress = "127.0.0.1:9091";
         };
       };
     };
@@ -199,6 +229,7 @@ in
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"
     "d ${syncthingConfigDir} 0700 syncthing syncthing -"
+    "d /var/lib/node_exporter/textfile_collector 0755 root root -"
   ];
 
   # Harden networking a bit for a public host

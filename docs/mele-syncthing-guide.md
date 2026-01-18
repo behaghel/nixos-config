@@ -27,7 +27,10 @@
 - Verify the USB write by re-plugging and checking `lsblk` shows the ISO9660 partition.
 
 ## Observability
-- **Built-in Grafana (internal, open access):** Grafana listens on `http://<mele-hub-ip>:3000` with anonymous read-only access and a pre-provisioned "MeLE Hub Health" dashboard (uptime, CPU, memory, root disk, network, disk IO). Datasource is the local Prometheus (`127.0.0.1:9090`); node_exporter is bound to `127.0.0.1:9100`.
+- **Built-in Grafana (internal, open access):** Grafana listens on `http://<mele-hub-ip>:3000` with anonymous read-only access. Dashboards:
+  - "MeLE Hub Health" – uptime, CPU, memory, root + `/srv/syncthing` disk usage, network, disk IO.
+  - "Syncthing & Restic" – Syncthing scrape status and Restic backup age/status/duration (via node_exporter textfile metrics).
+  Datasource is the local Prometheus (`127.0.0.1:9090`); node_exporter is bound to `127.0.0.1:9100`; Syncthing Prometheus endpoint is `127.0.0.1:9091`.
 - **Disk/health alerts (low overhead):** set up a simple cron/systemd timer that runs `df -h / /srv/syncthing` and posts to a webhook (e.g., healthchecks.io, ntfy, Apprise). One-liner example for a timer: `df -h /srv/syncthing | tail -n +2 | awk '$5+0 > 85 {print}'` and send if triggered.
 - **Disk SMART checks:** the ISO enables `services.smartd`; configure email/webhook notifications for failing drives.
 - **Process/service visibility:** `systemd` will restart Syncthing; expose logs via `journalctl -u syncthing@hub`. If you want remote access, consider a lightweight VPN (Tailscale/WireGuard) and monitor via Prometheus.

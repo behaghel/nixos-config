@@ -261,6 +261,60 @@
       ],
       "title": "Disk IO",
       "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 20 },
+      "id": 9,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": ["lastNotNull"],
+          "fields": "",
+          "values": false
+        },
+        "textMode": "auto"
+      },
+      "targets": [
+        {
+          "expr": "(1 - (node_filesystem_avail_bytes{mountpoint=\"/srv/syncthing\",fstype!~\"tmpfs|ramfs\"} / node_filesystem_size_bytes{mountpoint=\"/srv/syncthing\",fstype!~\"tmpfs|ramfs\"})) * 100",
+          "refId": "A"
+        }
+      ],
+      "title": "Syncthing Disk Used",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [],
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 6, "y": 20 },
+      "id": 10,
+      "options": {
+        "legend": { "calcs": [], "displayMode": "table", "placement": "bottom" },
+        "tooltip": { "mode": "single", "sort": "none" }
+      },
+      "targets": [
+        { "expr": "node_filesystem_avail_bytes{mountpoint=\"/srv/syncthing\",fstype!~\"tmpfs|ramfs\"}", "legendFormat": "Avail", "refId": "A" },
+        { "expr": "node_filesystem_size_bytes{mountpoint=\"/srv/syncthing\",fstype!~\"tmpfs|ramfs\"}", "legendFormat": "Size", "refId": "B" }
+      ],
+      "title": "Syncthing Disk Space",
+      "type": "timeseries"
     }
   ],
   "refresh": "30s",
