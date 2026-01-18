@@ -124,6 +124,7 @@ in
       ];
     };
     fail2ban.enable = true;
+    smartd.enable = true;
     prometheus = {
       enable = true;
       listenAddress = "127.0.0.1";
@@ -148,7 +149,10 @@ in
         enabledCollectors = [ "systemd" "processes" ];
         port = 9100;
         listenAddress = "127.0.0.1";
-        extraFlags = [ "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector" ];
+        extraFlags = [
+          "--collector.textfile.directory=/var/lib/node_exporter/textfile_collector"
+          "--collector.smartmon"
+        ];
       };
     };
     grafana = {
