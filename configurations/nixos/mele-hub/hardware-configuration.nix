@@ -12,5 +12,16 @@
     fsType = "ext4";
   };
 
-  swapDevices = [ ];
+  fileSystems."/boot" = {
+    device = "/dev/disk/by-label/EFI";
+    fsType = "vfat";
+    options = [ "fmask=0022" "dmask=0022" ];
+  };
+
+  fileSystems."/srv/syncthing" = {
+    device = "/dev/disk/by-label/syncthing";
+    fsType = "ext4";
+  };
+
+  swapDevices = [ { device = "/dev/disk/by-label/swap"; } ];
 }
