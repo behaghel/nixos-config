@@ -213,7 +213,7 @@ in
       ruleFiles = [ alertsFile ];
       exporters.node = {
         enable = true;
-        enabledCollectors = [ "systemd" "processes" ];
+        enabledCollectors = [ "systemd" "processes" "hwmon" "nvme" ];
         port = 9100;
         listenAddress = "127.0.0.1";
         extraFlags = [
