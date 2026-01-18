@@ -63,14 +63,6 @@ EOF
     set +a
     exec ${pkgs.restic}/bin/restic "$@"
   '';
-in
-{
-  imports = [
-    self.nixosModules.default
-    ./hardware-configuration.nix
-  ];
-
-  # Alerting rules
   alertsFile = pkgs.writeText "prometheus-alerts.yml" ''
     groups:
       - name: mele-hub
@@ -131,6 +123,12 @@ in
               summary: "SMART reports failing drive"
               description: "Device {{ $labels.name }} SMART health failing"
   '';
+in
+{
+  imports = [
+    self.nixosModules.default
+    ./hardware-configuration.nix
+  ];
 
   nixpkgs = {
     hostPlatform = "x86_64-linux";
