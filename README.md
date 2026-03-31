@@ -14,6 +14,13 @@ git config core.hooksPath githooks
 
 Use `nix flake check` to evaluate the defined system configurations and verify formatting.
 
+## Agent Skills
+
+- Repo-local OpenCode skills live under `.agents/skills/`.
+- Use `npx skills ...` to add or update shared skills; Home Manager installs `nodejs`, which provides `npx`.
+- Keep OpenCode plugins and MCP configuration in `modules/home/opencode/`.
+- Reuse the existing global `devenv-project-workflow` skill for `devenv.nix` and `.envrc` work instead of copying it into `.agents/skills/`.
+
 ## Prerequisite: Install Nix
 
 This repository assumes Nix (or Lix) is available before you run any of the `nix run` or `nix develop` commands. For nix-darwin hosts we recommend the [Lix installer](https://lix.systems/install/), which provides a compatible multi-user setup:
