@@ -14,6 +14,8 @@ let
     "grishka/grishka/neardrop"
     "firefox"
   ];
+  defaultBrews = [ ];
+  defaultTaps = [ ];
 in
 {
   options.hub.darwin.apps = {
@@ -28,10 +30,24 @@ in
       default = defaultCasks;
       description = "Homebrew casks to install for the default macOS workstation setup.";
     };
+
+    brews = mkOption {
+      type = types.listOf types.str;
+      default = defaultBrews;
+      description = "Homebrew formulae to install for the default macOS workstation setup.";
+    };
+
+    taps = mkOption {
+      type = types.listOf types.str;
+      default = defaultTaps;
+      description = "Homebrew taps required by requested casks/formulae.";
+    };
   };
 
   config = mkIf cfg.enable {
     homebrew.enable = mkDefault true;
+    homebrew.taps = mkBefore cfg.taps;
+    homebrew.brews = mkBefore cfg.brews;
     homebrew.casks = mkBefore cfg.casks;
   };
 }

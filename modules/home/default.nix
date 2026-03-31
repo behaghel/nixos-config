@@ -11,8 +11,8 @@
     ./ghostty
     ./ssh
     ./nix.nix
+    ./opencode
     ./tmux
-    # ./dropbox
     # ./emacs.nix
     ./mail
   ];

@@ -22,20 +22,27 @@ in
 
   environment.systemPackages = [
     pkgs.jdk21_headless
+    pkgs.texlive.combined.scheme-small
     pkgs.qemu
   ];
 
   hub.darwin.apps = {
     enable = true;
+    taps = [
+      "sst/tap"
+    ];
+    brews = [
+      "sst/tap/opencode"
+    ];
     casks = [
       "anki"
       "zotero"
       "1password"
+      "codex"
       "ghostty"
       "iterm2"
       "notunes"
       "vlc"
-      "dropbox"
       "hammerspoon"
       "grishka/grishka/neardrop"
       "firefox"
@@ -54,7 +61,8 @@ in
     port = 2223;
     cpus = 4;
     memoryMB = 4096;
-    privateKeySource = ../../keys/utm-builder_ed25519;
+    # Key is pre-installed at /etc/nix/utm-builder_ed25519 (git-ignored); leave
+    # privateKeySource unset so evaluation does not try to copy it into the store.
     additionalBuilders = [
       "ssh-ng://builder@builder-arm aarch64-linux /etc/nix/builder_ed25519 2 1 kvm,benchmark,big-parallel"
     ];
@@ -68,6 +76,7 @@ Host builder-arm
   };
 
   # Make Home Manager share the system pkgs (avoids rebuilding stdenv/toolchain twice).
+  home-manager.backupFileExtension = "backup";
   home-manager.useGlobalPkgs = true;
   home-manager.useUserPackages = true;
 }

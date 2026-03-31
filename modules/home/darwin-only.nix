@@ -5,6 +5,7 @@
     ./darwin/bepo.nix
     ./darwin/fonts.nix
     ./ghostty
+    ./darwin/syncthing.nix
     ./hammerspoon
   ];
 

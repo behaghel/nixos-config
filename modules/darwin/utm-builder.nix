@@ -52,13 +52,21 @@ in
     keyFile = lib.mkOption {
       type = lib.types.str;
       default = "/etc/nix/utm-builder_ed25519";
-      description = "Private key used to reach the builder VM.";
+      description = ''
+        Private key used to reach the builder VM. When ${lib.literalExample "privateKeySource"} is unset,
+        the module will generate a new key here if it does not already exist; otherwise, ensure the file
+        is pre-installed (useful for git-ignored keys you copy into place manually).
+      '';
     };
 
     privateKeySource = lib.mkOption {
       type = lib.types.nullOr lib.types.path;
       default = null;
-      description = "If set, install this private key at keyFile instead of generating a new one.";
+      description = ''
+        If set, install this private key at keyFile instead of generating a new one. Only use when the key
+        path can enter the Nix store; for sensitive keys that are git-ignored, prefer leaving this null and
+        placing the key at keyFile manually.
+      '';
     };
 
     ovmfCode = lib.mkOption {

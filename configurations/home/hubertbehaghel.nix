@@ -3,6 +3,7 @@ let
   inherit (flake) inputs;
   inherit (inputs) self;
   isLinux = pkgs.stdenv.isLinux;
+  claudeCodePkg = inputs.claude-code.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
 in
 {
   imports =
@@ -13,7 +14,6 @@ in
       self.homeModules.emacs
       self.homeModules.password-store
       self.homeModules."video-editing"
-      self.homeModules.dropbox
       self.homeModules.linux-only
       self.homeModules.darwin-only
     ];
@@ -32,8 +32,9 @@ in
 
   home.packages = with pkgs; [
     gemini-cli
-    claude-code
     codex
+  ] ++ [
+    claudeCodePkg
   ];
 
   hub.mail = {
@@ -46,11 +47,9 @@ in
     };
   };
 
-  hub.dropbox = lib.mkIf isLinux {
-    enable = true;
-  };
-
   targets.genericLinux.enable = isLinux;
+
+  hub.syncthing.enable = lib.mkIf (!isLinux) true;
 
   hub.videoEditing = {
     enable = true;
