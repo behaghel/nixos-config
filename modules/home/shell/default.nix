@@ -42,7 +42,6 @@
     ALTERNATE_EDITOR = "";
     # Make Git use the terminal client explicitly
     GIT_EDITOR = "emacsclient -t";
-    SSH_AUTH_SOCK = "${config.home.homeDirectory}/.gnupg/S.gpg-agent.ssh";
   };
 
   # Platform-independent terminal setup
@@ -69,7 +68,10 @@
 
   programs = {
     bat.enable = true;
-    zoxide.enable = true;
+    zoxide = {
+      enable = true;
+      enableZshIntegration = false;
+    };
     fzf.enable = true;
     jq.enable = true;
     htop.enable = true;

@@ -9,7 +9,7 @@
       package = lib.mkIf (config.nix.package != null)
         (pkgs.nix-direnv.override { nix = config.nix.package; });
     };
-    enableZshIntegration = config.programs.zsh.enable;
+    enableZshIntegration = true;
     enableBashIntegration = config.programs.bash.enable;
 
     config.global = {

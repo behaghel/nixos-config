@@ -1,6 +1,7 @@
-{ pkgs, ...}:
+{ flake, pkgs, ... }:
+let
+  devenvPkg = flake.inputs.devenv.packages.${pkgs.stdenv.hostPlatform.system}.devenv;
+in
 {
-  home.packages = with pkgs; [
-    devenv
-  ];
+  home.packages = [ devenvPkg ];
 }
