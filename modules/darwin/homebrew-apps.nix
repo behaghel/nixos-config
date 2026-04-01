@@ -11,7 +11,6 @@ let
     "iterm2"
     "notunes"
     "hammerspoon"
-    "grishka/grishka/neardrop"
     "firefox"
   ];
   defaultBrews = [ ];

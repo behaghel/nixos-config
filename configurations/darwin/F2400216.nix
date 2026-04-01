@@ -44,7 +44,6 @@ in
       "notunes"
       "vlc"
       "hammerspoon"
-      "grishka/grishka/neardrop"
       "firefox"
       "gimp"
       "utm"
