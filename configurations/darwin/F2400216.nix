@@ -46,6 +46,8 @@ in
       "hammerspoon"
       "firefox"
       "gimp"
+      "localsend"
+      "mpv"
       "utm"
     ];
   };
