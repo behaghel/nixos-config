@@ -5,6 +5,7 @@
       # fonts that many things (apps, websites) expect
       dejavu_fonts
       liberation_ttf
+      inter
       roboto
       raleway
       ubuntu-classic

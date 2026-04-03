@@ -6,6 +6,7 @@ let
     # Common fallback/web fonts
     dejavu_fonts
     liberation_ttf
+    inter
     roboto
     raleway
     ubuntu-classic
