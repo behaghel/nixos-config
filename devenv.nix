@@ -69,6 +69,7 @@ in
       entry = "./tests/run-mail-sync-autocorrect-tests.sh";
       language = "system";
       pass_filenames = false;
+      files = "(modules/home/mail/|tests/mail-sync|tests/run-mail-sync)";
     };
     hooks.mail-tray-e2e = {
       enable = pkgs.stdenv.isLinux;
