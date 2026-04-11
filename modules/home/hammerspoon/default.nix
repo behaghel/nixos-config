@@ -279,7 +279,11 @@ in
 
       -----------------------------------------------------------------------
       -- DRAW OVERLAY (SCREEN ANNOTATIONS)
+      -- Architecture: one hs.canvas per screen (proven hhann pattern).
+      -- draw.screens[screenId] = { canvas, origin, strokes, previewId }
       -----------------------------------------------------------------------
+      local drawLog = hs.logger.new("draw", "info")
+
       local draw = {
         active = false,
         tool = "pen", -- pen|rect|arrow
@@ -291,9 +295,8 @@ in
           { white = 1, alpha = 0.9 },                         -- white
         },
         width = 4,
-        canvas = nil,
-        strokes = {},
-        previewId = nil,
+        screens = {},   -- screenId -> { canvas, origin, strokes, previewId }
+        activeScr = nil, -- screenId of the screen being drawn on
         taps = {},
         menu = nil,
       }
@@ -306,100 +309,165 @@ in
         draw.colorIndex = draw.colorIndex % #draw.colors + 1
       end
 
-      local function canvasFrameAllScreens()
-        local screens = hs.screen.allScreens()
-        local minX, minY = math.huge, math.huge
-        local maxX, maxY = -math.huge, -math.huge
-        for _, s in ipairs(screens) do
-          local f = s:fullFrame()
-          minX = math.min(minX, f.x)
-          minY = math.min(minY, f.y)
-          maxX = math.max(maxX, f.x + f.w)
-          maxY = math.max(maxY, f.y + f.h)
-        end
-        return { x = minX, y = minY, w = maxX - minX, h = maxY - minY }
+      -- Get the per-screen state for the currently active drawing screen
+      local function activeCanvas()
+        return draw.screens[draw.activeScr]
       end
 
+      -- Translate screen-absolute point to canvas-relative for a given screen state
+      local function toCanvas(screenPt, scrState)
+        local o = scrState.origin
+        return { x = screenPt.x - o.x, y = screenPt.y - o.y }
+      end
+
+      -- Create one canvas for a single screen, return its state table
+      local function createScreenCanvas(screen)
+        local frame = screen:fullFrame()
+        local sid = screen:id()
+        drawLog.i("Creating canvas for screen", sid, hs.inspect(frame))
+        local ok, c = pcall(function()
+          return hs.canvas.new(frame)
+            :level(hs.canvas.windowLevels.overlay)
+            :behavior({"canJoinAllSpaces","transient"})
+            :clickActivating(false)
+        end)
+        if not ok or not c then
+          drawLog.e("Failed to create canvas for screen", sid, ":", c)
+          return nil
+        end
+        -- transparent background element (index 1) to fill the screen
+        c[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 } }
+        c:show()
+        return {
+          canvas = c,
+          origin = { x = frame.x, y = frame.y },
+          strokes = {},
+          previewId = nil,
+        }
+      end
+
+      -- Create canvases for all connected screens
+      local function createAllCanvases()
+        for _, screen in ipairs(hs.screen.allScreens()) do
+          local sid = screen:id()
+          if not draw.screens[sid] then
+            local state = createScreenCanvas(screen)
+            if state then draw.screens[sid] = state end
+          end
+        end
+      end
+
+      -- Delete all canvases
+      local function deleteAllCanvases()
+        for sid, state in pairs(draw.screens) do
+          if state.canvas then state.canvas:delete() end
+        end
+        draw.screens = {}
+        draw.activeScr = nil
+      end
+
+      -- Detect which screen contains a screen-absolute point
+      local function screenForPoint(pt)
+        for _, screen in ipairs(hs.screen.allScreens()) do
+          local f = screen:fullFrame()
+          if pt.x >= f.x and pt.x < f.x + f.w and
+             pt.y >= f.y and pt.y < f.y + f.h then
+            return screen:id()
+          end
+        end
+        -- Fallback: primary screen
+        local primary = hs.screen.primaryScreen()
+        return primary and primary:id()
+      end
+
+      -- Preview / stroke helpers — operate on the active screen's canvas
       local function resetPreview()
-        if draw.previewId then
-          draw.canvas:removeElement(draw.previewId)
-          draw.previewId = nil
+        local s = activeCanvas()
+        if s and s.previewId then
+          s.canvas:removeElement(s.previewId)
+          s.previewId = nil
         end
       end
 
       local function addStroke(elem)
-        local idx = draw.canvas:insertElement(elem)
-        table.insert(draw.strokes, idx)
+        local s = activeCanvas()
+        if not s then return end
+        s.canvas:insertElement(elem)
+        table.insert(s.strokes, #s.canvas)
       end
 
       local function undoLast()
-        local idx = table.remove(draw.strokes)
-        if idx then draw.canvas:removeElement(idx) end
+        -- Undo from the most-recently-drawn-on screen
+        local s = activeCanvas()
+        if not s then return end
+        local idx = table.remove(s.strokes)
+        if idx then s.canvas:removeElement(idx) end
       end
 
       local function clearAll()
-        draw.canvas:delete()
-        draw.canvas = hs.canvas.new(canvasFrameAllScreens()):level(hs.canvas.windowLevels.overlay):behavior({"canJoinAllSpaces","stationary","fullScreenPrimary"}):clickActivating(false)
-        -- transparent background element to capture hits
-        draw.canvas[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 }, stroke = false }
-        draw.canvas:show()
-        draw.strokes = {}
-        draw.previewId = nil
-      end
-
-      local function ensureCanvas()
-        if draw.canvas then return end
-        draw.canvas = hs.canvas.new(canvasFrameAllScreens()):level(hs.canvas.windowLevels.overlay):behavior({"canJoinAllSpaces","stationary","fullScreenPrimary"}):clickActivating(false)
-        draw.canvas[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 }, stroke = false }
-        draw.canvas:show()
+        for _, state in pairs(draw.screens) do
+          -- Delete and recreate each canvas to reset cleanly
+          local frame = state.canvas:frame()
+          state.canvas:delete()
+          local ok, c = pcall(function()
+            return hs.canvas.new({
+                x = state.origin.x, y = state.origin.y,
+                w = frame.w, h = frame.h,
+              })
+              :level(hs.canvas.windowLevels.overlay)
+              :behavior({"canJoinAllSpaces","transient"})
+              :clickActivating(false)
+          end)
+          if ok and c then
+            c[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 } }
+            c:show()
+            state.canvas = c
+            state.strokes = {}
+            state.previewId = nil
+          end
+        end
       end
 
       local activeStroke = nil
+      local updateMenu -- forward declaration (used by teardown/toggleOverlay/setTool)
 
       local function finalizePen()
         if not activeStroke or not activeStroke.points then return end
-        local coords = {}
-        for _, p in ipairs(activeStroke.points) do
-          table.insert(coords, p.x)
-          table.insert(coords, p.y)
-        end
         resetPreview()
         addStroke({
           type = "segments",
-          coordinates = coords,
+          coordinates = activeStroke.points,
+          action = "stroke",
           strokeColor = activeStroke.color,
           strokeWidth = draw.width,
-          stroke = true,
-          fill = false,
         })
         activeStroke = nil
       end
 
       local function updatePenPreview()
         if not activeStroke or not activeStroke.points then return end
-        local coords = {}
-        for _, p in ipairs(activeStroke.points) do
-          table.insert(coords, p.x)
-          table.insert(coords, p.y)
-        end
+        local s = activeCanvas()
+        if not s then return end
         local elem = {
           type = "segments",
-          coordinates = coords,
+          coordinates = activeStroke.points,
+          action = "stroke",
           strokeColor = activeStroke.color,
           strokeWidth = draw.width,
-          stroke = true,
-          fill = false,
         }
-        if draw.previewId then
-          draw.canvas[draw.previewId] = elem
+        if s.previewId then
+          s.canvas[s.previewId] = elem
         else
-          draw.previewId = draw.canvas:insertElement(elem)
+          s.canvas:insertElement(elem)
+          s.previewId = #s.canvas
         end
       end
 
       local function updateRectPreview(current)
         local start = activeStroke and activeStroke.start
         if not start then return end
+        local s = activeCanvas()
+        if not s then return end
         local x = math.min(start.x, current.x)
         local y = math.min(start.y, current.y)
         local w = math.abs(current.x - start.x)
@@ -411,10 +479,11 @@ in
           strokeWidth = draw.width,
           frame = { x = x, y = y, w = w, h = h },
         }
-        if draw.previewId then
-          draw.canvas[draw.previewId] = elem
+        if s.previewId then
+          s.canvas[s.previewId] = elem
         else
-          draw.previewId = draw.canvas:insertElement(elem)
+          s.canvas:insertElement(elem)
+          s.previewId = #s.canvas
         end
       end
 
@@ -422,9 +491,10 @@ in
         if not activeStroke or not activeStroke.start then return end
         resetPreview()
         updateRectPreview(current)
-        if draw.previewId then
-          table.insert(draw.strokes, draw.previewId)
-          draw.previewId = nil
+        local s = activeCanvas()
+        if s and s.previewId then
+          table.insert(s.strokes, s.previewId)
+          s.previewId = nil
         end
         activeStroke = nil
       end
@@ -443,17 +513,15 @@ in
         return {
           {
             type = "segments",
-            coordinates = { start.x, start.y, finish.x, finish.y },
-            stroke = true,
-            fill = false,
+            coordinates = { start, finish },
+            action = "stroke",
             strokeColor = color,
             strokeWidth = draw.width,
           },
           {
             type = "segments",
-            coordinates = { finish.x, finish.y, left.x, left.y, finish.x, finish.y, right.x, right.y },
-            stroke = true,
-            fill = false,
+            coordinates = { finish, left, finish, right },
+            action = "stroke",
             strokeColor = color,
             strokeWidth = draw.width,
           }
@@ -463,10 +531,13 @@ in
       local function updateArrowPreview(current)
         local start = activeStroke and activeStroke.start
         if not start then return end
+        local s = activeCanvas()
+        if not s then return end
         local elems = arrowElements(start, current, activeStroke.color)
         resetPreview()
         for _, elem in ipairs(elems) do
-          draw.previewId = draw.canvas:insertElement(elem)
+          s.canvas:insertElement(elem)
+          s.previewId = #s.canvas
         end
       end
 
@@ -489,10 +560,7 @@ in
           tap:stop()
         end
         draw.taps = {}
-        if draw.canvas then
-          draw.canvas:delete()
-          draw.canvas = nil
-        end
+        deleteAllCanvases()
         hs.alert.show("Draw overlay off", 0.6)
         updateMenu()
       end
@@ -503,10 +571,15 @@ in
           return
         end
 
-        ensureCanvas()
-        clearAll()
+        createAllCanvases()
+        local anyCanvas = next(draw.screens) ~= nil
+        if not anyCanvas then
+          drawLog.e("toggleOverlay: no canvases created, aborting")
+          hs.alert.show("Draw: canvas failed — check console", 2)
+          return
+        end
         draw.active = true
-        hs.alert.show("Draw overlay on (pen)", 0.6)
+        hs.alert.show("Draw overlay on (" .. draw.tool .. ")", 0.6)
         updateMenu()
 
         local eventTypes = {
@@ -515,18 +588,30 @@ in
           hs.eventtap.event.types.leftMouseUp,
         }
 
-        local tap = hs.eventtap.new(eventTypes, function(ev)
+        local ok, tap = pcall(hs.eventtap.new, eventTypes, function(ev)
           if not draw.active then return false end
-          local loc = ev:location()
+          local rawPt = ev:location()
+
           if ev:getType() == hs.eventtap.event.types.leftMouseDown then
+            -- Detect which screen the click landed on
+            local sid = screenForPoint(rawPt)
+            draw.activeScr = sid
+            local s = activeCanvas()
+            if not s then return false end
+            local loc = toCanvas(rawPt, s)
             activeStroke = {
               start = { x = loc.x, y = loc.y },
               points = { { x = loc.x, y = loc.y } },
               color = currentColor(),
             }
             resetPreview()
+            return true
+
           elseif ev:getType() == hs.eventtap.event.types.leftMouseDragged then
             if not activeStroke then return true end
+            local s = activeCanvas()
+            if not s then return true end
+            local loc = toCanvas(rawPt, s)
             if draw.tool == "pen" then
               table.insert(activeStroke.points, { x = loc.x, y = loc.y })
               updatePenPreview()
@@ -536,8 +621,12 @@ in
               updateArrowPreview(loc)
             end
             return true
+
           elseif ev:getType() == hs.eventtap.event.types.leftMouseUp then
             if not activeStroke then return true end
+            local s = activeCanvas()
+            if not s then return true end
+            local loc = toCanvas(rawPt, s)
             if draw.tool == "pen" then
               table.insert(activeStroke.points, { x = loc.x, y = loc.y })
               finalizePen()
@@ -552,6 +641,12 @@ in
           end
           return false
         end)
+        if not ok or not tap then
+          drawLog.e("Failed to create eventtap:", tap)
+          hs.alert.show("Draw: eventtap failed — check console", 2)
+          teardown()
+          return
+        end
         tap:start()
         table.insert(draw.taps, tap)
       end
@@ -562,7 +657,7 @@ in
         updateMenu()
       end
 
-      local function updateMenu()
+      updateMenu = function()
         if not draw.menu then return end
         local active = draw.active
         draw.menu:setTitle(active and "Draw ✏️" or "Draw")
