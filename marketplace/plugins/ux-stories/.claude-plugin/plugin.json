@@ -1,0 +1,5 @@
+{
+  "name": "ux-stories",
+  "version": "0.1.0",
+  "description": "User-story-driven UX development — write stories, spec with SVG wireframes, validate with BDD scenarios, deliver with BDD+TDD orchestration"
+}

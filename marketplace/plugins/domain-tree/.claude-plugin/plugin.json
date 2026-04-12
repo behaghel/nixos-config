@@ -1,0 +1,5 @@
+{
+  "name": "domain-tree",
+  "version": "0.1.0",
+  "description": "Domain-driven codebase structure — enforce 1:1 mirroring between spec/ and code namespaces across business and technical domains"
+}

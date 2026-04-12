@@ -1,0 +1,5 @@
+{
+  "name": "spec-tdd",
+  "version": "0.1.0",
+  "description": "Iterative vertical-slice TDD — plan implementation from specs, execute red-green-refactor iterations, and maintain test hygiene"
+}
