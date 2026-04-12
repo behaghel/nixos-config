@@ -38,12 +38,17 @@ Exclude from orphan detection:
 - Vendor/dependency directories
 - Build output directories
 
-### Step 4: Check spec → code traceability
+### Step 4: Check code-paths quality
 
-For spec files with `governs` frontmatter:
+For each domain's `code-paths`:
 
-1. Verify each governed file exists.
-2. If a governed file was deleted or renamed: report as **broken traceability**.
+1. Flag **individual files** (not directories) as **refactoring signal** — "Domain **[name]** lists individual file `[path]`. Consider refactoring into a subdirectory that matches the domain boundary."
+2. Flag **many subdirectories of the same parent** — if 3+ paths share the same parent directory, suggest listing the parent instead: "Domain **[name]** lists [N] paths under `[parent/]` — consider using the parent directory."
+3. Flag **overlapping paths** — if two domains claim paths in the same directory, report as **boundary violation**.
+
+Also check for stale `governs:` frontmatter in spec files — if found, report as **deprecated** — "`governs:` in `[file]` is deprecated. Code ownership is declared via `code-paths` in `domains.yaml`."
+
+Also check for **spec files outside the domain tree** — scan `docs/` for files matching `SPEC_*.md` or `*_PROTOCOL.md` patterns. Report as **misplaced spec** — "`[file]` looks like a behavioral spec but lives outside `spec/`. Move it to `spec/{domain}/`."
 
 ### Step 5: Check naming alignment
 
@@ -70,7 +75,39 @@ For spec files with `governs` frontmatter:
 2. Flag core domains without specs as **high-risk gaps**.
 3. Flag shared-kernel domains without consumer contract tests.
 
-### Step 8: Report
+### Step 7b: Check index.md quality
+
+For each `index.md` file under `spec/`:
+
+1. Check frontmatter does NOT contain `type:` (classification lives in domains.yaml).
+2. Check frontmatter does NOT contain `consumers:` (consumer lists live in domains.yaml).
+3. Check body does NOT contain a "Context Map Relationships" section (context map lives in domains.yaml).
+4. Check body does NOT repeat the domain description from domains.yaml verbatim.
+5. Report **index.md duplication** for any violations — "**[domain]** index.md duplicates information from domains.yaml: [field/section]."
+6. Check if the index.md has substantive content beyond the title and reference line (ubiquitous language, invariants, domain events). If it only contains a heading and a reference line, report as **empty index.md** — "**[domain]** index.md adds no content beyond the reference line. Consider deleting it."
+
+`index.md` is optional. Do NOT flag domains that lack one — only flag ones that exist but add nothing.
+
+### Step 8: Check OpenAPI completeness (backend domains only)
+
+For each backend domain (language: `go`) that has a `spec.md`:
+
+1. Scan the spec.md for HTTP endpoint references (patterns like `POST /path`, `GET /path`, or endpoint descriptions).
+2. For each endpoint found in spec.md, check whether `schemas/openapi.yaml` declares a matching path+method.
+3. Report **undeclared endpoints** — "spec.md for **[domain]** describes `[METHOD] [path]` but it is not in `schemas/openapi.yaml`."
+
+For each path in `schemas/openapi.yaml`:
+
+1. Identify which domain owns it (via the `tags` field).
+2. If the owning domain is `type: core` and has a `spec.md`, check whether the spec.md mentions the endpoint.
+3. Report **unspecced endpoints** — "`[METHOD] [path]` is in OpenAPI (tag: [tag]) but has no behavioral spec in `spec/[domain]/spec.md`."
+
+Also check:
+
+- If `schemas/openapi.yaml` does not exist, skip this step with a note.
+- Flag OpenAPI error responses that use only the generic `Error` schema without domain-specific error codes, for core domain endpoints.
+
+### Step 9: Report
 
 ```
 Domain Tree Health Check
@@ -90,8 +127,21 @@ Domain Tree Health Check
 ⚠ Missing spec directories:
   - spec/ux/                ← domain declared but directory not created
 
-⚠ Broken traceability:
-  - spec/issuance/webhook.md governs services/issuance-gateway/webhook.go → file renamed to webhooks.go
+⚠ Code-paths quality:
+  - wallet/credentials lists 4 individual .kt files in ui/ — refactor into ui/credentials/
+  - wallet/verification-flow lists 7 individual .kt files in ui/ — refactor into ui/verification/
+  - wallet lists 4 subdirectories under .../android/ — consider using the parent
+
+⚠ Deprecated governs:
+  - spec/issuance/spec.md still uses governs: — remove, code ownership is in domains.yaml
+
+⚠ Misplaced specs:
+  - docs/VERIFICATION_PROTOCOL.md — move to spec/security/
+  - docs/SPEC_REVOKED_CACHET_UX.md — move to spec/wallet/credentials/ or delete
+
+⚠ Empty index.md:
+  - spec/wallet/onboarding/index.md — adds nothing beyond reference line
+  - spec/registry/index.md — adds nothing beyond reference line
 
 ⚠ Context map issues:
   - issuance → wallet (ACL): via path mobile/shared/.../acl/ does not exist
@@ -100,6 +150,11 @@ Domain Tree Health Check
 ⚠ Classification gaps:
   - verification (core): no approved specs — HIGH RISK
   - common (shared-kernel): no contract tests from consumers
+
+⚠ OpenAPI gaps:
+  - spec/verification/spec.md describes POST /sessions — not in schemas/openapi.yaml
+  - spec/issuance/spec.md describes GET /status/{listId} — not in schemas/openapi.yaml
+  - POST /presentations/verify (tag: verifier) — no behavioral spec coverage (only generic Error)
 
 Recommendations:
 1. Update domains.yaml: issuance code path → services/issuance-gateway/

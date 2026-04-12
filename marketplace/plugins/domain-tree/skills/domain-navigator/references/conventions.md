@@ -118,35 +118,57 @@ Every spec file should have YAML frontmatter:
 ---
 domain: issuance
 status: draft | approved | stale
-governs:
-  - services/issuance-gateway/handler/credential.go
-  - services/issuance-gateway/service/issuance.go
 last-reviewed: 2026-04-12
 ---
 ```
 
 - `domain` — must match a domain in `spec/domains.yaml`
 - `status` — lifecycle state (`draft` → `approved` → `stale` when code outpaces spec)
-- `governs` — specific files this spec covers (more granular than the domain's `code` paths)
 - `last-reviewed` — when a human last verified accuracy
+
+Do NOT use `governs:` in spec frontmatter. Code ownership is already declared via `code-paths` in `domains.yaml` — maintaining a second mapping in each spec file creates drift.
 
 ### Domain-level spec
 
-Each domain should have an `index.md` at its root:
+A domain MAY have an `index.md` at its root:
 
 ```
 spec/issuance/
-├── index.md              ← domain overview, key concepts, invariants
+├── index.md              ← OPTIONAL: ubiquitous language, invariants, domain events
 ├── credential-flow.md    ← specific behavior spec
 ├── credential-flow.plan.md
 └── webhook-handling.md
 ```
 
-The `index.md` covers:
-- Domain purpose and boundaries
+`index.md` is **optional**. Only create one when the domain has content worth capturing:
 - Ubiquitous language (key terms and their meanings in this domain)
-- Cross-cutting invariants
-- Context map relationships (which domains does this interact with, via which patterns)
+- Cross-cutting invariants and key concepts
+- Domain events
+
+Do NOT create an `index.md` that is just a title and a reference line — that adds nothing. Domains without ubiquitous language, invariants, or events do not need one.
+
+`index.md` does NOT duplicate information already in `domains.yaml`:
+- Description
+- Domain type/classification
+- Code paths
+- Context map relationships
+- Consumer lists
+
+## Code-paths rules
+
+`code-paths` in `domains.yaml` should be **directories, not individual files**. A code-path means "everything under this directory belongs to this domain."
+
+### Signals that code-paths need attention
+
+1. **Individual files listed**: If a domain lists `ui/FooScreen.kt`, `ui/BarScreen.kt` instead of `ui/foo/`, the code likely needs refactoring into subdirectories that match the domain boundary.
+2. **Many subdirectories of the same parent**: If a domain lists `ui/mapper/`, `ui/model/`, `ui/components/` — the parent `ui/` probably belongs to the domain. List the parent, not each child.
+3. **Overlapping paths**: If two domains claim files in the same directory, the directory mixes concerns — refactor into separate directories.
+
+When `/domain-tree:check` detects these patterns, it should recommend the refactoring rather than silently accepting the file-level mappings.
+
+### Spec files live in spec/, not docs/
+
+All behavioral specifications must live under `spec/{domain}/`. If a spec-like document exists in `docs/` (e.g., `docs/VERIFICATION_PROTOCOL.md`), it should be moved into the appropriate domain's spec directory. `docs/` is for guides, plans, and non-normative documentation — not for specs that govern code.
 
 ## When to create a new domain
 

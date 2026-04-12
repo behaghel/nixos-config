@@ -1,81 +1,92 @@
 # User Story Format
 
-Every UX change starts from a user story. The story is the "why" — it connects a human need to the work being done.
+Every UX change starts from a user story. The `.feature` file IS the story — it captures persona, goal, acceptance criteria (as scenarios), wireframe references (as tags), and context. There is no separate `story.md`.
 
 ## Story file structure
 
-Stories live at `spec/{domain}/stories/{story-name}/story.md`:
+Stories live at `spec/{domain}/stories/{story-name}/scenarios.feature`:
 
 ```
 spec/wallet/onboarding/stories/first-launch/
-├── story.md                    ← the story itself
-├── wireframes/
-│   ├── welcome.svg             ← screen: welcome state
-│   ├── id-scan.svg             ← screen: scanning ID
-│   ├── id-success.svg          ← screen: ID verified
-│   └── vault-empty.svg         ← screen: empty vault after onboarding
-├── scenarios.feature           ← BDD scenarios
-└── spec.md                     ← collected spec (optional, from spec-driven)
+└── scenarios.feature           ← the story: persona, goal, scenarios, wireframe tags
 ```
 
-## Story template
+Wireframes live in `design/wireframes/` (single source of truth) and are referenced by `@wireframe:` tags — never copied into story directories.
 
-```markdown
----
-domain: wallet/onboarding
-story: first-launch
-personas: [first-time-user]
-status: draft | ready | in-progress | done
-priority: must | should | could
-wireframes:
-  - wireframes/welcome.svg
-  - wireframes/id-scan.svg
-  - wireframes/id-success.svg
-  - wireframes/vault-empty.svg
-created: 2026-04-12
----
+## Feature file template
 
-# First Launch
+```gherkin
+@story:first-launch @domain:wallet/onboarding @priority:must @status:draft
+Feature: First Launch Onboarding
+  As a first-time user
+  I want to understand what Cachet does and be guided to my first credential
+  So that I can demand proof from others on my terms
 
-## Story
+  Context:
+    The user has just installed the app. They have no credentials and no
+    familiarity with the verification concept. The onboarding must
+    communicate the value proposition and make the first action obvious.
 
-As a **first-time user**,
-I want to **understand what Cachet does and verify my identity**,
-so that **I receive my first credential and can start building trust**.
+  Out of scope:
+    - Identity verification flow (separate story: identity-verification)
+    - Returning user experience (separate story: returning-launch)
+    - Skipping onboarding (not supported)
 
-## Context
+  References:
+    - docs/SPEC_REVOKED_CACHET_UX.md (if relevant)
 
-<!-- What's the situation? What has the user done before reaching this point? -->
-The user has just installed the app. They have no credentials and no familiarity
-with the verification concept.
+  Background:
+    Given I am a first-time user
+    And the app is freshly installed
 
-## Acceptance Criteria
+  # AC-1: User sees the value proposition before any action is required
+  @wireframe:holder-01-onboarding-1.svg @happy-path
+  Scenario: User sees the welcome screen
+    When I launch the app
+    Then I see "Don't take their word for it"
+    And I see a brand shield illustration
+    And I see a step indicator showing 1 of 4
 
-- [ ] AC-1: User sees the value proposition (onboarding screens) before any action is required
-- [ ] AC-2: User can initiate identity verification from the onboarding flow
-- [ ] AC-3: After successful verification, user lands in an empty vault with their first credential
-- [ ] AC-4: User understands what a "cachet" is by the end of onboarding
+  # AC-2: Each onboarding screen has a clear message
+  Scenario Outline: Onboarding screen <n> content
+    Given I am on onboarding screen <n>
+    Then the screen conveys "<message>"
 
-## Screen States
+    Examples:
+      | n | message                                |
+      | 1 | demand proof from others on your terms |
+      | 2 | prove yourself without over-sharing    |
+      | 3 | your trust, your rules                 |
+      | 4 | get started                            |
 
-| State | Wireframe | Description |
-|-------|-----------|-------------|
-| Welcome | `wireframes/welcome.svg` | Value prop: "Don't take their word for it" |
-| ID Scan | `wireframes/id-scan.svg` | Camera view for ID verification |
-| Success | `wireframes/id-success.svg` | Credential received confirmation |
-| Empty Vault | `wireframes/vault-empty.svg` | Home screen with first credential |
+  # AC-5: After onboarding, user lands in the vault
+  @wireframe:holder-05-empty-vault.svg
+  Scenario: After onboarding user sees the vault
+    Given I have completed the onboarding screens
+    When I tap "Get Started"
+    Then I see My Cachets
+    And I see guidance for getting my first cachet
 
-## Out of Scope
-
-<!-- What this story explicitly does NOT cover -->
-- Returning user experience (separate story)
-- Error handling for failed ID verification (separate story)
-- Multiple credential types (separate story)
-
-## Notes
-
-<!-- Design rationale, open questions, decisions made -->
+  @edge-case
+  Scenario: User cannot swipe backward past the first screen
+    Given I am on the welcome screen
+    When I swipe right
+    Then I still see the welcome screen
 ```
+
+## What goes WHERE
+
+| Information | Where it lives | NOT here |
+|-------------|---------------|----------|
+| Persona + goal | Feature header (`As a... I want... So that...`) | ~~story.md~~ |
+| Context / situation | Freeform text under Feature header | ~~story.md~~ |
+| Out of scope | Freeform text under Feature header | ~~story.md~~ |
+| Acceptance criteria | Scenarios (with `# AC-N:` comments) | ~~story.md~~ |
+| Wireframe references | `@wireframe:` tags on scenarios | ~~story.md wireframes list~~ |
+| Story metadata | Feature-level tags (`@story:`, `@domain:`, `@priority:`, `@status:`) | ~~story.md YAML frontmatter~~ |
+| Demo scenario mapping | `@scenario:` tags on scenarios | ~~story.md~~ |
+| External references | Freeform text under Feature header | ~~story.md~~ |
+| Visual spec | `design/wireframes/*.svg` (referenced by tag) | ~~copied into story dir~~ |
 
 ## Persona catalog
 
@@ -91,14 +102,6 @@ Primary goal: understand the value and get their first credential.
 ## returning-holder
 Has credentials. Uses the app regularly to share trust.
 Primary goal: quickly verify or share credentials.
-
-## verifier
-Business user who needs to verify someone's credentials.
-Primary goal: get a trustworthy answer fast.
-
-## revoked-holder
-Had credentials but one or more were revoked.
-Primary goal: understand what happened and what to do next.
 ```
 
 ## Story sizing
@@ -109,15 +112,17 @@ Primary goal: understand what happened and what to do next.
 | Medium | 3-5 states | 3-7 scenarios | New screen with navigation |
 | Large | 5+ states | 7+ scenarios | Multi-screen flow (onboarding, verification) |
 
-If a story has more than 10 wireframes, it's too large — split it.
+If a story has more than 10 wireframe references, it's too large — split it.
 
 ## Story lifecycle
 
+Tracked via the `@status:` tag on the Feature:
+
 ```
-draft → ready → in-progress → done
+@status:draft → @status:ready → @status:in-progress → @status:done
 ```
 
-- **draft** — Story written, wireframes in progress or missing
-- **ready** — Story + wireframes + BDD scenarios complete, approved for delivery
+- **draft** — Feature file written, wireframes in progress or missing
+- **ready** — Feature file + wireframes complete, approved for delivery
 - **in-progress** — Being delivered via BDD+TDD
 - **done** — All scenarios pass, visual verification matches, user approved

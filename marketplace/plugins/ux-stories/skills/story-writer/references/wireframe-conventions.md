@@ -7,7 +7,7 @@ SVG wireframes are the visual spec. They define precisely what the user sees —
 1. **Wireframes are contracts, not sketches.** Coordinates, sizes, and colors in the SVG are the source of truth.
 2. **One SVG per screen state.** Welcome, loading, populated, error, empty, success — each is a separate file.
 3. **Hand-coded is preferred.** Hand-coded SVGs with HTML comments documenting intent are more maintainable and diffable than tool-exported SVGs.
-4. **Wireframes live with their story.** Path: `spec/{domain}/stories/{story-name}/wireframes/{state}.svg`.
+4. **Single source of truth.** Wireframes live in `design/wireframes/` — never copied into story directories. Stories reference them via `@wireframe:` tags in `.feature` files. This prevents duplication and ensures all stories reference the same canonical wireframe.
 
 ## SVG structure conventions
 
@@ -126,21 +126,21 @@ When reviewing a wireframe against implementation (screenshot):
 
 ## Scenario-specific wireframes
 
-Some wireframes exist only for specific scenarios (revoked, expired, empty). Name them with the scenario:
+Some wireframes exist only for specific scenarios (revoked, expired, empty). Name them with the scenario variant:
 
 ```
-wireframes/
-├── vault-populated.svg         ← default state
-├── vault-empty.svg             ← empty state
-├── vault-revoked.svg           ← scenario: credential revoked
-└── detail-hardware.svg         ← scenario: hardware-backed indicator
+design/wireframes/
+├── holder-04-vault-my-trust.svg      ← default state
+├── holder-05-empty-vault.svg         ← empty state
+├── cachet-01-detail-revoked.svg      ← scenario: credential revoked
+└── cachet-01-detail-hardware.svg     ← scenario: hardware-backed indicator
 ```
 
-Link scenario wireframes to BDD scenarios in the `.feature` file:
+Link scenario wireframes to BDD scenarios via `@wireframe:` tags:
 
 ```gherkin
-# Wireframe: wireframes/vault-revoked.svg
-Scenario: Revoked credential appears in vault
+@wireframe:cachet-01-detail-revoked.svg @scenario:revoked
+Scenario: Revoked credential shows revocation banner
   Given I have a revoked identity credential
   When I open My Cachets
   Then I see the credential with a "Revoked" status chip in red

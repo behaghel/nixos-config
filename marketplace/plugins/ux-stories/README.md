@@ -70,14 +70,15 @@ All scenarios pass. All wireframes match. User approves. Story marked `done`.
 
 ```
 spec/{domain}/stories/{story-name}/
-├── story.md                    ← user story (persona, goal, ACs)
-├── wireframes/
-│   ├── welcome.svg             ← screen state: welcome
-│   ├── populated.svg           ← screen state: populated
-│   └── error.svg               ← screen state: error
-├── scenarios.feature           ← BDD scenarios (Gherkin)
-└── spec.md                     ← optional: collected spec (from spec-driven)
+└── scenarios.feature           ← the single story artifact (persona, goal, ACs, scenarios, wireframe tags)
+
+design/wireframes/
+├── welcome.svg                 ← wireframes live here (single source of truth)
+├── populated.svg               ← referenced by @wireframe: tags in .feature files
+└── error.svg                   ← never copied into story directories
 ```
+
+The `.feature` file IS the story. There is no separate `story.md`. Wireframes live in `design/wireframes/` and are referenced by `@wireframe:` tags — never copied into story directories.
 
 ## Wireframes as contracts
 

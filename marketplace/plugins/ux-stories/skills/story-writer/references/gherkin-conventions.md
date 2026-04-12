@@ -1,6 +1,6 @@
 # Gherkin Conventions for UX Stories
 
-BDD scenarios are written in Gherkin and live alongside their user story. They validate the story's acceptance criteria from the user's perspective.
+The `.feature` file is the **single story artifact**. It captures persona, goal, context, acceptance criteria (as scenarios), and wireframe references (as tags). There is no separate `story.md`.
 
 ## File location
 
@@ -11,44 +11,60 @@ spec/{domain}/stories/{story-name}/scenarios.feature
 ## Structure
 
 ```gherkin
+@story:first-launch @domain:wallet/onboarding @priority:must
 Feature: First Launch Onboarding
   As a first-time user
-  I want to understand what Cachet does and verify my identity
-  So that I receive my first credential and can start building trust
+  I want to understand what Cachet does and be guided to my first credential
+  So that I can demand proof from others on my terms
 
-  # Story: spec/wallet/onboarding/stories/first-launch/story.md
+  Context:
+    The user just installed the app. No credentials, no familiarity
+    with trust verification.
+
+  Out of scope:
+    - Identity verification flow (separate story)
+    - Returning user experience (separate story)
 
   Background:
     Given I am a first-time user
     And the app is freshly installed
 
-  # Wireframe: wireframes/welcome.svg
-  Scenario: User sees the value proposition
+  # AC-1: User sees 4 onboarding screens explaining the value proposition
+  @wireframe:holder-01-onboarding-1.svg
+  @happy-path
+  Scenario: User sees the welcome screen
     When I launch the app
-    Then I see the onboarding screen with "Don't take their word for it"
+    Then I see "Don't take their word for it"
     And I see a brand shield illustration
-    And I can swipe to the next screen
+    And I see a step indicator showing 1 of 4
 
-  # Wireframe: wireframes/id-scan.svg
-  Scenario: User initiates identity verification
+  # AC-3: User can swipe between screens and see progress
+  @wireframe:holder-01-onboarding-1.svg @wireframe:holder-02-onboarding-2.svg
+  Scenario: User swipes between onboarding screens
+    Given I am on the welcome screen
+    When I swipe left
+    Then I see the second onboarding screen
+    And the step indicator shows 2 of 4
+
+  # AC-1: Each screen has distinct content
+  Scenario Outline: Onboarding screen <n> content
+    Given I am on onboarding screen <n>
+    Then the screen conveys "<message>"
+
+    Examples:
+      | n | message                                |
+      | 1 | demand proof from others on your terms |
+      | 2 | prove yourself without over-sharing    |
+      | 3 | your trust, your rules                 |
+      | 4 | get started                            |
+
+  # AC-5: After onboarding user sees the vault
+  @wireframe:holder-05-empty-vault.svg
+  Scenario: After onboarding user sees the vault
     Given I have completed the onboarding screens
     When I tap "Get Started"
-    Then I see the identity verification camera view
-    And instructions for scanning my ID
-
-  # Wireframe: wireframes/id-success.svg
-  Scenario: User receives first credential after verification
-    Given I have completed identity verification successfully
-    When the verification result arrives
-    Then I see a success screen with my new Identity cachet
-    And the cachet shows a green "Verified" status
-
-  # Wireframe: wireframes/vault-empty.svg → wireframes/vault-populated.svg
-  Scenario: User lands in vault with first credential
-    Given I have received my first credential
-    When I dismiss the success screen
-    Then I see My Cachets with one credential card
-    And the card shows my Identity cachet with emerald accent
+    Then I see My Cachets
+    And I see guidance for getting my first cachet
 ```
 
 ## Writing conventions
@@ -85,25 +101,27 @@ When I scan a QR code from the verifier
 When I scroll down to see more credentials
 ```
 
-### Wireframe references
+### Wireframe references via tags
 
-Link each scenario to its wireframe with a comment:
-
-```gherkin
-# Wireframe: wireframes/vault-revoked.svg
-Scenario: Revoked credential visual treatment
-```
-
-For scenarios that transition between screens, reference both:
+Link each scenario to its wireframe(s) via `@wireframe:` tags. Wireframe paths are relative to `design/wireframes/` — the single source of truth. **Never copy SVG files into story directories.**
 
 ```gherkin
-# Wireframe: wireframes/vault-populated.svg → wireframes/detail-revoked.svg
-Scenario: Opening a revoked credential
+@wireframe:cachet-01-detail-revoked.svg
+Scenario: Revoked credential shows revocation banner
 ```
 
-### Scenario outlines for data variants
+For scenarios that transition between screens, use multiple tags:
 
-When the same flow applies with different data:
+```gherkin
+@wireframe:holder-04-vault-my-trust.svg @wireframe:cachet-01-detail.svg
+Scenario: Opening a credential from the vault
+```
+
+**Do NOT write separate "Visual match" scenarios.** The `@wireframe:` tag IS the visual contract. The test runner and visual verification tooling (step 2d of `/ux-stories:deliver`) use these tags to find the reference wireframe for screenshot comparison. This is platform-agnostic — works for Android, iOS, and web.
+
+### Scenario outlines for data variants (MANDATORY)
+
+When the same flow applies with different data, you MUST use `Scenario Outline` — never duplicate scenarios:
 
 ```gherkin
 Scenario Outline: Cachet card shows correct accent color
@@ -167,22 +185,43 @@ Scenario: User initiates identity verification
 
 If a scenario doesn't map to an AC, either the AC is missing or the scenario is unnecessary.
 
-## Tags for organization
+## Tags
+
+Tags serve as the metadata layer — they replace what would otherwise be frontmatter in a separate story.md file.
 
 ```gherkin
 @story:first-launch @domain:wallet/onboarding @priority:must
 Feature: First Launch Onboarding
 
-@happy-path
-Scenario: User completes onboarding flow
+@happy-path @wireframe:holder-01-onboarding-1.svg
+Scenario: User sees the welcome screen
 
-@edge-case @scenario:revoked
+@edge-case @scenario:revoked @wireframe:cachet-01-detail-revoked.svg
 Scenario: User with revoked credential sees warning
 ```
 
-Standard tags:
-- `@story:{name}` — links to user story
-- `@domain:{path}` — links to domain in tree
-- `@priority:{must|should|could}` — from story priority
+### Standard tags
+
+**Feature-level (required):**
+- `@story:{name}` — story identifier
+- `@domain:{path}` — domain from spec/domains.yaml
+- `@priority:{must|should|could}` — story priority
+
+**Feature-level (lifecycle):**
+- `@status:{draft|ready|in-progress|done}` — story status (replaces story.md status field)
+
+**Scenario-level:**
+- `@wireframe:{filename.svg}` — links to wireframe in `design/wireframes/` (**required on every scenario**)
 - `@happy-path`, `@error`, `@edge-case` — scenario category
-- `@scenario:{demo-scenario}` — links to demo scenario for testing
+- `@scenario:{demo-scenario}` — links to demo scenario for test data
+
+## DRY principles
+
+The BDD suite must never repeat itself. These rules prevent duplication:
+
+1. **One behavior, one scenario.** If two scenarios test the same interaction, keep only one.
+2. **Scenario Outline for data variants.** Multiple scenarios differing only in data values → one Outline with Examples table.
+3. **No "Visual match" boilerplate.** Wireframe validation is handled by `@wireframe:` tags — never write scenarios like "Then the screen matches wireframe X".
+4. **Shared behaviors belong to one story.** Tab switching, navigation chrome, app launch — these belong in one story. Other stories assume them as Background, not re-test them.
+5. **Background for shared setup.** If 3+ scenarios share the same Given steps, extract to Background.
+6. **Cross-story dedup.** Before writing a scenario, check if another story already covers the same behavior. If so, don't duplicate — reference it.

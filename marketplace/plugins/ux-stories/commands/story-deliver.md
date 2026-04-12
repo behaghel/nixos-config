@@ -12,10 +12,10 @@ Orchestrates the full delivery of a user story: BDD scenarios as the outer test 
 
 ### Step 1: Load context
 
-1. Find the story — check `spec/**/stories/*/story.md` or use the provided path.
-2. Read the story, wireframes, and `scenarios.feature`.
-3. If scenarios don't exist: "Run `/ux-stories:scenarios` first to generate BDD scenarios."
-4. Verify all wireframes referenced in scenarios exist.
+1. Find the story — check `spec/**/stories/*/scenarios.feature` or use the provided path.
+2. Read `scenarios.feature` (the single story artifact — contains persona, goal, scenarios, wireframe tags).
+3. Collect all `@wireframe:` tags and verify the referenced SVGs exist in `design/wireframes/`.
+4. If wireframes are missing: "These wireframes don't exist yet: [list]. Create them before delivery."
 5. Order scenarios from simplest to most complex (happy path first, edge cases last).
 6. Present the delivery plan: "This story has [N] scenarios. I'll deliver them in this order: [list]."
 7. **Pause for approval.** Do NOT proceed until the user confirms.
@@ -60,15 +60,18 @@ During the inner loop:
 #### 2d. Visual verification
 
 1. Launch the app/screen in the state this scenario tests.
-2. Take a screenshot (use `android-ux-review` skill or equivalent tooling).
-3. Compare against the wireframe SVG referenced in the scenario.
-4. Check the wireframe review checklist:
+2. Take a screenshot using the platform's tooling (Android MCP, iOS simulator, browser dev tools).
+3. Read the `@wireframe:` tag(s) on this scenario to find the reference SVG(s) in `design/wireframes/`.
+4. Compare the screenshot against the wireframe SVG element-by-element.
+5. Check the wireframe review checklist:
    - [ ] Layout order matches
    - [ ] Correct components used
    - [ ] Text content matches (including domain vocabulary)
    - [ ] Colors and states match
    - [ ] Interactive elements work
-5. If discrepancies: fix before continuing.
+6. If discrepancies: fix the implementation (not the wireframe) before continuing.
+
+This step is platform-agnostic — it works the same for Android, iOS, or web. The `@wireframe:` tag is the contract; the screenshot tool is an implementation detail.
 
 #### 2e. Feedback checkpoint
 
@@ -78,8 +81,8 @@ During the inner loop:
    - "To exercise it: [concrete instruction — adb command, tap sequence, etc.]"
 2. Collect feedback.
 3. If feedback changes the story:
-   - Update `story.md` and/or `scenarios.feature`
-   - Note the change: "Updated AC-3 based on feedback: [what changed]"
+   - Update `scenarios.feature` (the single story artifact)
+   - Note the change: "Updated scenario [name] based on feedback: [what changed]"
 
 ### Step 3: Story completion
 
@@ -88,7 +91,7 @@ After all scenarios pass:
 1. Run the full BDD scenario suite for this story.
 2. Run the full project test suite (unit + integration + BDD).
 3. Final visual review: compare all wireframe states against screenshots.
-4. Update the story status to `done` in `story.md`.
+4. Add `@status:done` tag to the Feature in `scenarios.feature`.
 5. Report:
 
 ```

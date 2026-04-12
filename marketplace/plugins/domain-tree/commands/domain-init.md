@@ -93,20 +93,34 @@ Analyze how domains interact:
 
 1. Create `spec/domains.yaml` with the approved tree (including `type`, `language`, and `context-map`).
 2. Create the `spec/` directory structure (empty domain directories).
-3. For each domain, create a skeleton `index.md` tailored to its type:
+3. For each domain, create a skeleton `index.md` tailored to its type.
+
+**CRITICAL: index.md must NOT duplicate domains.yaml.** The `domains.yaml` is the single source of truth for:
+- Domain descriptions
+- Domain type/classification
+- Code paths
+- Context map relationships
+- Consumer lists
+
+The `index.md` exists ONLY for information that `domains.yaml` cannot express:
+- Ubiquitous language (term definitions)
+- Key concepts and aggregates
+- Invariants (business rules that must never break)
+- Domain events
+
+**Do NOT copy the description from domains.yaml into index.md.** Instead, use a reference.
 
 For **core** domains:
 ```markdown
 ---
 domain: <domain-name>
-type: core
 status: draft
 last-reviewed: <today>
 ---
 
 # <Domain Name>
 
-<Description from domains.yaml>
+> See `spec/domains.yaml` for description, classification, code paths, and context map.
 
 ## Ubiquitous Language
 
@@ -124,30 +138,35 @@ last-reviewed: <today>
 
 <!-- TODO: what must never break in this domain -->
 
-## Context Map Relationships
-
-<!-- TODO: which other domains does this interact with, via which patterns -->
-
 ## Domain Events
 
 <!-- TODO: what events does this domain publish or consume -->
 ```
 
-For **supporting/generic** domains, use a lighter skeleton (omit ubiquitous language and domain events sections).
+For **supporting/generic** domains, use a lighter skeleton (omit ubiquitous language and domain events sections):
+```markdown
+---
+domain: <domain-name>
+status: draft
+last-reviewed: <today>
+---
+
+# <Domain Name>
+
+> See `spec/domains.yaml` for description, classification, code paths, and context map.
+```
 
 For **shared-kernel** domains:
 ```markdown
 ---
 domain: <domain-name>
-type: shared-kernel
 status: draft
 last-reviewed: <today>
-consumers: [list, of, consuming, domains]
 ---
 
 # <Domain Name>
 
-<Description from domains.yaml>
+> See `spec/domains.yaml` for description, consumers, and context map.
 
 ## Shared Types
 
