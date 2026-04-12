@@ -103,16 +103,23 @@ Environment ready!'';
     echo "✅ Tests completed!"
   '';
 
-  # Agent configuration (Claude Code + OpenCode)
-  # Skills and hooks sourced from the agent marketplace.
-  claude.code = {
+  # Agent marketplace: skills, commands, agents, hooks, MCP servers.
+  # Shared across Claude Code and OpenCode.
+  claude.code = let
+    mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  in {
     enable = true;
-    hooks = import (inputs.agent-marketplace + "/marketplace/hooks/notification.nix");
-    mcpServers.devenv = import (inputs.agent-marketplace + "/marketplace/mcp/devenv.nix");
+    commands = mp.commands;
+    hooks = mp.hooks;
+    mcpServers.devenv = mp.mcpServers.devenv;
   };
 
-  opencode = {
+  opencode = let
+    mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  in {
     enable = true;
-    skills = inputs.agent-marketplace + "/marketplace/skills";
+    skills = mp.skills;
+    commands = mp.commands;
+    agents = mp.agents;
   };
 }
