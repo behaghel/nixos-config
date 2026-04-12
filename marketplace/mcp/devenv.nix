@@ -4,6 +4,7 @@
 # Usage in devenv.nix:
 #   claude.code.mcpServers.devenv = import (inputs.agent-marketplace + "/marketplace/mcp/devenv.nix");
 {
+  type = "stdio";
   command = "devenv";
   args = [ "mcp" ];
 }
