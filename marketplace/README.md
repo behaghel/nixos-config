@@ -8,18 +8,18 @@ Projects consume this marketplace via [devenv](https://devenv.sh) by adding it a
 
 ```
 marketplace/
+├── lib.nix                 # Explicit opt-in API
+├── plugins/                # Modular plugins (skills + commands + agents)
+│   ├── spec-driven/
+│   ├── spec-tdd/
+│   ├── domain-tree/
+│   └── ux-stories/
 ├── memory.md               # Shared agent rules (git policy, dev workflow, etc.)
-├── skills/                 # Tool-agnostic skills (SKILL.md format)
-│   ├── devenv-project-workflow/
-│   └── spec-driven-tdd/
-├── commands/               # Shared slash-commands (markdown)
-├── mcp/                    # MCP server definitions (Nix attrsets)
-│   └── devenv.nix          # devenv MCP server (search_packages, search_options)
+├── skills/                 # Standalone tool-agnostic skills
+├── commands/               # Standalone slash-commands
+├── mcp/                    # MCP server definitions
 ├── hooks/                  # Claude Code hook definitions
-│   └── notification.nix    # Desktop notifications on idle/permission/stop
 └── settings/               # Per-tool settings fragments
-    ├── claude-code.nix
-    └── opencode.nix
 ```
 
 ## Usage in a devenv Project
@@ -39,46 +39,53 @@ inputs:
 
 ### 2. Wire it in `devenv.nix`
 
+The recommended way to use the marketplace is via the `lib.nix` API. This allows you to explicitly opt-in to specific plugins or bundles.
+
 ```nix
-{ pkgs, inputs, ... }:
+{ lib, inputs, ... }:
 
-{
-  # ... your project config ...
-
+let
+  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  bundle = mp.bundles.total-spec;
+in {
   # Claude Code
   claude.code = {
     enable = true;
-    hooks = import (inputs.agent-marketplace + "/marketplace/hooks/notification.nix");
-    mcpServers.devenv = import (inputs.agent-marketplace + "/marketplace/mcp/devenv.nix");
+    commands = bundle.commands;
+    hooks = mp.hooks;
+    mcpServers.devenv = mp.mcpServers.devenv;
   };
 
   # OpenCode
   opencode = {
     enable = true;
-    skills = inputs.agent-marketplace + "/marketplace/skills";
+    skills = mp.skills // bundle.skills;
+    commands = bundle.commands;
+    agents = bundle.agents;
   };
 }
 ```
 
-### 3. Cherry-pick what you need
+## Bundles
 
-You don't have to use everything. Import only what your project needs:
+Bundles are pre-defined collections of plugins.
 
+- `total-spec`: Includes `spec-driven`, `spec-tdd`, `domain-tree`, and `ux-stories`.
+
+### Cherry-pick what you need
+
+You don't have to use everything. You can cherry-pick specific plugins or use the `select` helper:
+
+**Per-plugin cherry-pick:**
 ```nix
-# Just Claude Code hooks, no OpenCode
-claude.code = {
-  enable = true;
-  hooks = import (inputs.agent-marketplace + "/marketplace/hooks/notification.nix");
-};
+opencode.skills = mp.skills // mp.plugins.spec-tdd.skills;
+opencode.commands = mp.plugins.spec-tdd.commands;
+```
 
-# Just OpenCode skills, no Claude
-opencode = {
-  enable = true;
-  skills = inputs.agent-marketplace + "/marketplace/skills";
-};
-
-# Just the MCP server
-claude.code.mcpServers.devenv = import (inputs.agent-marketplace + "/marketplace/mcp/devenv.nix");
+**Select helper:**
+```nix
+let chosen = mp.select [ "spec-tdd" "domain-tree" ];
+in { opencode.skills = mp.skills // chosen.skills; }
 ```
 
 ## Adding Skills

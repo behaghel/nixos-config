@@ -1,21 +1,22 @@
 # Auto-discovery helper for the agent marketplace.
 #
-# Scans plugins/ and skills/ directories and produces tool-agnostic
-# attrsets that devenv's claude.code.* and opencode.* modules consume.
+# Provides per-plugin access, named bundles, and a select helper.
+# Importing the marketplace does NOT activate any plugin — consumers opt in.
 #
 # Usage in a project's devenv.nix:
 #   let
 #     mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+#     bundle = mp.bundles.total-spec;
 #   in {
 #     opencode = {
 #       enable = true;
-#       skills = mp.skills;
-#       commands = mp.commands;
-#       agents = mp.agents;
+#       skills = mp.skills // bundle.skills;
+#       commands = bundle.commands;
+#       agents = bundle.agents;
 #     };
 #     claude.code = {
 #       enable = true;
-#       commands = mp.commands;
+#       commands = bundle.commands;
 #       hooks = mp.hooks;
 #       mcpServers.devenv = mp.mcpServers.devenv;
 #     };
@@ -43,22 +44,72 @@ let
     in
     lib.concatStringsSep "\n" afterFrontmatter;
 
+  # ── Per-plugin discovery ────────────────────────────────────
+
   pluginNames =
     if builtins.pathExists pluginsDir
     then builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir pluginsDir))
     else [ ];
 
-  # Collect skills from plugins/<name>/skills/<skill-name>/ (directories)
-  pluginSkills = lib.mergeAttrsList (map
-    (name:
-      let path = pluginsDir + "/${name}/skills";
-      in lib.optionalAttrs (builtins.pathExists path)
-        (lib.mapAttrs'
-          (sName: _: lib.nameValuePair sName (path + "/${sName}"))
-          (lib.filterAttrs (_: t: t == "directory") (builtins.readDir path))))
-    pluginNames);
+  # Build a single plugin's attrset: { skills, commands, agents }
+  mkPlugin = name:
+    let
+      base = pluginsDir + "/${name}";
+      skillsPath = base + "/skills";
+      cmdsPath = base + "/commands";
+      agentsPath = base + "/agents";
+    in
+    {
+      skills =
+        if builtins.pathExists skillsPath
+        then lib.mapAttrs'
+          (sName: _: lib.nameValuePair sName (skillsPath + "/${sName}"))
+          (lib.filterAttrs (_: t: t == "directory") (builtins.readDir skillsPath))
+        else { };
 
-  # Collect standalone skills from skills/<skill-name>/
+      commands =
+        if builtins.pathExists cmdsPath
+        then lib.mapAttrs'
+          (fName: _:
+            lib.nameValuePair
+              (lib.removeSuffix ".md" fName)
+              (builtins.readFile (cmdsPath + "/${fName}")))
+          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n) (builtins.readDir cmdsPath))
+        else { };
+
+      agents =
+        if builtins.pathExists agentsPath
+        then lib.mapAttrs'
+          (fName: _:
+            lib.nameValuePair
+              (lib.removeSuffix ".md" fName)
+              (stripFrontmatter (builtins.readFile (agentsPath + "/${fName}"))))
+          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n) (builtins.readDir agentsPath))
+        else { };
+    };
+
+  # All plugins as attrset: { spec-tdd = { skills, commands, agents }; ... }
+  plugins = lib.genAttrs pluginNames mkPlugin;
+
+  # ── Select helper ───────────────────────────────────────────
+
+  # Merge a list of plugin names into a single { skills, commands, agents }.
+  select = names:
+    let
+      selected = map (n:
+        if builtins.hasAttr n plugins
+        then plugins.${n}
+        else throw "marketplace: unknown plugin '${n}'. Available: ${builtins.concatStringsSep ", " pluginNames}"
+      ) names;
+    in
+    {
+      skills = lib.mergeAttrsList (map (p: p.skills) selected);
+      commands = lib.mergeAttrsList (map (p: p.commands) selected);
+      agents = lib.mergeAttrsList (map (p: p.agents) selected);
+    };
+
+  # ── Standalone skills ───────────────────────────────────────
+
   standaloneSkills =
     if builtins.pathExists skillsDir
     then lib.mapAttrs'
@@ -66,43 +117,22 @@ let
       (lib.filterAttrs (_: t: t == "directory") (builtins.readDir skillsDir))
     else { };
 
-  # Collect commands from plugins/<name>/commands/*.md
-  pluginCommands = lib.mergeAttrsList (map
-    (name:
-      let path = pluginsDir + "/${name}/commands";
-      in lib.optionalAttrs (builtins.pathExists path)
-        (lib.mapAttrs'
-          (fName: _:
-            lib.nameValuePair
-              (lib.removeSuffix ".md" fName)
-              (builtins.readFile (path + "/${fName}")))
-          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n) (builtins.readDir path))))
-    pluginNames);
-
-  # Collect agents from plugins/<name>/agents/*.md
-  # Frontmatter is stripped so the content is tool-agnostic.
-  pluginAgents = lib.mergeAttrsList (map
-    (name:
-      let path = pluginsDir + "/${name}/agents";
-      in lib.optionalAttrs (builtins.pathExists path)
-        (lib.mapAttrs'
-          (fName: _:
-            lib.nameValuePair
-              (lib.removeSuffix ".md" fName)
-              (stripFrontmatter (builtins.readFile (path + "/${fName}"))))
-          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n) (builtins.readDir path))))
-    pluginNames);
-
 in
 {
-  # All skills (standalone + from plugins). Attrset of name -> path.
-  skills = standaloneSkills // pluginSkills;
+  # Per-plugin access. Each plugin exposes { skills, commands, agents }.
+  inherit plugins;
 
-  # All commands (from plugins). Attrset of name -> markdown content.
-  commands = pluginCommands;
+  # Merge an arbitrary list of plugins by name.
+  inherit select;
 
-  # All agents (from plugins). Attrset of name -> markdown content.
-  agents = pluginAgents;
+  # Named bundles.
+  bundles = {
+    # spec-driven + spec-tdd + domain-tree + ux-stories
+    total-spec = select [ "spec-driven" "spec-tdd" "domain-tree" "ux-stories" ];
+  };
+
+  # Standalone skills (not part of any plugin). Always safe to include.
+  skills = standaloneSkills;
 
   # Shared memory / rules.
   memory = builtins.readFile ./memory.md;

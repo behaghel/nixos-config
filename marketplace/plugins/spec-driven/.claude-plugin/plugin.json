@@ -1,0 +1,5 @@
+{
+  "name": "spec-driven",
+  "version": "0.1.0",
+  "description": "Spec-driven development toolkit — collect requirements, define acceptance criteria, and produce verifiable specs before code is written"
+}
