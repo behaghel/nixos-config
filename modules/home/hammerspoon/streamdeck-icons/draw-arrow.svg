@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#1a1a2e"/>
+  <!-- Arrow line -->
+  <line x1="36" y1="86" x2="96" y2="36" stroke="#4ecdc4" stroke-width="5" stroke-linecap="round"/>
+  <!-- Arrowhead -->
+  <polygon points="100,30 82,38 92,48" fill="#4ecdc4"/>
+  <!-- Label -->
+  <text x="72" y="124" text-anchor="middle" font-family="SF Pro,Helvetica,sans-serif" font-size="14" font-weight="600" fill="#ffffff">ARROW</text>
+</svg>

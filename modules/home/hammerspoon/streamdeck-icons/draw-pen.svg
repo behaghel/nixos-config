@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#1a1a2e"/>
+  <!-- Freehand squiggle -->
+  <path d="M 35 80 C 45 40, 60 95, 72 55 C 84 15, 95 75, 110 50" fill="none" stroke="#4ecdc4" stroke-width="6" stroke-linecap="round"/>
+  <!-- Label -->
+  <text x="72" y="124" text-anchor="middle" font-family="SF Pro,Helvetica,sans-serif" font-size="14" font-weight="600" fill="#ffffff">PEN</text>
+</svg>

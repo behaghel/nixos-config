@@ -305,14 +305,16 @@ in
       local FADE_STEPS     = 20  -- number of alpha steps in the fade
 
       -- Cursor indicator constants
-      -- Canvas layout: [1]=background, [2]=tool shape, [3+]=strokes
+      -- Canvas layout: [1]=background, [2]=tool shape, [3]=ephemeral badge, [4+]=strokes
       local INDICATOR_TOOL_IDX  = 2
+      local INDICATOR_EPH_IDX  = 3
       local INDICATOR_OFFSET_X  = 24  -- offset right of cursor
       local INDICATOR_OFFSET_Y  = 6   -- slight offset below cursor
 
       local draw = {
         active = false,
         tool = "pen", -- pen|rect|arrow
+        ephemeralMode = false, -- when true, all strokes are ephemeral
         colorIndex = 1,
         colors = {
           { red = 1, green = 0.2, blue = 0.2, alpha = 0.9 },   -- red
@@ -382,11 +384,23 @@ in
         end
       end
 
+      -- Build the ephemeral badge element (small timer icon next to tool indicator)
+      local function makeEphBadge(cx, cy, visible)
+        return {
+          type = "text",
+          text = visible and "\u{23F1}" or "",  -- stopwatch emoji
+          textSize = 12,
+          textColor = { white = 1, alpha = 0.9 },
+          frame = { x = cx + 10, y = cy - 14, w = 20, h = 20 },
+        }
+      end
+
       -- Move the indicator to follow the cursor (canvas-relative coords).
       -- Wrapped in pcall so a failure here never breaks the drawing callback.
       local function moveIndicator(scrState, cx, cy)
         pcall(function()
           scrState.canvas[INDICATOR_TOOL_IDX] = makeToolElem(cx, cy, draw.tool, currentColor())
+          scrState.canvas[INDICATOR_EPH_IDX] = makeEphBadge(cx, cy, draw.ephemeralMode)
         end)
       end
 
@@ -419,6 +433,7 @@ in
               elseif tool.coordinates and tool.coordinates[2] then cx, cy = tool.coordinates[2].x, tool.coordinates[2].y
               end
               c[INDICATOR_TOOL_IDX] = makeToolElem(cx, cy, draw.tool, currentColor())
+              c[INDICATOR_EPH_IDX] = makeEphBadge(cx, cy, draw.ephemeralMode)
             end
           end)
         end
@@ -443,6 +458,8 @@ in
         c[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 } }
         -- cursor indicator element (index 2) — initially off-screen
         c:insertElement(makeToolElem(-100, -100, draw.tool, currentColor()))
+        -- ephemeral badge element (index 3) — initially off-screen
+        c:insertElement(makeEphBadge(-100, -100, false))
         c:show()
         return {
           canvas = c,
@@ -786,6 +803,7 @@ in
 
       local function toggleOverlay()
         if draw.active then
+          draw.ephemeralMode = false
           teardown()
           return
         end
@@ -812,6 +830,17 @@ in
           if not draw.active then return false end
           local rawPt = ev:location()
           local evType = ev:getType()
+
+          -- Let clicks in the menu bar region pass through (for tray menus, etc.)
+          local pointScreen = hs.mouse.getCurrentScreen()
+          if pointScreen then
+            local full = pointScreen:fullFrame()
+            local usable = pointScreen:frame()
+            -- Menu bar occupies the gap between fullFrame top and frame top
+            if rawPt.y < full.y + (usable.y - full.y) then
+              return false
+            end
+          end
 
           -- Update cursor indicator on every mouse event
           if evType == hs.eventtap.event.types.mouseMoved
@@ -842,7 +871,7 @@ in
               start = { x = loc.x, y = loc.y },
               points = { { x = loc.x, y = loc.y } },
               color = currentColor(),
-              ephemeral = ev:getFlags().shift or false,
+              ephemeral = draw.ephemeralMode or ev:getFlags().shift or false,
             }
             resetPreview()
             return true
@@ -911,7 +940,8 @@ in
       updateMenu = function()
         if not draw.menu then return end
         local active = draw.active
-        draw.menu:setTitle(active and "Draw ✏️" or "Draw")
+        local ephLabel = draw.ephemeralMode and " \u{23F1}" or ""
+        draw.menu:setTitle(active and ("Draw \u{270F}\u{FE0F}" .. ephLabel) or "Draw")
         draw.menu:setMenu({
           { title = active and "Turn off" or "Turn on", fn = toggleOverlay },
           { title = "Tool: pen", fn = function() setTool("pen") end },
@@ -920,6 +950,7 @@ in
           { title = "Undo last", disabled = not active, fn = undoLast },
           { title = "Clear", disabled = not active, fn = clearAll },
           { title = "Next color", disabled = not active, fn = function() nextColor(); refreshIndicatorOnAll(); hs.alert.show("Color changed") end },
+          { title = draw.ephemeralMode and "Ephemeral \u{2705}" or "Ephemeral", disabled = not active, fn = function() draw.ephemeralMode = not draw.ephemeralMode; refreshIndicatorOnAll(); updateMenu() end },
         })
       end
 
@@ -945,6 +976,36 @@ in
       end)
       hs.hotkey.bind({"ctrl","alt","cmd"}, "x", function()
         if draw.active then nextColor(); refreshIndicatorOnAll(); hs.alert.show("Color changed"); updateMenu() end
+      end)
+
+      -- URL event handlers (Stream Deck via Elgato app "Open URL" actions)
+      -- Usage: open -g "hammerspoon://drawon" (or drawoff, drawpen, etc.)
+      hs.urlevent.bind("drawon", function()
+        if not draw.active then toggleOverlay() end
+      end)
+      hs.urlevent.bind("drawoff", function()
+        if draw.active then toggleOverlay() end
+      end)
+      hs.urlevent.bind("drawpen", function()
+        if draw.active then setTool("pen"); updateMenu() end
+      end)
+      hs.urlevent.bind("drawrect", function()
+        if draw.active then setTool("rect"); updateMenu() end
+      end)
+      hs.urlevent.bind("drawarrow", function()
+        if draw.active then setTool("arrow"); updateMenu() end
+      end)
+      hs.urlevent.bind("drawundo", function()
+        if draw.active then undoLast(); updateMenu() end
+      end)
+      hs.urlevent.bind("drawcolor", function()
+        if draw.active then nextColor(); refreshIndicatorOnAll(); hs.alert.show("Color changed"); updateMenu() end
+      end)
+      hs.urlevent.bind("drawephemeral", function()
+        draw.ephemeralMode = not draw.ephemeralMode
+        refreshIndicatorOnAll()
+        updateMenu()
+        hs.alert.show(draw.ephemeralMode and "Ephemeral ON" or "Ephemeral OFF")
       end)
 
       -- Menu bar toggle for draw overlay

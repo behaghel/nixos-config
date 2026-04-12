@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#1a1a2e"/>
+  <!-- Curved undo arrow -->
+  <path d="M 52 40 L 36 56 L 52 72" fill="none" stroke="#f5c542" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M 36 56 C 36 56, 60 56, 80 56 C 108 56, 108 88, 80 88 L 60 88" fill="none" stroke="#f5c542" stroke-width="6" stroke-linecap="round"/>
+  <!-- Label -->
+  <text x="72" y="124" text-anchor="middle" font-family="SF Pro,Helvetica,sans-serif" font-size="14" font-weight="600" fill="#ffffff">UNDO</text>
+</svg>

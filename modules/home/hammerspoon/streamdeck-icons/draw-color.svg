@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <rect width="144" height="144" fill="#1a1a2e"/>
+  <!-- Four color dots matching the draw overlay colors -->
+  <circle cx="52" cy="44" r="14" fill="#ff3030"/>
+  <circle cx="92" cy="44" r="14" fill="#3090ff"/>
+  <circle cx="52" cy="80" r="14" fill="#30ff30"/>
+  <circle cx="92" cy="80" r="14" fill="#ffffff"/>
+  <!-- Label -->
+  <text x="72" y="124" text-anchor="middle" font-family="SF Pro,Helvetica,sans-serif" font-size="14" font-weight="600" fill="#ffffff">COLOR</text>
+</svg>
