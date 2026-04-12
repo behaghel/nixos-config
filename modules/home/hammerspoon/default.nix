@@ -296,9 +296,19 @@ in
       -----------------------------------------------------------------------
       -- DRAW OVERLAY (SCREEN ANNOTATIONS)
       -- Architecture: one hs.canvas per screen (proven hhann pattern).
-      -- draw.screens[screenId] = { canvas, origin, strokes, previewId }
+      -- draw.screens[screenId] = { canvas, origin, strokes, previewIds }
       -----------------------------------------------------------------------
       local drawLog = hs.logger.new("draw", "info")
+
+      local EPHEMERAL_DELAY = 2   -- seconds before ephemeral strokes fade
+      local FADE_DURATION  = 1.0 -- seconds for the fade-out animation
+      local FADE_STEPS     = 20  -- number of alpha steps in the fade
+
+      -- Cursor indicator constants
+      -- Canvas layout: [1]=background, [2]=tool shape, [3+]=strokes
+      local INDICATOR_TOOL_IDX  = 2
+      local INDICATOR_OFFSET_X  = 24  -- offset right of cursor
+      local INDICATOR_OFFSET_Y  = 6   -- slight offset below cursor
 
       local draw = {
         active = false,
@@ -311,7 +321,7 @@ in
           { white = 1, alpha = 0.9 },                         -- white
         },
         width = 4,
-        screens = {},   -- screenId -> { canvas, origin, strokes, previewId }
+        screens = {},   -- screenId -> { canvas, origin, strokes, previewIds, timers }
         activeScr = nil, -- screenId of the screen being drawn on
         taps = {},
         menu = nil,
@@ -336,6 +346,84 @@ in
         return { x = screenPt.x - o.x, y = screenPt.y - o.y }
       end
 
+      -- Build the tool shape element at a given center
+      local function makeToolElem(cx, cy, tool, color)
+        if tool == "pen" then
+          return {
+            type = "circle",
+            center = { x = cx, y = cy },
+            radius = 4,
+            action = "fill",
+            fillColor = color,
+          }
+        elseif tool == "rect" then
+          local half = 6
+          return {
+            type = "rectangle",
+            action = "stroke",
+            strokeColor = color,
+            strokeWidth = 2,
+            frame = { x = cx - half, y = cy - half, w = half * 2, h = half * 2 },
+          }
+        else -- arrow
+          -- Small ">" chevron
+          local sz = 6
+          return {
+            type = "segments",
+            coordinates = {
+              { x = cx - sz, y = cy - sz },
+              { x = cx + sz, y = cy },
+              { x = cx - sz, y = cy + sz },
+            },
+            action = "stroke",
+            strokeColor = color,
+            strokeWidth = 2.5,
+          }
+        end
+      end
+
+      -- Move the indicator to follow the cursor (canvas-relative coords).
+      -- Wrapped in pcall so a failure here never breaks the drawing callback.
+      local function moveIndicator(scrState, cx, cy)
+        pcall(function()
+          scrState.canvas[INDICATOR_TOOL_IDX] = makeToolElem(cx, cy, draw.tool, currentColor())
+        end)
+      end
+
+      -- Show/hide the indicator (alpha toggle)
+      local function setIndicatorVisible(scrState, visible)
+        pcall(function()
+          local color = currentColor()
+          local rc = {}; for k,v in pairs(color) do rc[k]=v end
+          rc.alpha = visible and (color.alpha or 0.9) or 0
+          local tool = scrState.canvas[INDICATOR_TOOL_IDX]
+          if tool then
+            if tool.fillColor then tool.fillColor = rc end
+            if tool.strokeColor then tool.strokeColor = rc end
+            scrState.canvas[INDICATOR_TOOL_IDX] = tool
+          end
+        end)
+      end
+
+      -- Refresh indicator color/tool on all screen canvases
+      local function refreshIndicatorOnAll()
+        for _, state in pairs(draw.screens) do
+          pcall(function()
+            local c = state.canvas
+            local tool = c[INDICATOR_TOOL_IDX]
+            if tool then
+              -- Preserve position from existing element
+              local cx, cy = 0, 0
+              if tool.center then cx, cy = tool.center.x, tool.center.y
+              elseif tool.frame then cx, cy = tool.frame.x + tool.frame.w/2, tool.frame.y + tool.frame.h/2
+              elseif tool.coordinates and tool.coordinates[2] then cx, cy = tool.coordinates[2].x, tool.coordinates[2].y
+              end
+              c[INDICATOR_TOOL_IDX] = makeToolElem(cx, cy, draw.tool, currentColor())
+            end
+          end)
+        end
+      end
+
       -- Create one canvas for a single screen, return its state table
       local function createScreenCanvas(screen)
         local frame = screen:fullFrame()
@@ -353,12 +441,15 @@ in
         end
         -- transparent background element (index 1) to fill the screen
         c[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 } }
+        -- cursor indicator element (index 2) — initially off-screen
+        c:insertElement(makeToolElem(-100, -100, draw.tool, currentColor()))
         c:show()
         return {
           canvas = c,
           origin = { x = frame.x, y = frame.y },
           strokes = {},
-          previewId = nil,
+          previewIds = {},
+          timers = {},  -- strokeArrayIdx -> timer (for ephemeral auto-erase)
         }
       end
 
@@ -373,9 +464,18 @@ in
         end
       end
 
+      -- Cancel all pending ephemeral timers for a screen state
+      local function cancelTimers(state)
+        for k, t in pairs(state.timers) do
+          t:stop()
+        end
+        state.timers = {}
+      end
+
       -- Delete all canvases
       local function deleteAllCanvases()
         for sid, state in pairs(draw.screens) do
+          cancelTimers(state)
           if state.canvas then state.canvas:delete() end
         end
         draw.screens = {}
@@ -399,29 +499,127 @@ in
       -- Preview / stroke helpers — operate on the active screen's canvas
       local function resetPreview()
         local s = activeCanvas()
-        if s and s.previewId then
-          s.canvas:removeElement(s.previewId)
-          s.previewId = nil
+        if not s then return end
+        -- Remove in reverse order so lower indices stay valid
+        for i = #s.previewIds, 1, -1 do
+          s.canvas:removeElement(s.previewIds[i])
         end
+        s.previewIds = {}
       end
 
       local function addStroke(elem)
         local s = activeCanvas()
         if not s then return end
         s.canvas:insertElement(elem)
-        table.insert(s.strokes, #s.canvas)
+        table.insert(s.strokes, { #s.canvas })
+      end
+
+      -- Add multiple elements as a single undoable stroke (e.g., arrow shaft + head)
+      local function addCompoundStroke(elems)
+        local s = activeCanvas()
+        if not s then return end
+        local indices = {}
+        for _, elem in ipairs(elems) do
+          s.canvas:insertElement(elem)
+          table.insert(indices, #s.canvas)
+        end
+        table.insert(s.strokes, indices)
+      end
+
+      -- Fade out canvas elements then remove them.
+      -- elemIndices: array of canvas element indices (highest first is fine).
+      -- onDone: called after all elements are removed.
+      local function fadeAndRemove(scrState, elemIndices, onDone)
+        if not scrState or not scrState.canvas then
+          if onDone then onDone() end
+          return
+        end
+        local step = 0
+        local interval = FADE_DURATION / FADE_STEPS
+        -- Read initial alpha from the first element's strokeColor (or fillColor)
+        local initAlpha = 0.9
+        local timer
+        timer = hs.timer.doEvery(interval, function()
+          step = step + 1
+          local alpha = initAlpha * (1 - step / FADE_STEPS)
+          if alpha < 0 then alpha = 0 end
+          -- Update alpha on each element
+          for _, eidx in ipairs(elemIndices) do
+            local ok, _ = pcall(function()
+              local e = scrState.canvas[eidx]
+              if e then
+                if e.strokeColor then
+                  local c = {}; for k,v in pairs(e.strokeColor) do c[k]=v end
+                  c.alpha = alpha
+                  e.strokeColor = c
+                  scrState.canvas[eidx] = e
+                end
+              end
+            end)
+          end
+          if step >= FADE_STEPS then
+            timer:stop()
+            -- Remove elements in reverse index order so lower indices stay valid
+            table.sort(elemIndices, function(a,b) return a > b end)
+            for _, eidx in ipairs(elemIndices) do
+              pcall(function() scrState.canvas:removeElement(eidx) end)
+            end
+            if onDone then onDone() end
+          end
+        end)
+      end
+
+      -- Schedule an ephemeral stroke for auto-erase after EPHEMERAL_DELAY seconds.
+      -- strokeArrIdx: index into s.strokes (entry is an array of canvas indices).
+      local function scheduleEphemeral(s, strokeArrIdx)
+        local entry = s.strokes[strokeArrIdx]
+        if not entry then return end
+        s.timers[strokeArrIdx] = hs.timer.doAfter(EPHEMERAL_DELAY, function()
+          s.timers[strokeArrIdx] = nil
+          -- Fade all canvas elements in this stroke entry, then remove
+          fadeAndRemove(s, entry, function()
+            -- Find and remove this stroke entry
+            for i, v in ipairs(s.strokes) do
+              if v == entry then
+                table.remove(s.strokes, i)
+                -- Adjust timer keys that reference shifted stroke positions
+                local newTimers = {}
+                for k, t in pairs(s.timers) do
+                  if k > i then
+                    newTimers[k - 1] = t
+                  elseif k < i then
+                    newTimers[k] = t
+                  end
+                end
+                s.timers = newTimers
+                break
+              end
+            end
+          end)
+        end)
       end
 
       local function undoLast()
         -- Undo from the most-recently-drawn-on screen
         local s = activeCanvas()
         if not s then return end
-        local idx = table.remove(s.strokes)
-        if idx then s.canvas:removeElement(idx) end
+        local strokeArrIdx = #s.strokes
+        -- Cancel pending ephemeral timer if any
+        if s.timers[strokeArrIdx] then
+          s.timers[strokeArrIdx]:stop()
+          s.timers[strokeArrIdx] = nil
+        end
+        local entry = table.remove(s.strokes)
+        if not entry then return end
+        -- entry is an array of canvas indices; remove in reverse order
+        for i = #entry, 1, -1 do
+          s.canvas:removeElement(entry[i])
+        end
       end
 
       local function clearAll()
         for _, state in pairs(draw.screens) do
+          cancelTimers(state)
           -- Delete and recreate each canvas to reset cleanly
           local frame = state.canvas:frame()
           state.canvas:delete()
@@ -436,10 +634,11 @@ in
           end)
           if ok and c then
             c[1] = { type = "rectangle", action = "fill", fillColor = { alpha = 0 } }
+            c:insertElement(makeToolElem(-100, -100, draw.tool, currentColor()))
             c:show()
             state.canvas = c
             state.strokes = {}
-            state.previewId = nil
+            state.previewIds = {}
           end
         end
       end
@@ -471,11 +670,11 @@ in
           strokeColor = activeStroke.color,
           strokeWidth = draw.width,
         }
-        if s.previewId then
-          s.canvas[s.previewId] = elem
+        if #s.previewIds > 0 then
+          s.canvas[s.previewIds[1]] = elem
         else
           s.canvas:insertElement(elem)
-          s.previewId = #s.canvas
+          s.previewIds = { #s.canvas }
         end
       end
 
@@ -495,11 +694,11 @@ in
           strokeWidth = draw.width,
           frame = { x = x, y = y, w = w, h = h },
         }
-        if s.previewId then
-          s.canvas[s.previewId] = elem
+        if #s.previewIds > 0 then
+          s.canvas[s.previewIds[1]] = elem
         else
           s.canvas:insertElement(elem)
-          s.previewId = #s.canvas
+          s.previewIds = { #s.canvas }
         end
       end
 
@@ -508,9 +707,14 @@ in
         resetPreview()
         updateRectPreview(current)
         local s = activeCanvas()
-        if s and s.previewId then
-          table.insert(s.strokes, s.previewId)
-          s.previewId = nil
+        if s and #s.previewIds > 0 then
+          -- Wrap preview indices as a single stroke entry
+          local entry = {}
+          for _, idx in ipairs(s.previewIds) do
+            table.insert(entry, idx)
+          end
+          table.insert(s.strokes, entry)
+          s.previewIds = {}
         end
         activeStroke = nil
       end
@@ -551,9 +755,10 @@ in
         if not s then return end
         local elems = arrowElements(start, current, activeStroke.color)
         resetPreview()
+        s.previewIds = {}
         for _, elem in ipairs(elems) do
           s.canvas:insertElement(elem)
-          s.previewId = #s.canvas
+          table.insert(s.previewIds, #s.canvas)
         end
       end
 
@@ -562,9 +767,7 @@ in
         if not start then return end
         resetPreview()
         local elems = arrowElements(start, current, activeStroke.color)
-        for _, elem in ipairs(elems) do
-          addStroke(elem)
-        end
+        addCompoundStroke(elems)
         activeStroke = nil
       end
 
@@ -599,6 +802,7 @@ in
         updateMenu()
 
         local eventTypes = {
+          hs.eventtap.event.types.mouseMoved,
           hs.eventtap.event.types.leftMouseDown,
           hs.eventtap.event.types.leftMouseDragged,
           hs.eventtap.event.types.leftMouseUp,
@@ -607,23 +811,43 @@ in
         local ok, tap = pcall(hs.eventtap.new, eventTypes, function(ev)
           if not draw.active then return false end
           local rawPt = ev:location()
+          local evType = ev:getType()
 
-          if ev:getType() == hs.eventtap.event.types.leftMouseDown then
+          -- Update cursor indicator on every mouse event
+          if evType == hs.eventtap.event.types.mouseMoved
+             or evType == hs.eventtap.event.types.leftMouseDragged then
+            local sid = screenForPoint(rawPt)
+            local s = sid and draw.screens[sid]
+            if s then
+              local loc = toCanvas(rawPt, s)
+              moveIndicator(s, loc.x + INDICATOR_OFFSET_X,
+                               loc.y + INDICATOR_OFFSET_Y)
+            end
+            -- mouseMoved: pass through (don't consume)
+            if evType == hs.eventtap.event.types.mouseMoved then
+              return false
+            end
+          end
+
+          if evType == hs.eventtap.event.types.leftMouseDown then
             -- Detect which screen the click landed on
             local sid = screenForPoint(rawPt)
             draw.activeScr = sid
             local s = activeCanvas()
             if not s then return false end
+            -- Hide indicator while drawing
+            setIndicatorVisible(s, false)
             local loc = toCanvas(rawPt, s)
             activeStroke = {
               start = { x = loc.x, y = loc.y },
               points = { { x = loc.x, y = loc.y } },
               color = currentColor(),
+              ephemeral = ev:getFlags().shift or false,
             }
             resetPreview()
             return true
 
-          elseif ev:getType() == hs.eventtap.event.types.leftMouseDragged then
+          elseif evType == hs.eventtap.event.types.leftMouseDragged then
             if not activeStroke then return true end
             local s = activeCanvas()
             if not s then return true end
@@ -638,11 +862,15 @@ in
             end
             return true
 
-          elseif ev:getType() == hs.eventtap.event.types.leftMouseUp then
+          elseif evType == hs.eventtap.event.types.leftMouseUp then
             if not activeStroke then return true end
             local s = activeCanvas()
             if not s then return true end
+            -- Show indicator again
+            setIndicatorVisible(s, true)
             local loc = toCanvas(rawPt, s)
+            local isEphemeral = activeStroke.ephemeral
+            local strokesBefore = #s.strokes
             if draw.tool == "pen" then
               table.insert(activeStroke.points, { x = loc.x, y = loc.y })
               finalizePen()
@@ -652,6 +880,12 @@ in
               finalizeArrow(loc)
             end
             resetPreview()
+            -- Schedule auto-erase for ephemeral strokes (shift held at mouseDown)
+            if isEphemeral then
+              for i = strokesBefore + 1, #s.strokes do
+                scheduleEphemeral(s, i)
+              end
+            end
             activeStroke = nil
             return true
           end
@@ -670,6 +904,7 @@ in
       local function setTool(tool)
         draw.tool = tool
         hs.alert.show("Tool: " .. tool)
+        refreshIndicatorOnAll()
         updateMenu()
       end
 
@@ -684,7 +919,7 @@ in
           { title = "Tool: arrow", fn = function() setTool("arrow") end },
           { title = "Undo last", disabled = not active, fn = undoLast },
           { title = "Clear", disabled = not active, fn = clearAll },
-          { title = "Next color", disabled = not active, fn = function() nextColor(); hs.alert.show("Color changed") end },
+          { title = "Next color", disabled = not active, fn = function() nextColor(); refreshIndicatorOnAll(); hs.alert.show("Color changed") end },
         })
       end
 
@@ -709,7 +944,7 @@ in
         if draw.active then undoLast(); updateMenu() end
       end)
       hs.hotkey.bind({"ctrl","alt","cmd"}, "x", function()
-        if draw.active then nextColor(); hs.alert.show("Color changed"); updateMenu() end
+        if draw.active then nextColor(); refreshIndicatorOnAll(); hs.alert.show("Color changed"); updateMenu() end
       end)
 
       -- Menu bar toggle for draw overlay
