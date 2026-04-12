@@ -50,22 +50,22 @@ let
     + assertHasAttr mp.plugins.domain-tree.skills "domain-navigator" "domain-tree has skill: domain-navigator"
     + assertHasAttr mp.plugins.ux-stories.skills "story-writer" "ux-stories has skill: story-writer"
     # Per-plugin commands
-    + assertHasAttr mp.plugins.spec-driven.commands "collect-spec" "spec-driven has command: collect-spec"
-    + assertHasAttr mp.plugins.spec-tdd.commands "plan" "spec-tdd has command: plan"
-    + assertHasAttr mp.plugins.spec-tdd.commands "iterate" "spec-tdd has command: iterate"
-    + assertHasAttr mp.plugins.domain-tree.commands "check" "domain-tree has command: check"
-    + assertHasAttr mp.plugins.domain-tree.commands "init" "domain-tree has command: init"
-    + assertHasAttr mp.plugins.domain-tree.commands "map" "domain-tree has command: map"
-    + assertHasAttr mp.plugins.ux-stories.commands "write" "ux-stories has command: write"
-    + assertHasAttr mp.plugins.ux-stories.commands "scenarios" "ux-stories has command: scenarios"
-    + assertHasAttr mp.plugins.ux-stories.commands "deliver" "ux-stories has command: deliver"
+    + assertHasAttr mp.plugins.spec-driven.commands "spec-collect" "spec-driven has command: spec-collect"
+    + assertHasAttr mp.plugins.spec-tdd.commands "tdd-plan" "spec-tdd has command: tdd-plan"
+    + assertHasAttr mp.plugins.spec-tdd.commands "tdd-iterate" "spec-tdd has command: tdd-iterate"
+    + assertHasAttr mp.plugins.domain-tree.commands "domain-check" "domain-tree has command: domain-check"
+    + assertHasAttr mp.plugins.domain-tree.commands "domain-init" "domain-tree has command: domain-init"
+    + assertHasAttr mp.plugins.domain-tree.commands "domain-map" "domain-tree has command: domain-map"
+    + assertHasAttr mp.plugins.ux-stories.commands "story-write" "ux-stories has command: story-write"
+    + assertHasAttr mp.plugins.ux-stories.commands "story-scenarios" "ux-stories has command: story-scenarios"
+    + assertHasAttr mp.plugins.ux-stories.commands "story-deliver" "ux-stories has command: story-deliver"
     # Per-plugin agents
     + assertHasAttr mp.plugins.spec-driven.agents "spec-challenger" "spec-driven has agent: spec-challenger"
     + assertHasAttr mp.plugins.spec-tdd.agents "tdd-coach" "spec-tdd has agent: tdd-coach"
     + assertHasAttr mp.plugins.domain-tree.agents "boundary-enforcer" "domain-tree has agent: boundary-enforcer"
     + assertHasAttr mp.plugins.ux-stories.agents "story-guardian" "ux-stories has agent: story-guardian"
     # Content types
-    + assertIsString mp.plugins.spec-tdd.commands.plan "command content is string"
+    + assertIsString mp.plugins.spec-tdd.commands.tdd-plan "command content is string"
     + assertIsString mp.plugins.spec-tdd.agents.tdd-coach "agent content is string (frontmatter stripped)";
 
   level1-bundle =
@@ -79,10 +79,10 @@ let
     + assertHasAttr bundle.skills "tdd-planner" "bundle has tdd-planner (spec-tdd)"
     + assertHasAttr bundle.skills "domain-navigator" "bundle has domain-navigator (domain-tree)"
     + assertHasAttr bundle.skills "story-writer" "bundle has story-writer (ux-stories)"
-    + assertHasAttr bundle.commands "collect-spec" "bundle has collect-spec (spec-driven)"
-    + assertHasAttr bundle.commands "plan" "bundle has plan (spec-tdd)"
-    + assertHasAttr bundle.commands "check" "bundle has check (domain-tree)"
-    + assertHasAttr bundle.commands "write" "bundle has write (ux-stories)"
+    + assertHasAttr bundle.commands "spec-collect" "bundle has spec-collect (spec-driven)"
+    + assertHasAttr bundle.commands "tdd-plan" "bundle has tdd-plan (spec-tdd)"
+    + assertHasAttr bundle.commands "domain-check" "bundle has domain-check (domain-tree)"
+    + assertHasAttr bundle.commands "story-write" "bundle has story-write (ux-stories)"
     + assertHasAttr bundle.agents "spec-challenger" "bundle has spec-challenger (spec-driven)"
     + assertHasAttr bundle.agents "tdd-coach" "bundle has tdd-coach (spec-tdd)"
     + assertHasAttr bundle.agents "boundary-enforcer" "bundle has boundary-enforcer (domain-tree)"
@@ -95,7 +95,7 @@ let
     in
     # Select single plugin
     assertHasAttr one.skills "tdd-planner" "select [spec-tdd] has tdd-planner"
-    + assertHasAttr one.commands "plan" "select [spec-tdd] has plan command"
+    + assertHasAttr one.commands "tdd-plan" "select [spec-tdd] has tdd-plan command"
     + assertNoAttr one.skills "domain-navigator" "select [spec-tdd] does NOT have domain-navigator"
     # Select multiple
     + assertHasAttr two.skills "tdd-planner" "select [spec-tdd,domain-tree] has tdd-planner"
