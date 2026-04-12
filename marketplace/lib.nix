@@ -27,6 +27,22 @@ let
   pluginsDir = ./plugins;
   skillsDir = ./skills;
 
+  # Strip YAML frontmatter (--- ... ---) from markdown content.
+  # Agent .md files use Claude Code frontmatter fields (color, tools, model)
+  # that are incompatible with OpenCode. Stripping the frontmatter keeps
+  # only the prompt body, which is tool-agnostic.
+  stripFrontmatter = content:
+    let
+      lines = lib.splitString "\n" content;
+      indexed = lib.imap0 (i: line: { inherit i line; }) lines;
+      dashes = builtins.filter (x: x.line == "---") indexed;
+      afterFrontmatter =
+        if builtins.length dashes >= 2
+        then lib.drop ((builtins.elemAt dashes 1).i + 1) lines
+        else lines;
+    in
+    lib.concatStringsSep "\n" afterFrontmatter;
+
   pluginNames =
     if builtins.pathExists pluginsDir
     then builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir pluginsDir))
@@ -64,6 +80,7 @@ let
     pluginNames);
 
   # Collect agents from plugins/<name>/agents/*.md
+  # Frontmatter is stripped so the content is tool-agnostic.
   pluginAgents = lib.mergeAttrsList (map
     (name:
       let path = pluginsDir + "/${name}/agents";
@@ -72,7 +89,7 @@ let
           (fName: _:
             lib.nameValuePair
               (lib.removeSuffix ".md" fName)
-              (builtins.readFile (path + "/${fName}")))
+              (stripFrontmatter (builtins.readFile (path + "/${fName}"))))
           (lib.filterAttrs (n: _: lib.hasSuffix ".md" n) (builtins.readDir path))))
     pluginNames);
 
