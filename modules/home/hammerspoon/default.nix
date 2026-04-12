@@ -62,20 +62,36 @@ in
         end)
       end
 
-      -- Screenshots: map Print Screen (F13) combos to clipboard captures
-      local function run_screencapture(args, label)
-        hs.task.new("/usr/sbin/screencapture", function() end, args):start()
-        if label then hs.alert.show(label, 0.3) end
+      -- Screenshots: map Print Screen (F13) to capture → file + clipboard
+      local function screenshotPath()
+        return os.getenv("HOME") .. "/Desktop/Screenshot-"
+               .. os.date("%Y-%m-%d_%H-%M-%S") .. ".png"
       end
 
-      -- Print Screen → interactive region to clipboard (Cmd+Ctrl+Shift+( in bépo)
+      -- Run screencapture; on success copy the file to clipboard too
+      local function run_screencapture(args, path)
+        hs.task.new("/usr/sbin/screencapture", function(exitCode)
+          if exitCode ~= 0 then return end
+          local img = hs.image.imageFromPath(path)
+          if img then
+            hs.pasteboard.writeObjects(img)
+            hs.alert.show("Saved + copied", 0.3)
+          else
+            hs.alert.show("Saved (clipboard failed)", 0.5)
+          end
+        end, args):start()
+      end
+
+      -- Print Screen → interactive region → file + clipboard
       hs.hotkey.bind({}, "f13", function()
-        run_screencapture({"-i", "-c"}, "Capture → clipboard")
+        local path = screenshotPath()
+        run_screencapture({"-i", path}, path)
       end)
 
-      -- Shift+Print Screen → main display to clipboard (Cmd+Ctrl+Shift+» in bépo)
+      -- Shift+Print Screen → main display → file + clipboard
       hs.hotkey.bind({"shift"}, "f13", function()
-        run_screencapture({"-m", "-c"}, "Full screen → clipboard")
+        local path = screenshotPath()
+        run_screencapture({"-m", path}, path)
       end)
 
       -- Quick reload: Ctrl+Alt+Cmd+Shift+R
