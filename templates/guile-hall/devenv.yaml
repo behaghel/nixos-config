@@ -2,3 +2,6 @@
 inputs:
   nixpkgs:
     url: github:NixOS/nixpkgs/nixos-unstable
+  agent-marketplace:
+    url: github:hubertbehaghel/nixos-config
+    flake: false

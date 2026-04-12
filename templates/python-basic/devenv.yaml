@@ -6,3 +6,6 @@ inputs:
     url: github:NixOS/nixpkgs/nixos-unstable
   nixpkgs-python:
     url: github:cachix/nixpkgs-python
+  agent-marketplace:
+    url: github:hubertbehaghel/nixos-config
+    flake: false

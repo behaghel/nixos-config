@@ -6,6 +6,7 @@
     ./darwin/fonts.nix
     ./ghostty
     ./darwin/syncthing.nix
+    ./darwin/yknotify
     ./hammerspoon
   ];
 

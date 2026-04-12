@@ -111,4 +111,17 @@ Environment ready!'';
     uv run pytest
     echo "✅ Tests completed!"
   '';
+
+  # Agent configuration (Claude Code + OpenCode)
+  # Skills and hooks sourced from the agent marketplace.
+  claude.code = {
+    enable = true;
+    hooks = import (inputs.agent-marketplace + "/marketplace/hooks/notification.nix");
+    mcpServers.devenv = import (inputs.agent-marketplace + "/marketplace/mcp/devenv.nix");
+  };
+
+  opencode = {
+    enable = true;
+    skills = inputs.agent-marketplace + "/marketplace/skills";
+  };
 }
