@@ -7,5 +7,5 @@ inputs:
   nixpkgs-python:
     url: github:cachix/nixpkgs-python
   agent-marketplace:
-    url: github:hubertbehaghel/nixos-config
+    url: github:behaghel/nixos-config
     flake: false

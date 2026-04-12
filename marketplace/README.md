@@ -33,7 +33,7 @@ inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
   agent-marketplace:
-    url: github:hubertbehaghel/nixos-config
+    url: github:behaghel/nixos-config
     flake: false
 ```
 
