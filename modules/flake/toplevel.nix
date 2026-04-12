@@ -6,7 +6,7 @@
     inputs.nixos-unified.flakeModules.default
     inputs.nixos-unified.flakeModules.autoWire
   ];
-  perSystem = { self', pkgs, ... }: {
+  perSystem = { self', pkgs, lib, ... }: {
     # For 'nix fmt'
     formatter = pkgs.nixpkgs-fmt;
 
@@ -14,6 +14,7 @@
     packages.default = self'.packages.activate;
 
     checks.video-editing = import ../../tests/video-editing.nix { inherit pkgs; };
+    checks.marketplace = import ../../tests/marketplace.nix { inherit pkgs lib; };
 
     # Flake inputs we want to update periodically
     # Run: `nix run .#update`.
