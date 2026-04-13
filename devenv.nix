@@ -33,8 +33,35 @@ let
       cairo
       gobject-introspection
     ];
+  # Marketplace plugin paths
+  devenvPlugin = ./marketplace/plugins/devenv-workflow;
 in
 {
+  # OpenCode: wire devenv-workflow plugin
+  opencode = {
+    enable = true;
+    skills = {
+      "devenv-project" = devenvPlugin + "/skills/devenv-project";
+    };
+    commands = {
+      "devenv-init" = builtins.readFile (devenvPlugin + "/commands/devenv-init.md");
+      "devenv-diagnose" = builtins.readFile (devenvPlugin + "/commands/devenv-diagnose.md");
+      "devenv-add" = builtins.readFile (devenvPlugin + "/commands/devenv-add.md");
+    };
+    agents = {
+      "devenv-expert" = builtins.readFile (devenvPlugin + "/agents/devenv-expert.md");
+    };
+    mcp = {
+      devenv = {
+        type = "local";
+        command = [ "devenv" "mcp" ];
+        environment = {
+          DEVENV_TUI = "false";
+        };
+      };
+    };
+  };
+
   packages = with pkgs; [
     bats
     just

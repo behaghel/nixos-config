@@ -43,12 +43,14 @@ let
     + assertHasAttr mp.plugins "spec-tdd" "plugin exists: spec-tdd"
     + assertHasAttr mp.plugins "domain-tree" "plugin exists: domain-tree"
     + assertHasAttr mp.plugins "ux-stories" "plugin exists: ux-stories"
+    + assertHasAttr mp.plugins "devenv-workflow" "plugin exists: devenv-workflow"
     # Per-plugin skills
     + assertHasAttr mp.plugins.spec-driven.skills "spec-collector" "spec-driven has skill: spec-collector"
     + assertHasAttr mp.plugins.spec-driven.skills "spec-verifier" "spec-driven has skill: spec-verifier"
     + assertHasAttr mp.plugins.spec-tdd.skills "tdd-planner" "spec-tdd has skill: tdd-planner"
     + assertHasAttr mp.plugins.domain-tree.skills "domain-navigator" "domain-tree has skill: domain-navigator"
     + assertHasAttr mp.plugins.ux-stories.skills "story-writer" "ux-stories has skill: story-writer"
+    + assertHasAttr mp.plugins.devenv-workflow.skills "devenv-project" "devenv-workflow has skill: devenv-project"
     # Per-plugin commands
     + assertHasAttr mp.plugins.spec-driven.commands "spec-collect" "spec-driven has command: spec-collect"
     + assertHasAttr mp.plugins.spec-tdd.commands "tdd-plan" "spec-tdd has command: tdd-plan"
@@ -59,11 +61,15 @@ let
     + assertHasAttr mp.plugins.ux-stories.commands "story-write" "ux-stories has command: story-write"
     + assertHasAttr mp.plugins.ux-stories.commands "story-scenarios" "ux-stories has command: story-scenarios"
     + assertHasAttr mp.plugins.ux-stories.commands "story-deliver" "ux-stories has command: story-deliver"
+    + assertHasAttr mp.plugins.devenv-workflow.commands "devenv-init" "devenv-workflow has command: devenv-init"
+    + assertHasAttr mp.plugins.devenv-workflow.commands "devenv-diagnose" "devenv-workflow has command: devenv-diagnose"
+    + assertHasAttr mp.plugins.devenv-workflow.commands "devenv-add" "devenv-workflow has command: devenv-add"
     # Per-plugin agents
     + assertHasAttr mp.plugins.spec-driven.agents "spec-challenger" "spec-driven has agent: spec-challenger"
     + assertHasAttr mp.plugins.spec-tdd.agents "tdd-coach" "spec-tdd has agent: tdd-coach"
     + assertHasAttr mp.plugins.domain-tree.agents "boundary-enforcer" "domain-tree has agent: boundary-enforcer"
     + assertHasAttr mp.plugins.ux-stories.agents "story-guardian" "ux-stories has agent: story-guardian"
+    + assertHasAttr mp.plugins.devenv-workflow.agents "devenv-expert" "devenv-workflow has agent: devenv-expert"
     # Content types
     + assertIsString mp.plugins.spec-tdd.commands.tdd-plan "command content is string"
     + assertIsString mp.plugins.spec-tdd.agents.tdd-coach "agent content is string (frontmatter stripped)";
@@ -103,9 +109,9 @@ let
     + assertNoAttr two.skills "story-writer" "select [spec-tdd,domain-tree] does NOT have story-writer";
 
   level1-standalone =
-    # Standalone skills are separate from plugins
-    assertHasAttr mp.skills "devenv-project-workflow" "standalone skill: devenv-project-workflow"
-    + assertNoAttr mp.skills "tdd-planner" "standalone skills do NOT include plugin skills";
+    # Standalone skills (currently none — devenv-project-workflow moved to plugin)
+    assertNoAttr mp.skills "tdd-planner" "standalone skills do NOT include plugin skills"
+    + assertNoAttr mp.skills "devenv-project" "devenv-project is in plugin, not standalone";
 
   level1-no-auto-merge =
     # Top-level mp should NOT have auto-merged commands/agents

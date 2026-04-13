@@ -5,20 +5,6 @@
     "opencode-gemini-auth@latest",
     "opencode-claude-auth"
   ],
-  "mcp": {
-    "devenv": {
-      "type": "local",
-      "command": [
-        "devenv",
-        "mcp"
-      ],
-      "environment": {
-        "DEVENV_TUI": "false"
-      },
-      "enabled": true,
-      "timeout": 20000
-    }
-  },
   "experimental": {
     "mcp_timeout": 20000
   }

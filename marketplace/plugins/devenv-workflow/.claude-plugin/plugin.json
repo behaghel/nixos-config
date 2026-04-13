@@ -1,0 +1,5 @@
+{
+  "name": "devenv-workflow",
+  "version": "0.1.0",
+  "description": "Declarative dev environment management with devenv — scaffold, maintain, diagnose, and extend devenv.nix configurations"
+}
