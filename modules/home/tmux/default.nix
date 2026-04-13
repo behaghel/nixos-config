@@ -215,7 +215,7 @@
       started="$(date +%s 2>/dev/null || echo 0)"
 
       set +e
-      sh -lc "$cmd"
+      eval "$cmd"
       rc=$?
       set -e
 
