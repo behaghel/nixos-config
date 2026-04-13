@@ -174,10 +174,10 @@ in
       grabKeyboardAndMouse = lib.mkIf pkgs.stdenv.isDarwin false;
       enableScDaemon = expectSmartcard;
       enableSshSupport = expectSmartcard;
-      defaultCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 43200);
-      defaultCacheTtlSsh = lib.mkDefault (if cfg.requirePinAlways then 0 else 43200);
-      maxCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 86400);
-      maxCacheTtlSsh = lib.mkDefault (if cfg.requirePinAlways then 0 else 86400);
+      defaultCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 14400);
+      defaultCacheTtlSsh = lib.mkDefault (if cfg.requirePinAlways then 0 else 14400);
+      maxCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 14400);
+      maxCacheTtlSsh = lib.mkDefault (if cfg.requirePinAlways then 0 else 14400);
       pinentry.package = pinentryPackage;
       enableZshIntegration = true;
       enableBashIntegration = true;
