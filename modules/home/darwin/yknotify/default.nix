@@ -28,7 +28,6 @@ in
       config =
         let
           script = pkgs.writeShellScript "yknotify-wrapper.sh" ''
-            set -euo pipefail
             export PATH=${lib.makeBinPath [
               yknotify
               pkgs.terminal-notifier
@@ -36,38 +35,19 @@ in
               pkgs.coreutils
             ]}:/usr/bin:/bin
 
-            # Smart throttle: per touch "session" (events within 10s of each
-            # other), send one immediate notification plus one reminder after
-            # ~5s, then suppress until the session ends.  This prevents the
-            # non-stop notification flood that occurs when scdaemon keeps
-            # polling a YubiKey waiting for touch.
             LAST_NOTIFY=0
-            LAST_EVENT=0
-            SESSION_COUNT=0
 
             ${yknotify}/bin/yknotify | while IFS= read -r line; do
               NOW="$(date +%s)"
 
-              # Reset session after 10s of silence from yknotify
-              if [ "$((NOW - LAST_EVENT))" -gt 10 ]; then
-                SESSION_COUNT=0
-              fi
-              LAST_EVENT="$NOW"
-
-              # Already sent initial + reminder → suppress until session ends
-              if [ "$SESSION_COUNT" -ge 2 ]; then
+              # One notification per 10s — suppress duplicates from scdaemon polling
+              if [ "$((NOW - LAST_NOTIFY))" -lt 10 ]; then
                 continue
               fi
-
-              # Reminder waits 5s after the first notification
-              if [ "$SESSION_COUNT" -eq 1 ] && [ "$NOW" -le "$((LAST_NOTIFY + 5))" ]; then
-                continue
-              fi
-
-              SESSION_COUNT=$((SESSION_COUNT + 1))
               LAST_NOTIFY="$NOW"
 
-              msg="$(printf '%s' "$line" | jq -r '.type // "touch"')"
+              msg="$(printf '%s' "$line" | jq -r '.type // "touch"')" || msg="touch"
+              echo "$(date '+%Y-%m-%d %H:%M:%S') notify: $msg"
 
               if command -v terminal-notifier >/dev/null 2>&1; then
                 terminal-notifier \
