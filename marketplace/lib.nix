@@ -3,7 +3,13 @@
 # Provides per-plugin access, named bundles, and a select helper.
 # Importing the marketplace does NOT activate any plugin — consumers opt in.
 #
-# Usage in a project's devenv.nix:
+# ── devenv.yaml ──────────────────────────────────────────────
+#   inputs:
+#     agent-marketplace:
+#       url: github:behaghel/nixos-config
+#       flake: false
+#
+# ── devenv.nix ───────────────────────────────────────────────
 #   let
 #     mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
 #     bundle = mp.bundles.total-spec;

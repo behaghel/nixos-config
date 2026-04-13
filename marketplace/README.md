@@ -101,9 +101,9 @@ On `devenv shell`, devenv creates `.claude/settings.json` and `.claude/commands/
 - `/devenv-diagnose` — systematic troubleshooting for devenv issues
 - `devenv` MCP server — live `search_packages` and `search_options` queries
 
-> **Let your agent do it.** Instead of editing `devenv.nix` by hand, prompt Claude Code:
+> **Let your agent do it.** Paste this prompt into Claude Code:
 >
-> *"Add the agent-marketplace devenv input from github:behaghel/nixos-config (flake: false), then wire the devenv-workflow plugin into claude.code in devenv.nix — enable commands, hooks, and the devenv MCP server."*
+> *"Add a devenv input called agent-marketplace pointing to github:behaghel/nixos-config (flake: false). Then in devenv.nix, import its lib at /marketplace/lib.nix and wire mp.plugins.devenv-workflow into claude.code — enable commands, hooks (mp.hooks), and the devenv MCP server (mp.mcpServers.devenv)."*
 
 ---
 
@@ -144,9 +144,9 @@ On `devenv shell`, devenv creates `.opencode/skills/*/SKILL.md`, `.opencode/comm
 - **Agent**: `devenv-expert` — catches imperative installs, commands outside devenv shell, config anti-patterns
 - **MCP**: `devenv` server — live `search_packages` and `search_options` queries
 
-> **Let your agent do it.** Instead of editing `devenv.nix` by hand, prompt OpenCode:
+> **Let your agent do it.** Paste this prompt into OpenCode:
 >
-> *"Add the agent-marketplace devenv input from github:behaghel/nixos-config (flake: false), then wire the devenv-workflow plugin into the opencode section of devenv.nix — enable skills, commands, agents, and the devenv MCP server."*
+> *"Add a devenv input called agent-marketplace pointing to github:behaghel/nixos-config (flake: false). Then in devenv.nix, import its lib at /marketplace/lib.nix and wire mp.plugins.devenv-workflow into the opencode section — enable skills, commands, agents, and add an mcp.devenv entry running `devenv mcp` with DEVENV_TUI=false."*
 
 ---
 

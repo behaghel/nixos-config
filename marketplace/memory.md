@@ -1,5 +1,12 @@
 # Shared Agent Rules
 
+## Agent Marketplace
+
+- The agent marketplace lives at `github:behaghel/nixos-config`, input name `agent-marketplace`, `flake: false`.
+- API: `import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; }`.
+- Returns: `plugins`, `bundles`, `select`, `skills`, `hooks`, `mcpServers`, `memory`.
+- See `marketplace/README.md` for full wiring examples (Claude Code and OpenCode).
+
 ## Development Environment
 
 - This project uses [devenv](https://devenv.sh) for reproducible development.
