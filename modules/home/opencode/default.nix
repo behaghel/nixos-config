@@ -66,4 +66,8 @@
     source = ./opencode.json;
   };
 
+  xdg.configFile."opencode/oh-my-opencode.json" = {
+    source = ./oh-my-opencode.json;
+  };
+
 }

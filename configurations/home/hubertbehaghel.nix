@@ -30,6 +30,7 @@ in
 
   home.packages = with pkgs; [
     gemini-cli
+  ] ++ lib.optionals isLinux [
     codex
   ] ++ [
     claudeCodePkg

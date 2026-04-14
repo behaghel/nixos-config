@@ -33,24 +33,17 @@ let
       cairo
       gobject-introspection
     ];
-  # Marketplace plugin paths
-  devenvPlugin = ./marketplace/plugins/devenv-workflow;
+  # Marketplace plugin bundle; strips agent frontmatter for OpenCode.
+  mp = import ./marketplace/lib.nix { inherit lib; };
+  devenvPlugin = mp.plugins.devenv-workflow;
 in
 {
   # OpenCode: wire devenv-workflow plugin
   opencode = {
     enable = true;
-    skills = {
-      "devenv-project" = devenvPlugin + "/skills/devenv-project";
-    };
-    commands = {
-      "devenv-init" = builtins.readFile (devenvPlugin + "/commands/devenv-init.md");
-      "devenv-diagnose" = builtins.readFile (devenvPlugin + "/commands/devenv-diagnose.md");
-      "devenv-add" = builtins.readFile (devenvPlugin + "/commands/devenv-add.md");
-    };
-    agents = {
-      "devenv-expert" = builtins.readFile (devenvPlugin + "/agents/devenv-expert.md");
-    };
+    skills = devenvPlugin.skills;
+    commands = devenvPlugin.commands;
+    agents = devenvPlugin.agents;
     mcp = {
       devenv = {
         type = "local";

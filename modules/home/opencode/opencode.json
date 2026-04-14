@@ -2,8 +2,7 @@
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     "oh-my-openagent@latest",
-    "opencode-gemini-auth@latest",
-    "opencode-claude-auth"
+    "opencode-gemini-auth@latest"
   ],
   "experimental": {
     "mcp_timeout": 20000
