@@ -116,14 +116,15 @@ Add to `devenv.nix`:
 
 let
   mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  devenv = mp.plugins.devenv-workflow;
 in {
   # ... your existing config ...
 
   opencode = {
     enable = true;
-    skills = mp.plugins.devenv-workflow.skills;
-    commands = mp.plugins.devenv-workflow.commands;
-    agents = mp.plugins.devenv-workflow.agents;
+    skills = devenv.skills;
+    commands = devenv.commands;
+    agents = devenv.agents;
     mcp.devenv = {
       type = "local";
       command = [ "devenv" "mcp" ];
@@ -137,6 +138,31 @@ in {
 
 On `devenv shell`, devenv creates `.opencode/skills/*/SKILL.md`, `.opencode/commands/*.md`, and `.opencode/agents/*.md`. These are managed by devenv — change `devenv.nix`, not the generated files. Add `.opencode/` to `.gitignore`.
 
+### Important wiring note
+
+- Use `mp.plugins.devenv-workflow` (or `let devenv = mp.plugins.devenv-workflow;`) as the source for `skills`, `commands`, and `agents`.
+- Do **not** point `opencode.agents` at raw files under `marketplace/plugins/devenv-workflow/agents/` and do **not** `builtins.readFile` those agent markdown files directly.
+- Why: `marketplace/lib.nix` applies compatibility processing for OpenCode agents, including stripping Claude-style YAML frontmatter that OpenCode rejects.
+
+Wrong:
+
+```nix
+opencode.agents = {
+  "devenv-expert" = builtins.readFile (inputs.agent-marketplace + "/marketplace/plugins/devenv-workflow/agents/devenv-expert.md");
+};
+```
+
+Right:
+
+```nix
+let
+  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  devenv = mp.plugins.devenv-workflow;
+in {
+  opencode.agents = devenv.agents;
+}
+```
+
 ### What becomes available
 
 - **Skill**: `devenv-project` — core devenv knowledge, loaded automatically
@@ -146,7 +172,7 @@ On `devenv shell`, devenv creates `.opencode/skills/*/SKILL.md`, `.opencode/comm
 
 > **Let your agent do it.** Paste this prompt into OpenCode:
 >
-> *"Add a devenv input called agent-marketplace pointing to github:behaghel/nixos-config (flake: false). Then in devenv.nix, import its lib at /marketplace/lib.nix and wire mp.plugins.devenv-workflow into the opencode section — enable skills, commands, agents, and add an mcp.devenv entry running `devenv mcp` with DEVENV_TUI=false."*
+> *"Add a devenv input called agent-marketplace pointing to github:behaghel/nixos-config (flake: false). Then in devenv.nix, import /marketplace/lib.nix as `mp`, bind `devenv = mp.plugins.devenv-workflow`, and wire `devenv.skills`, `devenv.commands`, and `devenv.agents` into `opencode`. Do not read files from `/marketplace/plugins/devenv-workflow/...` directly; use `mp.plugins...` so OpenCode agent compatibility processing is preserved. Also add `mcp.devenv = { type = \"local\"; command = [ \"devenv\" \"mcp\" ]; environment.DEVENV_TUI = \"false\"; };`."*
 
 ---
 
@@ -157,19 +183,20 @@ If the project uses both Claude Code and OpenCode, combine both sections:
 ```nix
 let
   mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  devenv = mp.plugins.devenv-workflow;
 in {
   claude.code = {
     enable = true;
-    commands = mp.plugins.devenv-workflow.commands;
+    commands = devenv.commands;
     hooks = mp.hooks;
     mcpServers.devenv = mp.mcpServers.devenv;
   };
 
   opencode = {
     enable = true;
-    skills = mp.plugins.devenv-workflow.skills;
-    commands = mp.plugins.devenv-workflow.commands;
-    agents = mp.plugins.devenv-workflow.agents;
+    skills = devenv.skills;
+    commands = devenv.commands;
+    agents = devenv.agents;
     mcp.devenv = {
       type = "local";
       command = [ "devenv" "mcp" ];

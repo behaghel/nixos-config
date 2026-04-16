@@ -47,3 +47,21 @@ The skill covers all major devenv 2.0 features:
 ```
 
 The `devenv-expert` agent runs passively, catching anti-patterns and redirecting toward declarative configuration.
+
+## Wiring Notes
+
+- For OpenCode, wire this plugin through `mp.plugins.devenv-workflow` from `marketplace/lib.nix`.
+- Do not read agent markdown files from `plugins/devenv-workflow/agents/` directly.
+- Reason: the marketplace library applies OpenCode compatibility processing to agents, including stripping Claude-style frontmatter that OpenCode rejects.
+- Safe pattern:
+
+```nix
+let
+  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+  devenv = mp.plugins.devenv-workflow;
+in {
+  opencode.skills = devenv.skills;
+  opencode.commands = devenv.commands;
+  opencode.agents = devenv.agents;
+}
+```
