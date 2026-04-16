@@ -20,6 +20,24 @@ in
       default = "Submarine";
       description = "macOS notification sound name.";
     };
+
+    reminderSeconds = lib.mkOption {
+      type = lib.types.int;
+      default = 20;
+      description = ''
+        Seconds between repeated notifications while the same touch request
+        continues.
+      '';
+    };
+
+    sessionTimeoutSeconds = lib.mkOption {
+      type = lib.types.int;
+      default = 10;
+      description = ''
+        Seconds of silence after which a new YubiKey touch request is treated
+        as a new session.
+      '';
+    };
   };
 
   config = lib.mkIf (cfg.enable && pkgs.stdenv.isDarwin) {
@@ -35,36 +53,35 @@ in
               pkgs.coreutils
             ]}:/usr/bin:/bin
 
+            set -eu
+
             LAST_EVENT=0
-            NOTIFIED=0
+            LAST_NOTIFY=0
 
             ${yknotify}/bin/yknotify | while IFS= read -r line; do
               NOW="$(date +%s)"
 
-              # New session: 15s of silence means previous touch request ended
-              if [ "$((NOW - LAST_EVENT))" -gt 15 ]; then
-                NOTIFIED=0
+              # New session after enough silence from yknotify.
+              if [ "$LAST_EVENT" -eq 0 ] || [ "$((NOW - LAST_EVENT))" -gt ${toString cfg.sessionTimeoutSeconds} ]; then
+                LAST_NOTIFY=0
               fi
               LAST_EVENT="$NOW"
 
-              # One notification per touch session
-              if [ "$NOTIFIED" -eq 1 ]; then
+              # Notify immediately, then periodically while the request persists.
+              if [ "$LAST_NOTIFY" -ne 0 ] && [ "$((NOW - LAST_NOTIFY))" -lt ${toString cfg.reminderSeconds} ]; then
                 continue
               fi
-              NOTIFIED=1
+              LAST_NOTIFY="$NOW"
 
               msg="$(printf '%s' "$line" | jq -r '.type // "touch"')" || msg="touch"
               echo "$(date '+%Y-%m-%d %H:%M:%S') notify: $msg"
 
-              if command -v terminal-notifier >/dev/null 2>&1; then
-                terminal-notifier \
-                  -title "YubiKey" \
-                  -message "Tap your key ($msg)" \
-                  -sound "${cfg.sound}" || true
-              else
-                /usr/bin/osascript \
-                  -e "display notification \"Tap your key ($msg)\" with title \"YubiKey\"" \
-                  2>/dev/null || true
+              if ! terminal-notifier \
+                -title "YubiKey" \
+                -message "Tap your key ($msg)" \
+                -sound "${cfg.sound}"
+              then
+                echo "$(date '+%Y-%m-%d %H:%M:%S') terminal-notifier failed"
               fi
             done
           '';
