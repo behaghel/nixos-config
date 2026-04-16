@@ -35,16 +35,23 @@ in
               pkgs.coreutils
             ]}:/usr/bin:/bin
 
-            LAST_NOTIFY=0
+            LAST_EVENT=0
+            NOTIFIED=0
 
             ${yknotify}/bin/yknotify | while IFS= read -r line; do
               NOW="$(date +%s)"
 
-              # One notification per 10s — suppress duplicates from scdaemon polling
-              if [ "$((NOW - LAST_NOTIFY))" -lt 10 ]; then
+              # New session: 15s of silence means previous touch request ended
+              if [ "$((NOW - LAST_EVENT))" -gt 15 ]; then
+                NOTIFIED=0
+              fi
+              LAST_EVENT="$NOW"
+
+              # One notification per touch session
+              if [ "$NOTIFIED" -eq 1 ]; then
                 continue
               fi
-              LAST_NOTIFY="$NOW"
+              NOTIFIED=1
 
               msg="$(printf '%s' "$line" | jq -r '.type // "touch"')" || msg="touch"
               echo "$(date '+%Y-%m-%d %H:%M:%S') notify: $msg"
