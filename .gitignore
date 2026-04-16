@@ -23,6 +23,9 @@ Thumbs.db
 devenv.local.nix
 .devenv.flake.nix
 .pre-commit-config.yaml
+.opencode/
+opencode.jsonc
+skills-lock.json
 *.qcow2
 /keys/*_ed25519
 /artifacts/
