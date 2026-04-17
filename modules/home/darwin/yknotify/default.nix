@@ -41,11 +41,9 @@ in
   };
 
   config = lib.mkIf (cfg.enable && pkgs.stdenv.isDarwin) {
-    launchd.agents.yknotify = {
-      enable = true;
-      config =
-        let
-          script = pkgs.writeShellScript "yknotify-wrapper.sh" ''
+    launchd.agents =
+      let
+        yknotifyScript = pkgs.writeShellScript "yknotify-wrapper.sh" ''
             export PATH=${lib.makeBinPath [
               yknotify
               pkgs.terminal-notifier
@@ -85,15 +83,53 @@ in
               fi
             done
           '';
-        in
-        {
-          Label = "org.nixos.yknotify";
-          ProgramArguments = [ (toString script) ];
-          KeepAlive = true;
-          RunAtLoad = true;
-          StandardOutPath = "${config.home.homeDirectory}/Library/Logs/yknotify.log";
-          StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/yknotify.log";
+
+        yknotifyWakeWatchdog = pkgs.writeShellScript "yknotify-wake-watchdog.sh" ''
+          export PATH=${lib.makeBinPath [ pkgs.coreutils ]}:/usr/bin:/bin
+
+          set -eu
+
+          state_dir="$HOME/Library/Caches"
+          state_file="$state_dir/yknotify-watchdog.last"
+          log_file="$HOME/Library/Logs/yknotify.log"
+          now="$(date +%s)"
+          last=0
+
+          mkdir -p "$state_dir"
+          if [ -f "$state_file" ]; then
+            last="$(cat "$state_file" 2>/dev/null || printf '0')"
+          fi
+          printf '%s\n' "$now" > "$state_file"
+
+          if [ "$last" -gt 0 ] && [ "$((now - last))" -gt 180 ]; then
+            echo "$(date '+%Y-%m-%d %H:%M:%S') wake gap detected ($((now - last))s); restarting yknotify" >> "$log_file"
+            /bin/launchctl kickstart -k "gui/$(/usr/bin/id -u)/org.nixos.yknotify" || true
+          fi
+        '';
+      in {
+        yknotify = {
+          enable = true;
+          config = {
+            Label = "org.nixos.yknotify";
+            ProgramArguments = [ (toString yknotifyScript) ];
+            KeepAlive = true;
+            RunAtLoad = true;
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/yknotify.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/yknotify.log";
+          };
         };
-    };
+
+        yknotifyWakeWatchdog = {
+          enable = true;
+          config = {
+            Label = "org.nixos.yknotify-wake-watchdog";
+            ProgramArguments = [ "/bin/sh" (toString yknotifyWakeWatchdog) ];
+            RunAtLoad = true;
+            StartInterval = 60;
+            StandardOutPath = "${config.home.homeDirectory}/Library/Logs/yknotify.log";
+            StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/yknotify.log";
+          };
+        };
+      };
   };
 }
