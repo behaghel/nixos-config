@@ -124,7 +124,7 @@ in
             recent_notify_lines="$(${pkgs.coreutils}/bin/tail -n 12 "$log_file" | /usr/bin/grep ' notify: ' || true)"
             recent_count="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed '/^$/d' | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
 
-            if [ "${recent_count:-0}" -ge 6 ]; then
+            if [ "''${recent_count:-0}" -ge 6 ]; then
               first_ts="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed -n '1s/^\(.\{19\}\).*/\1/p')"
               last_ts="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed -n '$s/^\(.\{19\}\).*/\1/p')"
               first_epoch="$(date -d "$first_ts" +%s 2>/dev/null || printf '0')"
@@ -133,7 +133,7 @@ in
 
               if [ "$first_epoch" -gt 0 ] && [ "$last_epoch" -gt 0 ] && [ "$((last_epoch - first_epoch))" -ge 100 ] && [ "$unique_types" -eq 1 ]; then
                 only_type="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed -n '1s/^.*notify: //p')"
-                restart_yknotify "runaway notify streak detected (${only_type})"
+                restart_yknotify "runaway notify streak detected (''${only_type})"
               fi
             fi
           fi
