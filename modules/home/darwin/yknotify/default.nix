@@ -91,19 +91,51 @@ in
 
           state_dir="$HOME/Library/Caches"
           state_file="$state_dir/yknotify-watchdog.last"
+          restart_guard_file="$state_dir/yknotify-watchdog.restart-last"
           log_file="$HOME/Library/Logs/yknotify.log"
           now="$(date +%s)"
           last=0
+          last_restart=0
 
           mkdir -p "$state_dir"
           if [ -f "$state_file" ]; then
             last="$(cat "$state_file" 2>/dev/null || printf '0')"
           fi
+          if [ -f "$restart_guard_file" ]; then
+            last_restart="$(cat "$restart_guard_file" 2>/dev/null || printf '0')"
+          fi
           printf '%s\n' "$now" > "$state_file"
 
-          if [ "$last" -gt 0 ] && [ "$((now - last))" -gt 180 ]; then
-            echo "$(date '+%Y-%m-%d %H:%M:%S') wake gap detected ($((now - last))s); restarting yknotify" >> "$log_file"
+          restart_yknotify() {
+            local reason="$1"
+            if [ "$((now - last_restart))" -lt 300 ]; then
+              return 0
+            fi
+            printf '%s\n' "$now" > "$restart_guard_file"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') $reason; restarting yknotify" >> "$log_file"
             /bin/launchctl kickstart -k "gui/$(/usr/bin/id -u)/org.nixos.yknotify" || true
+          }
+
+          if [ "$last" -gt 0 ] && [ "$((now - last))" -gt 180 ]; then
+            restart_yknotify "wake gap detected ($((now - last))s)"
+          fi
+
+          if [ -f "$log_file" ]; then
+            recent_notify_lines="$(${pkgs.coreutils}/bin/tail -n 12 "$log_file" | /usr/bin/grep ' notify: ' || true)"
+            recent_count="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed '/^$/d' | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
+
+            if [ "${recent_count:-0}" -ge 6 ]; then
+              first_ts="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed -n '1s/^\(.\{19\}\).*/\1/p')"
+              last_ts="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed -n '$s/^\(.\{19\}\).*/\1/p')"
+              first_epoch="$(date -d "$first_ts" +%s 2>/dev/null || printf '0')"
+              last_epoch="$(date -d "$last_ts" +%s 2>/dev/null || printf '0')"
+              unique_types="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed 's/^.*notify: //' | /usr/bin/sort -u | /usr/bin/wc -l | /usr/bin/tr -d ' ')"
+
+              if [ "$first_epoch" -gt 0 ] && [ "$last_epoch" -gt 0 ] && [ "$((last_epoch - first_epoch))" -ge 100 ] && [ "$unique_types" -eq 1 ]; then
+                only_type="$(printf '%s\n' "$recent_notify_lines" | /usr/bin/sed -n '1s/^.*notify: //p')"
+                restart_yknotify "runaway notify streak detected (${only_type})"
+              fi
+            fi
           fi
         '';
       in {
