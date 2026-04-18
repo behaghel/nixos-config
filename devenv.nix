@@ -35,15 +35,15 @@ let
     ];
   # Marketplace plugin bundle; strips agent frontmatter for OpenCode.
   mp = import ./marketplace/lib.nix { inherit lib; };
-  devenvPlugin = mp.plugins.devenv-workflow;
+  marketplacePlugins = mp.select (builtins.attrNames mp.plugins);
 in
 {
-  # OpenCode: wire devenv-workflow plugin
+  # OpenCode: wire all marketplace plugins
   opencode = {
     enable = true;
-    skills = devenvPlugin.skills;
-    commands = devenvPlugin.commands;
-    agents = devenvPlugin.agents;
+    skills = marketplacePlugins.skills;
+    commands = marketplacePlugins.commands;
+    agents = marketplacePlugins.agents;
     mcp = {
       devenv = {
         type = "local";
