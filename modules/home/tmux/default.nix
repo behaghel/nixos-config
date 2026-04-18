@@ -368,8 +368,10 @@ EOF
       if tmux has-session -t "$name" 2>/dev/null; then
         # Create a new window in the existing session
         idx="$(tmux new-window -P -F '#I' -t "$name" -c "$dir" -n "$wname")"
-        # Layout: assistant (left) + shell (right)
+        # Layout: assistant (left) + assistant (right)
+        original_pane="$(tmux display-message -p -t "$name:$idx" '#{pane_id}')"
         pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:$idx" -c "$dir")"
+        tmux send-keys -t "$original_pane" "$launch_cmd" C-m
         tmux send-keys -t "$pane" "$launch_cmd" C-m
         tmux select-pane -t "$pane"
         # Focus the new window
@@ -380,7 +382,9 @@ EOF
       else
         # Create session and first window
         tmux new-session -d -s "$name" -c "$dir" -n "$wname"
+        original_pane="$(tmux display-message -p -t "$name:1" '#{pane_id}')"
         pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:1" -c "$dir")"
+        tmux send-keys -t "$original_pane" "$launch_cmd" C-m
         tmux send-keys -t "$pane" "$launch_cmd" C-m
         tmux select-pane -t "$pane"
         tmux select-window -t "$name:1"
