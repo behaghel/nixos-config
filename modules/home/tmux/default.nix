@@ -356,6 +356,8 @@ EOF
         launch_cmd="$HOME/.local/bin/workon-assistant \"$assist\""
       fi
 
+      user_shell="''${SHELL:-/bin/zsh}"
+
       if [ "''${WORKON_DEBUG-}" = "1" ]; then
         echo "workon: dir=$dir name=$name wname=$wname assist=$assist launch=$launch_cmd" >&2
       fi
@@ -368,11 +370,8 @@ EOF
       if tmux has-session -t "$name" 2>/dev/null; then
         # Create a new window in the existing session
         idx="$(tmux new-window -P -F '#I' -t "$name" -c "$dir" -n "$wname")"
-        # Layout: assistant (left) + assistant (right)
-        original_pane="$(tmux display-message -p -t "$name:$idx" '#{pane_id}')"
-        pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:$idx" -c "$dir")"
-        tmux send-keys -t "$original_pane" "$launch_cmd" C-m
-        tmux send-keys -t "$pane" "$launch_cmd" C-m
+        # Layout: assistant (left) + shell (right)
+        pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:$idx" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
         tmux select-pane -t "$pane"
         # Focus the new window
         tmux select-window -t "$name:$idx"
@@ -382,10 +381,7 @@ EOF
       else
         # Create session and first window
         tmux new-session -d -s "$name" -c "$dir" -n "$wname"
-        original_pane="$(tmux display-message -p -t "$name:1" '#{pane_id}')"
-        pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:1" -c "$dir")"
-        tmux send-keys -t "$original_pane" "$launch_cmd" C-m
-        tmux send-keys -t "$pane" "$launch_cmd" C-m
+        pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:1" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
         tmux select-pane -t "$pane"
         tmux select-window -t "$name:1"
         if [ -n "''${TMUX-}" ]; then
