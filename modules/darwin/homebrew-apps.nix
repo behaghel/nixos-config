@@ -4,17 +4,18 @@ with lib;
 let
   cfg = config.hub.darwin.apps;
   defaultCasks = [
-    "anki"
+    "gimp"
     "vlc"
-    "zotero"
     "ghostty"
-    "iterm2"
     "notunes"
     "hammerspoon"
     "firefox"
+    "localsend"
+    "mpv"
+    "utm"
   ];
-  defaultBrews = [ ];
-  defaultTaps = [ ];
+  defaultBrews = [ "sst/tap/opencode" ];
+  defaultTaps = [ "sst/tap" ];
 in
 {
   options.hub.darwin.apps = {
@@ -27,19 +28,19 @@ in
     casks = mkOption {
       type = types.listOf types.str;
       default = defaultCasks;
-      description = "Homebrew casks to install for the default macOS workstation setup.";
+      description = "Homebrew casks to install for the shared macOS workstation setup.";
     };
 
     brews = mkOption {
       type = types.listOf types.str;
       default = defaultBrews;
-      description = "Homebrew formulae to install for the default macOS workstation setup.";
+      description = "Homebrew formulae to install for the shared macOS workstation setup.";
     };
 
     taps = mkOption {
       type = types.listOf types.str;
       default = defaultTaps;
-      description = "Homebrew taps required by requested casks/formulae.";
+      description = "Homebrew taps required by the shared macOS workstation setup.";
     };
   };
 

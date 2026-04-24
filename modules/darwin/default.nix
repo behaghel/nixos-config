@@ -1,5 +1,5 @@
 # Configuration common to all macOS systems
-{ flake, pkgs, ... }:
+{ flake, pkgs, lib, ... }:
 let
   inherit (flake) inputs config;
   inherit (inputs) self;
@@ -15,5 +15,6 @@ in
 
   config = {
     nixpkgs.overlays = import ../../overlays/default.nix { inherit inputs; };
+    environment.systemPackages = [ pkgs.texlive.combined.scheme-small ];
   };
 }
