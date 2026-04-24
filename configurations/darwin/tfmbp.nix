@@ -23,16 +23,14 @@ in
   nix.linux-builder.enable = true;
 
   environment.systemPackages = [
+    pkgs.gemini-cli
     pkgs.jdk21_headless # for languagetools from Emacs
   ];
 
   hub.darwin.apps = {
-    enable = true;
     casks = [
       "anki"
       "zotero"
-      "1password"
-      "gimp"
     ];
   };
 

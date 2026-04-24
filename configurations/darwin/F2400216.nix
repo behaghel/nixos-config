@@ -22,33 +22,16 @@ in
 
   environment.systemPackages = [
     pkgs.jdk21_headless
-    pkgs.texlive.combined.scheme-small
     pkgs.qemu
   ];
 
   hub.darwin.apps = {
-    enable = true;
-    taps = [
-      "sst/tap"
-    ];
-    brews = [
-      "sst/tap/opencode"
-    ];
     casks = [
       "anki"
       "zotero"
       "1password"
       "codex"
-      "ghostty"
       "iterm2"
-      "notunes"
-      "vlc"
-      "hammerspoon"
-      "firefox"
-      "gimp"
-      "localsend"
-      "mpv"
-      "utm"
     ];
   };
 
