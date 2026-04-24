@@ -13,6 +13,8 @@
   # Verify Home Manager's launch agents after setupLaunchAgents.
   # This is generally useful and unrelated to keyboard remapping.
   config = lib.mkIf pkgs.stdenv.isDarwin {
+    services.local-modules.nix-darwin.keyboard.bepo.enable = lib.mkDefault true;
+
     home.activation.verifyLaunchAgents = lib.hm.dag.entryAfter [ "setupLaunchAgents" ] ''
       set -euo pipefail
 

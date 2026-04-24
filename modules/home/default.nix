@@ -13,6 +13,7 @@
     ./nix.nix
     ./opencode
     ./tmux
+    ./darwin-only.nix
     # ./emacs.nix
     ./mail
   ];
