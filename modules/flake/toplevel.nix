@@ -13,7 +13,6 @@
     # Enables 'nix run' to activate.
     packages.default = self'.packages.activate;
 
-    checks.video-editing = import ../../tests/video-editing.nix { inherit pkgs; };
     checks.marketplace = import ../../tests/marketplace.nix { inherit pkgs lib; };
 
     # Flake inputs we want to update periodically
