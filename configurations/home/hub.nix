@@ -1,4 +1,4 @@
-{ flake, pkgs, ... }:
+{ flake, pkgs, lib, ... }:
 let
   inherit (flake) inputs;
   inherit (inputs) self;
@@ -9,6 +9,7 @@ in
     self.homeModules.default
     self.homeModules.emacs
     self.homeModules.dev
+    self.homeModules.password-store
     self.homeModules.linux-only
   ];
 
@@ -20,6 +21,9 @@ in
   hub.linux.graphicalTools.enable = false;
 
   programs.gpg.useNixGPG = true;
+
+  hub.mail.enable = true;
+  hub.syncthing.enable = lib.mkIf (!pkgs.stdenv.isLinux) true;
 
   targets.genericLinux.enable = pkgs.stdenv.isLinux;
 
