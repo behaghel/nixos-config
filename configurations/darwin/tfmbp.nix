@@ -12,6 +12,7 @@ in
   ];
 
   nixpkgs.hostPlatform = "aarch64-darwin";
+  nixpkgs.config.allowUnfree = true;
   networking.hostName = "tfmbp";
 
   # Used for backwards compatibility, please read the changelog before changing.
