@@ -10,14 +10,10 @@ in
     [
       self.homeModules.default
       self.homeModules.dev
-      self.homeModules.browserpass
       self.homeModules.emacs
       self.homeModules.password-store
-      self.homeModules."video-editing"
       self.homeModules.linux-only
-      self.homeModules.darwin-only
     ];
-  services.local-modules.nix-darwin.keyboard.bepo.enable = true;
   programs.gpg.useNixGPG = true;
 
   # Defined by /modules/home/me.nix
@@ -49,12 +45,6 @@ in
   targets.genericLinux.enable = isLinux;
 
   hub.syncthing.enable = lib.mkIf (!isLinux) true;
-
-  hub.videoEditing = {
-    enable = true;
-    fillerWords = [ "uh" "um" "and you know" "and so" "and so for us" "so for us" "you know" "kind of" "a bit" "a bit of" "it's like" "and well" "to be completely honest" "yeah" ];
-    fillerPad = 0.07;
-  };
 
   home.stateVersion = "24.11";
 }
