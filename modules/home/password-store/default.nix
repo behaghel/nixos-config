@@ -23,6 +23,7 @@ let
       })
     else
       pkgs.pass;
+  guiTarget = pkgs.stdenv.isDarwin || (pkgs.stdenv.isLinux && config.hub.linux.graphicalTools.enable);
 in
 {
   programs.password-store = {
@@ -32,6 +33,13 @@ in
       PASSWORD_STORE_DIR = passwordStoreDir;
     };
   };
+
+  programs.browserpass = lib.mkIf guiTarget {
+    enable = true;
+    browsers = [ "firefox" "chromium" ];
+  };
+
+  home.packages = lib.optionals guiTarget [ pkgs.browserpass ];
 
   home.activation.ensurePasswordStore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     set -euo pipefail

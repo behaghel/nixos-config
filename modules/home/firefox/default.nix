@@ -43,9 +43,4 @@ in
         };
       };
   };
-
-  programs.browserpass = {
-    enable = true;
-    browsers = [ "firefox" "chrome" ];
-  };
 }
