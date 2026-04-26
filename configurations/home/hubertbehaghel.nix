@@ -11,6 +11,7 @@ in
       self.homeModules.default
       self.homeModules.dev
       self.homeModules.emacs
+      self.homeModules.texlive
       self.homeModules.password-store
       self.homeModules.linux-only
     ];
