@@ -16,6 +16,7 @@
       bind C-a send-prefix
       set -g xterm-keys on
       set -s extended-keys on
+      set -g extended-keys-format csi-u
       set -s escape-time 10
       # Surface bell activity from any window.
       set -g bell-action any
