@@ -1,0 +1,10 @@
+{
+  "name": "devenv-workflow",
+  "version": "0.2.0",
+  "description": "Declarative dev environment management with devenv — scaffold, maintain, diagnose, and extend devenv.nix configurations. Now with pi support.",
+  "keywords": ["pi-package", "devenv", "nix", "dev-environment"],
+  "pi": {
+    "extensions": ["./pi/extension.ts"],
+    "skills": ["./skills"]
+  }
+}

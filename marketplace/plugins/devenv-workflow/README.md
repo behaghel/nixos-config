@@ -50,10 +50,11 @@ The `devenv-expert` agent runs passively, catching anti-patterns and redirecting
 
 ## Wiring Notes
 
-- For OpenCode, wire this plugin through `mp.plugins.devenv-workflow` from `marketplace/lib.nix`.
-- Do not read agent markdown files from `plugins/devenv-workflow/agents/` directly.
-- Reason: the marketplace library applies OpenCode compatibility processing to agents, including stripping Claude-style frontmatter that OpenCode rejects.
-- Safe pattern:
+### OpenCode
+Wire this plugin through `mp.plugins.devenv-workflow` from `marketplace/lib.nix`.
+Do not read agent markdown files from `plugins/devenv-workflow/agents/` directly.
+Reason: the marketplace library applies OpenCode compatibility processing to agents, including stripping Claude-style frontmatter that OpenCode rejects.
+Safe pattern:
 
 ```nix
 let
@@ -65,3 +66,57 @@ in {
   opencode.agents = devenv.agents;
 }
 ```
+
+### Claude Code
+Wire commands and MCP server through the `claude.code` block in `devenv.nix`:
+
+```nix
+claude.code = {
+  enable = true;
+  commands = mp.plugins.devenv-workflow.commands;
+  hooks = mp.hooks;
+  mcpServers.devenv = mp.mcpServers.devenv;
+};
+```
+
+### Pi (coding agent)
+
+Pi uses the `pi` package manifest in `package.json` to discover the extension and skill.
+
+#### Per-project (quick start)
+
+Add to `.pi/settings.json`:
+
+```json
+{
+  "extensions": [
+    "/absolute/path/to/marketplace/plugins/devenv-workflow/pi/extension.ts"
+  ],
+  "skills": [
+    "/absolute/path/to/marketplace/plugins/devenv-workflow/skills"
+  ],
+  "enableSkillCommands": true
+}
+```
+
+#### Via pi install (portable)
+
+```bash
+pi install /absolute/path/to/marketplace/plugins/devenv-workflow
+# or from git:
+pi install git:github.com:behaghel/nixos-config
+# then enable just the devenv-workflow plugin:
+pi config
+```
+
+#### What you get
+| Resource | Type | Description |
+|----------|------|-------------|
+| `devenv-project` | Skill | Core knowledge — loaded on-demand when pi detects a devenv project |
+| `devenv_search` | Tool | Search packages/options via `devenv search` |
+| `devenv_validate` | Tool | Syntax + evaluation check after editing `devenv.nix` |
+| `devenv_read_config` | Tool | Read and summarize devenv configuration files |
+| `/devenv-diagnose` | Command | Systematic troubleshooting ladder |
+| `/devenv-init` | Command | Scaffold a new devenv environment |
+| `/devenv-add` | Command | Add a capability to existing config |
+| Devenv Expert | Passive | Anti-pattern detection — catches imperative installs, redirects to declarative config |
