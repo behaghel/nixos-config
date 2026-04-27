@@ -1,5 +1,5 @@
 ---
-name: Spec Collector
+name: spec-collector
 description: "Collect information and write development specs. Use when creating a spec, writing requirements, defining acceptance criteria, planning a feature, starting a new task, or when the user says 'spec this', 'define requirements', 'what should the spec look like', or 'help me think through this feature'."
 ---
 

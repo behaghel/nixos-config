@@ -1,5 +1,5 @@
 ---
-name: Spec Verifier
+name: spec-verifier
 description: "Audit development specs for completeness and quality. Use when validating a spec, checking requirements, reviewing acceptance criteria, or when the user says 'is this spec complete', 'validate my spec', 'review the requirements', 'check this spec', or 'is this ready for implementation'."
 ---
 
