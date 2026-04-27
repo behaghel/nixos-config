@@ -57,13 +57,17 @@ let
     then builtins.attrNames (lib.filterAttrs (_: t: t == "directory") (builtins.readDir pluginsDir))
     else [ ];
 
-  # Build a single plugin's attrset: { skills, commands, agents }
+  # Build a single plugin's attrset: { skills, commands, agents, pi }
   mkPlugin = name:
     let
       base = pluginsDir + "/${name}";
       skillsPath = base + "/skills";
       cmdsPath = base + "/commands";
       agentsPath = base + "/agents";
+      pkgPath = base + "/package.json";
+      # Only expose .pi if the plugin has a package.json with a pi manifest
+      hasPi = builtins.pathExists pkgPath
+        && builtins.hasAttr "pi" (builtins.fromJSON (builtins.readFile pkgPath));
     in
     {
       skills =
@@ -92,6 +96,11 @@ let
               (stripFrontmatter (builtins.readFile (agentsPath + "/${fName}"))))
           (lib.filterAttrs (n: _: lib.hasSuffix ".md" n) (builtins.readDir agentsPath))
         else { };
+
+      pi = lib.optionalAttrs hasPi {
+        # Absolute path to the plugin directory, usable with `pi install -l`
+        path = base;
+      };
     };
 
   # All plugins as attrset: { spec-tdd = { skills, commands, agents }; ... }

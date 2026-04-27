@@ -267,6 +267,46 @@ marketplace/plugins/my-plugin/
 
 ---
 
+## Pi
+
+Each plugin ships as a [pi](https://pi.dev) package. Skills and extensions load automatically when pi discovers the package:
+
+### Global install
+
+```bash
+pi install /path/to/nixos-config/marketplace/plugins/devenv-workflow
+pi install /path/to/nixos-config/marketplace/plugins/domain-tree
+pi install /path/to/nixos-config/marketplace/plugins/spec-driven
+pi install /path/to/nixos-config/marketplace/plugins/spec-tdd
+pi install /path/to/nixos-config/marketplace/plugins/ux-stories
+```
+
+### Per-project install
+
+Add to `.pi/settings.json`:
+
+```json
+{
+  "packages": [
+    "<absolute-path>/nixos-config/marketplace/plugins/domain-tree"
+  ]
+}
+```
+
+### What becomes available
+
+Each plugin contributes:
+
+| Plugin | Extensions | Skills | Commands |
+|--------|-----------|--------|----------|
+| **devenv-workflow** | Auto-detect, tool monitoring, 3 custom tools | `devenv-project` | `/devenv-init`, `/devenv-add`, `/devenv-diagnose` |
+| **domain-tree** | Auto-detect, spec-on-touch enforcement, 3 custom tools | `domain-navigator` | `/domain-tree:init`, `/domain-tree:check`, `/domain-tree:map` |
+| **spec-driven** | Expertise injection, spec coverage tool | `spec-collector`, `spec-verifier` | `/spec-collect`, `/spec-verify` |
+| **spec-tdd** | Expertise injection | `tdd-planner` | `/tdd-plan`, `/tdd-iterate` |
+| **ux-stories** | Expertise injection | `story-writer` | `/story-write`, `/story-scenarios`, `/story-deliver` |
+
+---
+
 ## Updating in projects
 
 ```bash
