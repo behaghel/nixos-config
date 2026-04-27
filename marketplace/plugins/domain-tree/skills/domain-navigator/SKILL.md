@@ -1,5 +1,5 @@
 ---
-name: Domain Navigator
+name: domain-navigator
 description: |
   Navigate and enforce domain-driven codebase structure. Use when the user references a domain, asks where code or specs live, wants to understand project structure, asks about domain boundaries, or when you need to locate the right spec or code for a given feature area. Also use when creating new files to ensure they land in the correct domain namespace.
 ---

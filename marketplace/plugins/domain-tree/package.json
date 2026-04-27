@@ -1,0 +1,10 @@
+{
+  "name": "domain-tree",
+  "version": "0.2.0",
+  "description": "Domain-driven codebase structure — enforce 1:1 mirroring between spec/ and code namespaces, with DDD-informed subdomain classification, context mapping, and shared kernel management. Now with pi support.",
+  "keywords": ["pi-package", "domain-driven-design", "spec", "ddd", "architecture"],
+  "pi": {
+    "extensions": ["./pi/extension.ts"],
+    "skills": ["./skills"]
+  }
+}
