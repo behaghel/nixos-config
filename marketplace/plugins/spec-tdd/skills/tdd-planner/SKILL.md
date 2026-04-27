@@ -1,5 +1,5 @@
 ---
-name: TDD Planner
+name: tdd-planner
 description: |
   Plan and execute iterative vertical-slice TDD from specs. Use when the user wants to plan implementation of a spec, break work into iterations, create a test plan, start TDD on a feature, or implement a spec with red-green-refactor discipline. Also use when spec-driven collection is complete and the next step is implementation planning.
 ---

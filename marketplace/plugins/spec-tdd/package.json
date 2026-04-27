@@ -1,0 +1,10 @@
+{
+  "name": "spec-tdd",
+  "version": "0.2.0",
+  "description": "Iterative vertical-slice TDD — plan implementation from specs, execute red-green-refactor iterations, and maintain test hygiene. Now with pi support.",
+  "keywords": ["pi-package", "tdd", "spec-tdd", "testing", "iterations"],
+  "pi": {
+    "extensions": ["./pi/extension.ts"],
+    "skills": ["./skills"]
+  }
+}
