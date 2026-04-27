@@ -1,5 +1,33 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, config, ... }:
 let
+  emacsBundleId = "org.gnu.Emacs";
+  emacsDutiConfig = ''
+    # Bundle ID           UTI/Extension                   Role
+    ${emacsBundleId}      public.plain-text               all
+    ${emacsBundleId}      public.text                     all
+    ${emacsBundleId}      net.daringfireball.markdown     all
+    ${emacsBundleId}      public.comma-separated-values-text all
+    ${emacsBundleId}      public.tab-separated-values-text all
+    ${emacsBundleId}      txt                             all
+    ${emacsBundleId}      text                            all
+    ${emacsBundleId}      md                              all
+    ${emacsBundleId}      markdown                        all
+    ${emacsBundleId}      org                             all
+    ${emacsBundleId}      rst                             all
+    ${emacsBundleId}      tex                             all
+    ${emacsBundleId}      log                             all
+    ${emacsBundleId}      csv                             all
+    ${emacsBundleId}      tsv                             all
+    ${emacsBundleId}      json                            all
+    ${emacsBundleId}      jsonl                           all
+    ${emacsBundleId}      yaml                            all
+    ${emacsBundleId}      yml                             all
+    ${emacsBundleId}      toml                            all
+    ${emacsBundleId}      ini                             all
+    ${emacsBundleId}      conf                            all
+    ${emacsBundleId}      cfg                             all
+  '';
+
   # Script to set up Emacs configuration by cloning from GitHub
   emacs-config-setup = pkgs.writeShellApplication {
     name = "emacs-config-setup";
@@ -71,7 +99,11 @@ in
   };
 
   # Add the setup script to your environment (+ fonts on Darwin)
-  home.packages = [ emacs-config-setup ];
+  home.packages = [ emacs-config-setup ] ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs.duti ];
+
+  xdg.configFile."duti/emacs.duti" = lib.mkIf pkgs.stdenv.isDarwin {
+    text = emacsDutiConfig;
+  };
 
   # Install desktop entries on Linux platforms only
   xdg.desktopEntries = lib.mkIf pkgs.stdenv.isLinux {
@@ -125,4 +157,19 @@ in
       ${emacs-config-setup}/bin/emacs-config-setup
     fi
   '';
+
+  home.activation.setEmacsFileAssociations = lib.mkIf pkgs.stdenv.isDarwin (lib.hm.dag.entryAfter [ "linkGeneration" ] ''
+    set -euo pipefail
+
+    emacs_app="${config.home.homeDirectory}/Applications/Home Manager Apps/Emacs.app"
+    duti_file="${config.xdg.configHome}/duti/emacs.duti"
+    lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+
+    if [ -d "$emacs_app" ] && [ -f "$duti_file" ]; then
+      if [ -x "$lsregister" ]; then
+        run "$lsregister" -f "$emacs_app"
+      fi
+      run ${pkgs.duti}/bin/duti "$duti_file"
+    fi
+  '');
 }
