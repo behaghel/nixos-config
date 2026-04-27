@@ -1,5 +1,5 @@
 ---
-name: Story Writer
+name: story-writer
 description: |
   User-story-driven UX development. Use when the user describes a UX change, a new screen, a user-facing feature, or any work that affects what users see or interact with. Also use when the user says "user story", "wireframe", "screen", "BDD", "scenario", "as a user", or references a persona. Ensures all UX work starts from a user story, is specced with SVG wireframes, validated with BDD scenarios, and delivered through BDD+TDD orchestration.
 ---
