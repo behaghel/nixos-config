@@ -244,31 +244,35 @@ Also avoid combining `\bfseries` with a `\newfontface` that already names a bold
 
 ## Agent interaction rules
 
+### Low-noise agent convention
+
+When an agent runs `devenv` commands non-interactively, prefer `-q` / `--quiet` to minimize token-spending noise. Only omit `--quiet` when the user explicitly asks for verbose output or when the missing output is itself the thing being debugged.
+
 ### Commands to run
 
 | Action | Command | Notes |
 |--------|---------|-------|
 | Enter environment | `devenv shell` | Interactive shell with all tools |
-| Run inside env | `devenv shell -- <cmd>` | Non-interactive, agent-safe |
+| Run inside env | `devenv -q shell -- <cmd>` | Non-interactive, agent-safe, low-noise |
 | Start processes | `devenv up` | **Never run from agent** — interactive only |
-| Run tests | `devenv test` | Runs `enterTest` + processes lifecycle |
+| Run tests | `devenv -q test` | Runs `enterTest` + processes lifecycle |
 | Run a task | `devenv tasks run <ns:name>` | |
-| Search packages | `devenv search <query>` | Or use MCP `search_packages` |
-| Search options | `devenv search <query>` | Or use MCP `search_options` |
-| Build output | `devenv build` | |
-| Update inputs | `devenv update` | |
+| Search packages | `devenv -q search <query>` | Or use MCP `search_packages` |
+| Search options | `devenv -q search <query>` | Or use MCP `search_options` |
+| Build output | `devenv -q build` | |
+| Update inputs | `devenv -q update` | |
 
 ### What to run inside devenv shell
 
-All project lifecycle and code-related commands. Only basic core utilities (`ls`, `cp`, `cat`, `mkdir`, `rm`, `git`) are allowed outside `devenv shell`.
+All project lifecycle and code-related commands. Only basic core utilities (`ls`, `cp`, `cat`, `mkdir`, `rm`, `git`) are allowed outside `devenv shell`. For agent-driven checks and automation, prefer the low-noise form: `devenv -q shell -- <cmd>`.
 
 ### What NOT to do
 
-- **Never call `devenv up` from the agent** — it is interactive and blocks. Use non-interactive scripts or `devenv shell -- <cmd>` for validation.
+- **Never call `devenv up` from the agent** — it is interactive and blocks. Use non-interactive scripts or `devenv -q shell -- <cmd>` for validation.
 - **Never delete existing services or processes** unless explicitly requested.
 - **Never use `pip install`, `npm install -g`**, or other global package managers — declare everything in `devenv.nix`.
 - **Never suppress Nix evaluation errors** — fix the root cause.
-- **Treat sandbox failures as environment artifacts** — if `devenv shell` panics with `dynamic_store.rs` or Nix daemon socket errors, verify with `devenv shell -- true` on host before concluding the config is broken.
+- **Treat sandbox failures as environment artifacts** — if `devenv shell` panics with `dynamic_store.rs` or Nix daemon socket errors, verify with `devenv -q shell -- true` on host before concluding the config is broken.
 
 ### Editing devenv.nix
 
@@ -286,8 +290,8 @@ Apply fixes in order; stop at the first that resolves the issue:
 3. **Tool missing in shell** — add to `packages` or enable the right language module.
 4. **Service/process drift** — preserve names; add incrementally; validate after each change.
 5. **CLI errors** — run static validation first, runtime checks only when `devenv` CLI is healthy.
-6. **Sandbox false negatives** — re-run `devenv shell -- true` on host; if it passes, the error is sandbox-induced.
-7. **Stale lock** — run `devenv update` to refresh inputs.
+6. **Sandbox false negatives** — re-run `devenv -q shell -- true` on host; if it passes, the error is sandbox-induced.
+7. **Stale lock** — run `devenv -q update` to refresh inputs.
 
 ## Project-entry greeting (recommended pattern)
 
@@ -307,4 +311,4 @@ This is a recommended convention, not a hard requirement. Adapt to the project's
 - Define startup in `devenv.nix` processes/services so `devenv up` boots the full stack.
 - Add a startup health check that aborts on failure with a clear error.
 - Keep health scripts in `scripts/` and reuse them from hooks and CI.
-- For agent validation, use `devenv shell -- ./scripts/<check>.sh`, never `devenv up`.
+- For agent validation, use `devenv -q shell -- ./scripts/<check>.sh`, never `devenv up`.

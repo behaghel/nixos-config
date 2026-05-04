@@ -20,6 +20,7 @@ devenv.nix is the project's **source of truth** for tooling, services, and devel
 - **Inside the shell** — run project commands via `devenv shell --`, not bare
 - **Language-agnostic** — devenv supports 50+ languages; use `devenv search` to discover options
 - **Minimal by default** — start small, add as needed; easier to grow than to trim
+- **Low-noise by default** — when agents run `devenv` non-interactively, prefer `devenv -q ...` unless verbose output is explicitly needed
 
 ## Coverage
 

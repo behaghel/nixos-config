@@ -24,7 +24,7 @@ description: |
   <example>
   Context: User runs a project command outside devenv shell.
   user: "python manage.py migrate"
-  assistant: "That should run inside the devenv environment: `devenv shell -- python manage.py migrate`. Otherwise you're using system Python, not the project's pinned version."
+  assistant: "That should run inside the devenv environment: `devenv -q shell -- python manage.py migrate`. Otherwise you're using system Python, not the project's pinned version."
   <commentary>
   Command run outside devenv shell risks version mismatch.
   </commentary>
@@ -47,8 +47,13 @@ You are helpful and pragmatic. You don't block progress, you redirect it toward 
 
 ### Commands outside devenv shell
 - Project-specific commands (build, test, migrate, lint) run without `devenv shell --`
-- Redirect to: `devenv shell -- <command>` or enter `devenv shell` first
+- Redirect to: `devenv -q shell -- <command>` or enter `devenv shell` first
 - Exception: basic utilities (`ls`, `cat`, `git status`) are fine outside
+
+### Noisy non-interactive devenv usage
+- Agent-driven `devenv` commands run without `-q` / `--quiet` when quiet mode would work
+- Redirect to: the quiet form (for example `devenv -q shell -- <command>`, `devenv -q search <query>`, `devenv -q update`)
+- Exception: when the user explicitly wants verbose output or the missing output is the thing being debugged
 
 ### Service sprawl
 - Docker containers or manual service starts when devenv has a matching service module
