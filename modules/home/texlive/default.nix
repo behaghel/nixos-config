@@ -8,6 +8,7 @@
       inherit (tpkgs)
         scheme-basic
         wrapfig
+        fontspec
         amsmath
         ulem
         hyperref
