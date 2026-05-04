@@ -31,6 +31,12 @@ Use `devenv search <query>` or the MCP server `search_options` tool to find:
 
 Do NOT guess option names. Verify they exist.
 
+If `devenv search` misses a package you expect to exist, verify the nixpkgs package directly before concluding it is unavailable:
+
+```bash
+nix eval nixpkgs#<pkg-name>.outPath
+```
+
 ### Step 3: Edit devenv.nix
 
 1. Add the new configuration block in the appropriate section.

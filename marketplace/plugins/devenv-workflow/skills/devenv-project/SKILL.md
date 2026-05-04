@@ -71,6 +71,14 @@ packages = [ pkgs.git pkgs.jq pkgs.ripgrep ];
 
 Use `devenv search <query>` to find package names.
 
+If `devenv search` fails to find a known nixpkgs package, verify it explicitly before assuming it does not exist:
+
+```bash
+nix eval nixpkgs#<pkg-name>.outPath
+```
+
+If that returns a store path, the package exists and can usually still be added to `devenv.nix`.
+
 ### Services
 
 Pre-configured services (PostgreSQL, Redis, Nginx, RabbitMQ, etc.):
@@ -185,6 +193,20 @@ secretspec:
   provider: keyring
 ```
 
+If `devenv shell` hangs on GPG/YubiKey access during diagnostics, bypass SecretSpec temporarily for a one-off command:
+
+```bash
+devenv shell --secretspec-provider "env://BYPASS" -- <cmd>
+```
+
+Or set:
+
+```bash
+SECRETSPEC_PROVIDER=env://BYPASS
+```
+
+SecretSpec accepts any `env://<VAR>` provider and reads the named environment variable. This is for diagnostics and non-secret code paths, not for replacing the real provider permanently.
+
 ### Shell hooks
 
 ```nix
@@ -207,6 +229,18 @@ devenv mcp --http 8080  # HTTP mode
 ```
 
 Tools: `search_packages`, `search_options`. Use this to discover packages and configuration options at runtime instead of guessing.
+
+## Platform-specific notes
+
+### macOS XeLaTeX font resolution
+
+Nix-provided `xelatex` on macOS may fail to discover fonts that exist in system font directories. In devenv-managed projects, prefer an explicit `OSFONTDIR` in `devenv.nix` when TeX exports depend on macOS fonts:
+
+```nix
+env.OSFONTDIR = "/Library/Fonts:$HOME/Library/Fonts:/System/Library/Fonts";
+```
+
+Also avoid combining `\bfseries` with a `\newfontface` that already names a bold or extra-bold face. `fontspec` will try to resolve a non-existent b-variant of the already-bold face.
 
 ## Agent interaction rules
 

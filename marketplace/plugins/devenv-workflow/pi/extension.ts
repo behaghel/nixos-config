@@ -170,6 +170,10 @@ devenv.nix is the source of truth for tooling, services, and developer workflow.
 | Update inputs | \`devenv update\` |
 | Build output | \`devenv build\` |
 
+### Shared troubleshooting knowledge
+- Durable troubleshooting guidance such as SecretSpec/YubiKey bypasses, `devenv search` fallbacks, and macOS XeLaTeX font notes lives in the shared `devenv-project` skill and `/devenv-diagnose` command.
+- Keep this Pi extension focused on Pi-only runtime behavior: project detection, tool registration, command wiring, interception, and UI/status updates.
+
 ### Anti-patterns to redirect
 - \`pip install\` → add to \`languages.python.venv\` or \`packages\`
 - \`npm install -g\` → add to \`packages\` or \`languages.javascript.npm\`

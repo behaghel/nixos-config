@@ -67,6 +67,22 @@ direnv status
 ```
 If blocked: `direnv allow`. If stale: the `.envrc` or devenv.nix changed and direnv needs to reload.
 
+**2h. SecretSpec / GPG / YubiKey prompts**
+If `devenv shell` hangs waiting for SecretSpec-backed GPG or YubiKey access, bypass SecretSpec temporarily to isolate whether the shell startup problem is secret-related:
+
+```bash
+devenv shell --secretspec-provider "env://BYPASS" -- <cmd>
+```
+
+Or set `SECRETSPEC_PROVIDER=env://BYPASS` before retrying the command. This is a diagnostic bypass for commands that do not actually need the secret values.
+
+**2i. macOS XeLaTeX font resolution**
+If Nix-provided `xelatex` cannot find macOS fonts that are visibly installed:
+
+- Add `env.OSFONTDIR = "/Library/Fonts:$HOME/Library/Fonts:/System/Library/Fonts";` to `devenv.nix`
+- Re-enter the shell and retry the export
+- If the document uses `\newfontface` with an already-bold face, remove any extra `\bfseries` that would force fontspec to look for a non-existent b-variant
+
 ### Step 3: Report findings
 
 Present:
