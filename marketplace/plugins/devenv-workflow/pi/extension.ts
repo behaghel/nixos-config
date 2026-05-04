@@ -153,22 +153,12 @@ devenv.nix is the source of truth for tooling, services, and developer workflow.
 ### Core rules
 - **Declarative over imperative** — never use \`pip install\`, \`npm install -g\`, \`cargo install\`, etc.
   Add packages to \`devenv.nix\` instead (\`packages\`, language module, or service).
-- **Inside the shell** — run project commands via \`devenv shell -- <cmd>\`, not bare.
+- **Inside the shell** — run project commands via \`devenv -q shell -- <cmd>\`, not bare.
   Core utilities (ls, cat, git status, mkdir, rm) are fine outside.
 - **Language modules** — prefer \`languages.<name>.enable = true\` over raw packages.
-- **Search before guessing** — use \`devenv search <query>\` or the \`devenv_search\` tool.
+- **Search before guessing** — use \`devenv -q search <query>\` or the \`devenv_search\` tool.
 - **Validate** — after editing devenv.nix, use \`devenv_validate\` or \`nix-instantiate --parse devenv.nix\`.
-
-### Key commands
-| Action | Command |
-|--------|---------|
-| Enter environment | \`devenv shell\` (interactive) |
-| Run inside env | \`devenv shell -- <cmd>\` (agent-safe) |
-| Run tests | \`devenv test\` |
-| Run a task | \`devenv tasks run <ns:name>\` |
-| Search | \`devenv search <query>\` |
-| Update inputs | \`devenv update\` |
-| Build output | \`devenv build\` |
+- **Low-noise by default** — for agent-run devenv commands, prefer \`-q\` / \`--quiet\` unless verbose output is explicitly needed.
 
 ### Shared troubleshooting knowledge
 - Durable troubleshooting guidance such as SecretSpec/YubiKey bypasses, `devenv search` fallbacks, and macOS XeLaTeX font notes lives in the shared `devenv-project` skill and `/devenv-diagnose` command.
@@ -177,8 +167,8 @@ devenv.nix is the source of truth for tooling, services, and developer workflow.
 ### Anti-patterns to redirect
 - \`pip install\` → add to \`languages.python.venv\` or \`packages\`
 - \`npm install -g\` → add to \`packages\` or \`languages.javascript.npm\`
-- Project commands outside devenv shell → wrap with \`devenv shell --\`
-- \`devenv up\` from agent → never call interactively, use \`devenv shell -- ./scripts/<check>.sh\`
+- Project commands outside devenv shell → wrap with \`devenv -q shell --\`
+- \`devenv up\` from agent → never call interactively, use \`devenv -q shell -- ./scripts/<check>.sh\`
 
 ### Configuration files
 | File | Role |
@@ -232,7 +222,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 			// Don't block, but modify the command to run inside devenv shell
 			// unless it already is
 			if (!cmd.startsWith("devenv shell --") && !cmd.startsWith("devenv ")) {
-				(event.input as { command: string }).command = `devenv shell -- ${cmd}`;
+				(event.input as { command: string }).command = `devenv -q shell -- ${cmd}`;
 			}
 		}
 	});
@@ -271,7 +261,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 			const { query, scope } = params;
 			const args = scope ? [scope, query] : [query];
 			try {
-				const result = await pi.exec("devenv", ["search", ...args], {
+				const result = await pi.exec("devenv", ["-q", "search", ...args], {
 					signal,
 					timeout: 30_000,
 				});
@@ -281,7 +271,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 							type: "text",
 							text:
 								result.stdout.trim() ||
-								`No results for "${query}"${scope ? ` in ${scope}` : ""}. You can also try \`devenv search ${query}\` directly.`,
+								`No results for "${query}"${scope ? ` in ${scope}` : ""}. You can also try \`devenv -q search ${query}\` directly.`,
 						},
 					],
 					details: { query, scope: scope ?? "all" },
@@ -316,7 +306,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 			full: Type.Optional(
 				Type.Boolean({
 					description:
-						"If true, also runs `devenv shell -- true` for a full evaluation check. Default: false (syntax check only).",
+						"If true, also runs `devenv -q shell -- true` for a full evaluation check. Default: false (syntax check only).",
 				}),
 			),
 		}),
@@ -351,7 +341,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 
 			// Step 2: full evaluation check (optional)
 			if (params.full) {
-				const evalResult = await pi.exec("devenv", ["shell", "--", "true"], {
+				const evalResult = await pi.exec("devenv", ["-q", "shell", "--", "true"], {
 					signal,
 					timeout: 120_000,
 					cwd: devenvRoot,
@@ -362,7 +352,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 						content: [
 							{
 								type: "text",
-								text: `❌ devenv evaluation failed:\n${evalResult.stderr.trim()}\n\nFix the issue and validate again. If the error mentions \`dynamic_store.rs\` or Nix daemon sockets, it may be a sandbox artifact — try running \`devenv shell -- true\` on the host directly.`,
+								text: `❌ devenv evaluation failed:\n${evalResult.stderr.trim()}\n\nFix the issue and validate again. If the error mentions \`dynamic_store.rs\` or Nix daemon sockets, it may be a sandbox artifact — try running \`devenv -q shell -- true\` on the host directly.`,
 							},
 						],
 						isError: true,
@@ -501,7 +491,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 			// 4. Evaluation check
 			if (!foundIssue) {
 				results.push("\n### 4️⃣ Evaluation check");
-				const evalResult = await pi.exec("devenv", ["shell", "--", "true"], {
+				const evalResult = await pi.exec("devenv", ["-q", "shell", "--", "true"], {
 					timeout: 120_000,
 					cwd: devenvRoot!,
 				});
@@ -513,7 +503,7 @@ These are **independent layers**. Do not modify one agent’s configuration from
 						results.push(
 							"  ⚠️  Sandbox artifact detected (dynamic_store.rs or daemon socket error)\n" +
 								"  → This is likely a sandbox issue, not a config bug.\n" +
-								"  → Run `devenv shell -- true` on the host to verify.",
+								"  → Run `devenv -q shell -- true` on the host to verify.",
 						);
 					} else {
 						results.push(`  ❌ Evaluation failed:\n  \`\`\`\n  ${err.trim()}\n  \`\`\``);
