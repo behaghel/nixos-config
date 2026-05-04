@@ -25,6 +25,23 @@ marketplace/
 
 ---
 
+## Contributor Guidance
+
+When you evolve this marketplace, prefer structural reuse over consumer-specific drift.
+
+- Put durable workflow knowledge in shared markdown assets first.
+- If guidance would help multiple consumers (Claude Code, OpenCode, Pi, or future adapters), do not leave it only in one consumer runtime file.
+- Use the plugin-local files with clear ownership:
+  - `skills/*/SKILL.md` = reusable knowledge and reference material
+  - `commands/*.md` = procedural playbooks and operator flows
+  - `agents/*.md` = passive guardrails and redirect language
+  - consumer adapters (for example `pi/extension.ts`) = runtime detection, tool registration, interception, and UI glue only
+- Keep generated consumer config declarative. If a consumer is generated from `devenv.nix`, update the source wiring rather than the generated output.
+- Mark platform-specific advice explicitly (for example macOS-only or Linux-only) so one platform workaround does not silently become the default rule for every consumer.
+- When in doubt, upstream the shared policy to the marketplace-level docs or plugin shared markdown first, then keep only the minimum consumer-specific runtime bridge.
+
+---
+
 ## Installation
 
 ### Prerequisites
