@@ -119,11 +119,31 @@ let
     + assertNoAttr mp "agents" "no top-level mp.agents (explicit opt-in only)";
 
   level1-shared =
+    let
+      marketplaceReadme = builtins.readFile (marketplaceDir + "/README.md");
+      rawDevenvExpert = builtins.readFile (marketplaceDir + "/plugins/devenv-workflow/agents/devenv-expert.md");
+      renderedDevenvExpert = mp.plugins.devenv-workflow.agents.devenv-expert;
+      piExtension = builtins.readFile (marketplaceDir + "/plugins/devenv-workflow/pi/extension.ts");
+    in
     assertIsString mp.memory "memory is string"
     + assert' "hooks has notify-idle" (builtins.hasAttr "notify-idle" mp.hooks)
     + assert' "hooks has notify-stop" (builtins.hasAttr "notify-stop" mp.hooks)
     + assert' "mcpServers has devenv" (builtins.hasAttr "devenv" mp.mcpServers)
-    + assert' "mcpServers.devenv has type" (builtins.hasAttr "type" mp.mcpServers.devenv);
+    + assert' "mcpServers.devenv has type" (builtins.hasAttr "type" mp.mcpServers.devenv)
+    + assert' "marketplace README keeps shared-vs-consumer boundary" (
+      builtins.match ".*shared markdown assets first.*" marketplaceReadme != null
+      && builtins.match ".*consumer adapters .*runtime detection, tool registration, interception, and UI glue only.*" marketplaceReadme != null
+    )
+    + assert' "devenv-workflow raw agent keeps frontmatter" (
+      builtins.match ".*model: haiku.*" rawDevenvExpert != null
+    )
+    + assert' "devenv-workflow rendered agent strips frontmatter" (
+      builtins.match ".*model: haiku.*" renderedDevenvExpert == null
+      && builtins.match ".*You are a devenv environment expert\..*" renderedDevenvExpert != null
+    )
+    + assert' "Pi extension points durable guidance to shared markdown" (
+      builtins.match ".*Shared troubleshooting knowledge.*shared `devenv-project` skill and `/devenv-diagnose` command.*" piExtension != null
+    );
 
   level1 = level1-plugins + level1-bundle + level1-select + level1-standalone + level1-no-auto-merge + level1-shared;
 
