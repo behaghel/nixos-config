@@ -24,7 +24,7 @@ Adds a capability to an existing devenv.nix configuration.
 
 ### Step 2: Discover the right options
 
-Use `devenv search <query>` or the MCP server `search_options` tool to find:
+Use `devenv -q search <query>` or the MCP server `search_options` tool to find:
 - The exact option path (e.g., `services.postgres.enable`, not `services.postgresql.enable`)
 - Available sub-options (port, version, initial config)
 - Required companion packages
@@ -47,7 +47,7 @@ nix eval nixpkgs#<pkg-name>.outPath
 ### Step 4: Validate
 
 1. `nix-instantiate --parse devenv.nix`
-2. If devenv CLI is available: `devenv shell -- true`
+2. If devenv CLI is available: `devenv -q shell -- true`
 3. For services: note that verification requires `devenv up` (interactive) — tell the user to test manually.
 
 ### Step 5: Report
@@ -64,3 +64,4 @@ Tell the user:
 - Keep edits idempotent.
 - Prefer language modules over raw packages.
 - Add git hooks to `git-hooks.hooks`, not as custom scripts, when a pre-configured hook exists.
+- When an agent runs `devenv` non-interactively, prefer `-q` / `--quiet` unless the user explicitly asked for verbose output.

@@ -39,7 +39,7 @@ Verify devenv.nix starts with `{ pkgs, lib, config, inputs, ... }:`. Missing `in
 If a tool is missing, check:
 - Is the language block enabled? (`languages.<name>.enable = true`)
 - Is the tool in `packages`?
-- Use `devenv search <tool>` to find the correct package name.
+- Use `devenv -q search <tool>` to find the correct package name.
 
 **2d. Service configuration**
 If a service won't start:
@@ -50,14 +50,14 @@ If a service won't start:
 
 **2e. Input/lock freshness**
 ```bash
-devenv update
+devenv -q update
 ```
 Then retry. Stale locks cause evaluation failures when upstream changes.
 
 **2f. Sandbox detection**
 If the error mentions `dynamic_store.rs`, Nix daemon sockets, or `Operation not permitted`:
 ```bash
-devenv shell -- true
+devenv -q shell -- true
 ```
 If this succeeds on the host, the error is sandbox-induced — not a config bug.
 
@@ -71,7 +71,7 @@ If blocked: `direnv allow`. If stale: the `.envrc` or devenv.nix changed and dir
 If `devenv shell` hangs waiting for SecretSpec-backed GPG or YubiKey access, bypass SecretSpec temporarily to isolate whether the shell startup problem is secret-related:
 
 ```bash
-devenv shell --secretspec-provider "env://BYPASS" -- <cmd>
+devenv -q shell --secretspec-provider "env://BYPASS" -- <cmd>
 ```
 
 Or set `SECRETSPEC_PROVIDER=env://BYPASS` before retrying the command. This is a diagnostic bypass for commands that do not actually need the secret values.
@@ -95,4 +95,5 @@ Present:
 - Fix the root cause, not the symptom.
 - Make the smallest viable change.
 - Do not delete services or processes while troubleshooting unless they are the cause.
+- When an agent runs `devenv` non-interactively, prefer `-q` / `--quiet` unless the user explicitly asked for verbose output.
 - If you cannot determine the cause after the diagnostic ladder, say so and suggest checking `devenv` GitHub issues or the devenv Discord.

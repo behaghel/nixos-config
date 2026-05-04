@@ -60,13 +60,14 @@ eval "$(devenv direnvrc)" && use devenv
 ### Step 6: Validate
 
 1. Run `nix-instantiate --parse devenv.nix` to verify syntax.
-2. If `devenv` CLI is available, run `devenv shell -- true` to verify evaluation.
+2. If `devenv` CLI is available, run `devenv -q shell -- true` to verify evaluation.
 3. Report what was created and suggest next steps: `direnv allow`, `devenv shell`, `devenv up`.
 
 ## Rules
 
 - Always include `inputs` in function args for flakes compatibility.
 - Prefer language modules over raw packages (e.g., `languages.python.enable` over `pkgs.python3`).
-- Use `devenv search` or MCP `search_options` to verify option names exist before using them.
+- Use `devenv -q search` or MCP `search_options` to verify option names exist before using them.
+- When an agent runs `devenv` non-interactively, prefer `-q` / `--quiet` unless the user explicitly asked for verbose output.
 - Do not add services the user didn't ask for.
 - Keep the initial config minimal — it's easier to add than to remove.
