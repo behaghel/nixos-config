@@ -3,6 +3,7 @@
   imports = [
     ./me.nix
     ./shell
+    ./pass-launchers.nix
     ./zsh
     ./direnv
     ./gpg.nix
@@ -12,6 +13,7 @@
     ./ssh
     ./nix.nix
     ./opencode
+    ./pi
     ./tmux
     ./darwin-only.nix
     # ./emacs.nix
