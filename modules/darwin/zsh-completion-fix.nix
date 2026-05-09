@@ -3,8 +3,8 @@
 # TODO: Remove this after https://github.com/nix-community/home-manager/pull/5458
 {
   home-manager.sharedModules = [
-    ({ config, ... }: {
-      programs.zsh.initExtraBeforeCompInit = ''
+    ({ config, lib, ... }: {
+      programs.zsh.initContent = lib.mkOrder 550 ''
         fpath+=("${config.home.profileDirectory}"/share/zsh/site-functions "${config.home.profileDirectory}"/share/zsh/$ZSH_VERSION/functions "${config.home.profileDirectory}"/share/zsh/vendor-completions)
       '';
     })
