@@ -27,7 +27,7 @@
     };
 
     devenv = {
-      url = "github:cachix/devenv/v2.0.6";
+      url = "github:cachix/devenv/v2.1";
       inputs.nixpkgs.follows = "nixpkgs";
     };
 

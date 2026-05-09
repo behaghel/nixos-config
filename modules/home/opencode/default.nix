@@ -17,6 +17,16 @@ in
     '';
   };
 
+  options.hub.opencode.context7 = {
+    enable = lib.mkEnableOption "Context7 API key injection for OpenCode";
+
+    passEntry = lib.mkOption {
+      type = lib.types.str;
+      default = "dev/context7-api-key";
+      description = "Password-store entry used to populate CONTEXT7_API_KEY for OpenCode.";
+    };
+  };
+
   config = {
     home.packages = [
       pkgs.nodejs
@@ -89,6 +99,18 @@ in
         "openai-only" = ./oh-my-openagent-openai-only.json;
         "gemini-only" = ./oh-my-openagent-gemini-only.json;
       }.${cfg.modelConfigMode};
+    };
+
+    hub.passLaunchers = lib.mkIf cfg.context7.enable {
+      opencode = {
+        enable = true;
+        lookupCommand = "opencode";
+        fallbackCandidates = [
+          "/opt/homebrew/bin/opencode"
+          "/usr/local/bin/opencode"
+        ];
+        passEnv.CONTEXT7_API_KEY = cfg.context7.passEntry;
+      };
     };
   };
 
