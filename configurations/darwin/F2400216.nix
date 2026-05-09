@@ -7,6 +7,7 @@ in
 {
   imports = [
     self.darwinModules.default
+    ../../modules/common/local-network.nix
     ../../modules/nixos/gui/fonts.nix
     ../../modules/darwin/utm-builder.nix
   ];
@@ -24,6 +25,8 @@ in
     pkgs.jdk21_headless
     pkgs.qemu
   ];
+
+  hub.localNetwork.entries."192.168.1.199" = [ "mele" ];
 
   hub.darwin.apps = {
     casks = [
