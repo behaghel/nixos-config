@@ -47,5 +47,7 @@ in
 
   hub.syncthing.enable = lib.mkIf (!isLinux) true;
 
+  hub.opencode.modelConfigMode = "openai-only";
+
   home.stateVersion = "24.11";
 }
