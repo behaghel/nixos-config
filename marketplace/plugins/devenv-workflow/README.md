@@ -32,7 +32,8 @@ The skill covers all major devenv 2.0 features:
 - Profiles for selective environment activation
 - Git hooks (100+ pre-configured)
 - Containers and outputs
-- Secrets via SecretSpec
+- Secrets via SecretSpec, including provider/profile wiring and pass URI mapping
+- Nix language-server support through `devenv lsp` / generated nixd config
 - MCP server integration for live package/option search
 
 ## Workflow

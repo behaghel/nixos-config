@@ -180,18 +180,63 @@ Build with `devenv build`.
 
 ### Secrets (SecretSpec)
 
-Declarative secret definitions with pluggable providers (keyring, 1Password, dotenv, env):
+SecretSpec separates **what** a project needs (`secretspec.toml`) from **where** values live (provider URI / user provider aliases). Do not assume that declaring a variable in `secretspec.toml` is enough to reach an existing password-store entry.
+
+Use the current devenv integration shape:
+
+```yaml
+# devenv.yaml
+secretspec:
+  provider: keyring # or dotenv, env, 1password, pass://...
+  profile: default
+```
+
+Then map only the env vars the application needs in `devenv.nix`:
 
 ```nix
-secretspec.enable = true;
-secretspec.secrets.DATABASE_URL = {};
+{ config, lib, ... }:
+{
+  env = lib.optionalAttrs config.secretspec.enable {
+    DATABASE_URL = config.secretspec.secrets.DATABASE_URL or "";
+  };
+}
 ```
 
-Configure provider in `devenv.yaml`:
+#### Pass provider mapping (important)
+
+The SecretSpec `pass` provider default storage path is:
+
+```text
+secretspec/{project}/{profile}/{key}
+```
+
+For a project named `myapp`, profile `default`, and key `DATABASE_URL`, plain `provider: pass` reads:
+
+```bash
+pass show secretspec/myapp/default/DATABASE_URL
+```
+
+If the project already documents or uses another password-store layout, configure the provider URI explicitly with SecretSpec placeholders. Example: existing entries under `myapp/live/<ENV_VAR>` need:
+
 ```yaml
 secretspec:
-  provider: keyring
+  provider: pass://myapp/live/{key}
+  profile: live
 ```
+
+This maps `DATABASE_URL` to:
+
+```bash
+pass show myapp/live/DATABASE_URL
+```
+
+Checklist before declaring a SecretSpec task complete:
+
+1. Every env var the app checks is declared in `secretspec.toml` under the active profile or inherited profile.
+2. The provider URI actually maps each env var to the documented backing store entry.
+3. `devenv.nix` uses `config.secretspec.secrets.<KEY> or ""` (or another safe default) and does not print secret values.
+4. Normal shells stay secret-free unless the project explicitly wants secrets loaded on entry.
+5. A dedicated secret shell or runtime wrapper announces that pass/GPG/YubiKey prompts may occur, but never echoes values.
 
 If `devenv shell` hangs on GPG/YubiKey access during diagnostics, bypass SecretSpec temporarily for a one-off command:
 
@@ -230,6 +275,24 @@ devenv mcp --http 8080  # HTTP mode
 
 Tools: `search_packages`, `search_options`. Use this to discover packages and configuration options at runtime instead of guessing.
 
+### Language server (`devenv lsp`)
+
+devenv also exposes a bundled Nix language server for `devenv.nix`:
+
+```bash
+devenv lsp
+```
+
+According to <https://devenv.sh/lsp/>, this starts bundled `nixd`, pre-configured with the project's assembled devenv configuration, nixpkgs expression, and devenv options. Editors should use `devenv lsp` as the Nix LSP server command instead of relying on a host-installed `nixd`.
+
+For diagnostics, editor setup, or debugging generated settings, print the generated nixd configuration without starting the server:
+
+```bash
+devenv lsp --print-config
+```
+
+Agent rule: if host LSP diagnostics fail because `nixd` is missing, do **not** conclude the project lacks Nix LSP support. Check `devenv lsp --print-config` and run Nix validation (`nix-instantiate --parse devenv.nix`, `devenv -q shell -- true`) inside the devenv workflow.
+
 ## Platform-specific notes
 
 ### macOS XeLaTeX font resolution
@@ -259,6 +322,8 @@ When an agent runs `devenv` commands non-interactively, prefer `-q` / `--quiet` 
 | Run a task | `devenv tasks run <ns:name>` | |
 | Search packages | `devenv -q search <query>` | Or use MCP `search_packages` |
 | Search options | `devenv -q search <query>` | Or use MCP `search_options` |
+| Nix LSP server | `devenv lsp` | Bundled nixd over stdio for editors |
+| Print Nix LSP config | `devenv lsp --print-config` | Debug/manual editor setup |
 | Build output | `devenv -q build` | |
 | Update inputs | `devenv -q update` | |
 
@@ -272,6 +337,7 @@ All project lifecycle and code-related commands. Only basic core utilities (`ls`
 - **Never delete existing services or processes** unless explicitly requested.
 - **Never use `pip install`, `npm install -g`**, or other global package managers — declare everything in `devenv.nix`.
 - **Never suppress Nix evaluation errors** — fix the root cause.
+- **Do not treat missing host `nixd` as missing Nix LSP support** — devenv provides `devenv lsp`; use `devenv lsp --print-config` to inspect its generated configuration.
 - **Treat sandbox failures as environment artifacts** — if `devenv shell` panics with `dynamic_store.rs` or Nix daemon socket errors, verify with `devenv -q shell -- true` on host before concluding the config is broken.
 
 ### Editing devenv.nix
@@ -290,8 +356,9 @@ Apply fixes in order; stop at the first that resolves the issue:
 3. **Tool missing in shell** — add to `packages` or enable the right language module.
 4. **Service/process drift** — preserve names; add incrementally; validate after each change.
 5. **CLI errors** — run static validation first, runtime checks only when `devenv` CLI is healthy.
-6. **Sandbox false negatives** — re-run `devenv -q shell -- true` on host; if it passes, the error is sandbox-induced.
-7. **Stale lock** — run `devenv -q update` to refresh inputs.
+6. **Nix LSP missing on host** — use `devenv lsp` for editor integration or `devenv lsp --print-config` for generated nixd settings; do not install ad-hoc global LSPs when the project can provide them declaratively.
+7. **Sandbox false negatives** — re-run `devenv -q shell -- true` on host; if it passes, the error is sandbox-induced.
+8. **Stale lock** — run `devenv -q update` to refresh inputs.
 
 ## Project-entry greeting (recommended pattern)
 

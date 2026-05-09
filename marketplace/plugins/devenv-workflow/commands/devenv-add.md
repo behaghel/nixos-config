@@ -21,6 +21,8 @@ Adds a capability to an existing devenv.nix configuration.
    - **Package** — add to `packages` list
    - **Git hook** — `git-hooks.hooks.<name>.enable = true`
    - **Profile** — `profiles.<name>.module = ...`
+   - **SecretSpec** — declare keys in `secretspec.toml`, set provider/profile in `devenv.yaml`, and map `config.secretspec.secrets.KEY` in `devenv.nix`
+   - **LSP/editor support** — use `devenv lsp` / `devenv lsp --print-config` for Nix LSP configuration before adding ad-hoc packages
 
 ### Step 2: Discover the right options
 
@@ -28,6 +30,12 @@ Use `devenv -q search <query>` or the MCP server `search_options` tool to find:
 - The exact option path (e.g., `services.postgres.enable`, not `services.postgresql.enable`)
 - Available sub-options (port, version, initial config)
 - Required companion packages
+
+For Nix LSP/editor setup, do not guess or add global `nixd` first. Verify devenv's built-in LSP command:
+
+```bash
+devenv lsp --print-config
+```
 
 Do NOT guess option names. Verify they exist.
 
@@ -43,6 +51,7 @@ nix eval nixpkgs#<pkg-name>.outPath
 2. Preserve existing configuration — do not reorder, reformat, or delete unrelated code.
 3. If the addition needs a dependency on another service or process, add `after = [...]`.
 4. If the addition needs a new input, update `devenv.yaml` too.
+5. For SecretSpec additions using `pass`, verify whether the project uses the default SecretSpec pass path (`secretspec/{project}/{profile}/{key}`) or a custom password-store layout. Existing pass layouts require an explicit provider URI such as `pass://myapp/live/{key}`.
 
 ### Step 4: Validate
 

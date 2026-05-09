@@ -21,6 +21,7 @@ Systematic troubleshooting for devenv environment problems.
    - **Lock/input error** — stale lock, missing input, fetch failure
    - **Sandbox artifact** — `dynamic_store.rs` panic, daemon socket error
    - **direnv error** — blocked, stale, or missing .envrc
+   - **LSP/editor issue** — Nix language server missing, stale, or not configured for devenv
 
 ### Step 2: Apply diagnostic ladder
 
@@ -76,12 +77,37 @@ devenv -q shell --secretspec-provider "env://BYPASS" -- <cmd>
 
 Or set `SECRETSPEC_PROVIDER=env://BYPASS` before retrying the command. This is a diagnostic bypass for commands that do not actually need the secret values.
 
+When SecretSpec values are unexpectedly missing, verify the provider mapping before changing application code:
+
+1. Read `secretspec.toml` and list the active profile's keys.
+2. Read `devenv.yaml` and check `secretspec.provider` / `secretspec.profile`.
+3. For `provider: pass`, remember the default path is `secretspec/{project}/{profile}/{key}`.
+4. If the project stores secrets elsewhere in `pass`, use an explicit URI such as `pass://myapp/live/{key}`.
+5. Confirm `devenv.nix` maps `config.secretspec.secrets.KEY or ""` into the environment without printing values.
+
+Do not invent a second `secretspec.toml` to work around one mismapped key; prefer one project SecretSpec file plus the correct provider URI or provider alias.
+
 **2i. macOS XeLaTeX font resolution**
 If Nix-provided `xelatex` cannot find macOS fonts that are visibly installed:
 
 - Add `env.OSFONTDIR = "/Library/Fonts:$HOME/Library/Fonts:/System/Library/Fonts";` to `devenv.nix`
 - Re-enter the shell and retry the export
 - If the document uses `\newfontface` with an already-bold face, remove any extra `\bfseries` that would force fontspec to look for a non-existent b-variant
+
+**2j. Nix LSP / editor diagnostics**
+If Nix diagnostics fail because `nixd` is missing on the host, use devenv's bundled language server instead of treating the project as unsupported:
+
+```bash
+devenv lsp
+```
+
+For manual editor setup or debugging, print the generated nixd configuration:
+
+```bash
+devenv lsp --print-config
+```
+
+`devenv lsp` is pre-configured for the assembled `devenv.nix`, nixpkgs expression, and devenv options. Point editors at `devenv lsp` as the Nix LSP command. For agent-side validation, pair it with `nix-instantiate --parse devenv.nix` and `devenv -q shell -- true` rather than installing global ad-hoc language servers.
 
 ### Step 3: Report findings
 
