@@ -48,6 +48,13 @@ in
   hub.syncthing.enable = lib.mkIf (!isLinux) true;
 
   hub.opencode.modelConfigMode = "openai-only";
+  hub.opencode.context7.enable = true;
+
+  hub.pi = {
+    enable = true;
+    local.enable = true;
+    ds4.enable = true;
+  };
 
   home.stateVersion = "24.11";
 }
