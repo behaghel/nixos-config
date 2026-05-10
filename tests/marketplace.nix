@@ -142,7 +142,8 @@ let
       && builtins.match ".*You are a devenv environment expert\..*" renderedDevenvExpert != null
     )
     + assert' "Pi extension points durable guidance to shared markdown" (
-      builtins.match ".*Shared troubleshooting knowledge.*shared `devenv-project` skill and `/devenv-diagnose` command.*" piExtension != null
+      lib.hasInfix "### Shared troubleshooting knowledge" piExtension
+      && lib.hasInfix "shared \\`devenv-project\\` skill and \\`/devenv-diagnose\\` command" piExtension
     );
 
   level1 = level1-plugins + level1-bundle + level1-select + level1-standalone + level1-no-auto-merge + level1-shared;
@@ -207,6 +208,29 @@ let
 
   level2 = lib.concatMapStrings validatePlugin pluginNames;
 
+  # ── Level 2.5: Pi extension syntax ──────────────────────────
+  piExtensionPaths = builtins.filter builtins.pathExists [
+    (marketplaceDir + "/plugins/devenv-workflow/pi/extension.ts")
+    (marketplaceDir + "/plugins/domain-tree/pi/extension.ts")
+    (marketplaceDir + "/plugins/spec-driven/pi/extension.ts")
+    (marketplaceDir + "/plugins/spec-tdd/pi/extension.ts")
+    (marketplaceDir + "/plugins/ux-stories/pi/extension.ts")
+  ];
+
+  piSyntaxCheck = pkgs.runCommand "marketplace-pi-extension-syntax" {
+    nativeBuildInputs = [ pkgs.nodejs ];
+  } ''
+    set -euo pipefail
+
+    ${lib.concatMapStringsSep "\n" (path: ''
+      node --check ${lib.escapeShellArg (toString path)}
+    '') piExtensionPaths}
+
+    echo ok > "$out"
+  '';
+
+  level25 = assertPathExists piSyntaxCheck "pi extensions parse with node --check";
+
   # ── Level 3: Template wiring (explicit opt-in) ──────────────
   templateNames = builtins.attrNames
     (lib.filterAttrs (_: t: t == "directory")
@@ -261,6 +285,8 @@ pkgs.runCommand "marketplace-tests" { } ''
   ${level1-shared}
   ── Level 2: Plugin schema ──
   ${level2}
+  ── Level 2.5: Pi extension syntax ──
+  ${level25}
   ── Level 3: Template wiring ──
   ${level3}
   RESULTS

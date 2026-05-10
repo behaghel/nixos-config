@@ -161,7 +161,7 @@ devenv.nix is the source of truth for tooling, services, and developer workflow.
 - **Low-noise by default** — for agent-run devenv commands, prefer \`-q\` / \`--quiet\` unless verbose output is explicitly needed.
 
 ### Shared troubleshooting knowledge
-- Durable troubleshooting guidance such as SecretSpec/YubiKey bypasses, `devenv search` fallbacks, and macOS XeLaTeX font notes lives in the shared `devenv-project` skill and `/devenv-diagnose` command.
+- Durable troubleshooting guidance such as SecretSpec/YubiKey bypasses, \`devenv search\` fallbacks, and macOS XeLaTeX font notes lives in the shared \`devenv-project\` skill and \`/devenv-diagnose\` command.
 - Keep this Pi extension focused on Pi-only runtime behavior: project detection, tool registration, command wiring, interception, and UI/status updates.
 
 ### Anti-patterns to redirect
