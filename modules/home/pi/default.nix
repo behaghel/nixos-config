@@ -5,27 +5,27 @@ let
   system = pkgs.stdenv.hostPlatform.system;
   assets = {
     aarch64-darwin = {
-      url = "https://github.com/earendil-works/pi/releases/download/v0.70.2/pi-darwin-arm64.tar.gz";
-      hash = "sha256-TgOQUDZ9gr/5Y+Ff6o2FyiaPewKEuD9fFZOarQhzU6Q=";
+      url = "https://github.com/earendil-works/pi/releases/download/v0.74.0/pi-darwin-arm64.tar.gz";
+      hash = "sha256-MGMXmCPGqYVjQxIkDFcBUCQxb3/mZh7dQfFMd9ixXhA=";
     };
     x86_64-darwin = {
-      url = "https://github.com/earendil-works/pi/releases/download/v0.70.2/pi-darwin-x64.tar.gz";
-      hash = "sha256-D/7SEo77Rp7yPEb4Yc0dhIAiFTunJH2rPufqQb9sOGQ=";
+      url = "https://github.com/earendil-works/pi/releases/download/v0.74.0/pi-darwin-x64.tar.gz";
+      hash = "sha256-+mXJjyxlHsL4n7Goo9ybmHlHvJsQI2Gi8XiGKrrMdWA=";
     };
     aarch64-linux = {
-      url = "https://github.com/earendil-works/pi/releases/download/v0.70.2/pi-linux-arm64.tar.gz";
-      hash = "sha256-kfUCUFC/c1ZTp8IaBzGs9pnTRfea7CAUsIZdzVuQ5u8=";
+      url = "https://github.com/earendil-works/pi/releases/download/v0.74.0/pi-linux-arm64.tar.gz";
+      hash = "sha256-JhqpEoeMqYPJA9nEoECDEN2GN7WDCFZR2bXdtwyd9XI=";
     };
     x86_64-linux = {
-      url = "https://github.com/earendil-works/pi/releases/download/v0.70.2/pi-linux-x64.tar.gz";
-      hash = "sha256-VDEiaOSGtyaNr+1UdqyLdCTQh2zXJ9wyXU4A7HRG90k=";
+      url = "https://github.com/earendil-works/pi/releases/download/v0.74.0/pi-linux-x64.tar.gz";
+      hash = "sha256-1nZXow1JyfrKgIaNKkvbpN/KwEcCiT9FptFLJJNF640=";
     };
   };
   asset = assets.${system} or (throw "hub.pi: unsupported platform ${system}");
 
   piPackage = pkgs.stdenvNoCC.mkDerivation rec {
     pname = "pi-coding-agent";
-    version = "0.70.2";
+    version = "0.74.0";
 
     src = pkgs.fetchurl {
       inherit (asset) url hash;
