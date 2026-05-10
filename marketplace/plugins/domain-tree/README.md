@@ -10,6 +10,8 @@ The domain tree is a structural contract informed by Domain-Driven Design. It en
 2. **How much rigor each domain deserves** — core vs supporting vs generic classification
 3. **How domains communicate** — the context map declaring integration patterns
 
+`spec/domains.yaml` is the source of truth for that contract. The `spec/` tree and code namespaces should align to it, not compete with it.
+
 Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructure are domains too — anything with behavior worth specifying. A technical domain like security can be `core` if it's central to the product's value.
 
 ## DDD concepts used
@@ -21,7 +23,9 @@ Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructur
 | **Context map** | `context-map:` section declaring cross-domain relationships and integration patterns |
 | **Shared kernel** | `type: shared-kernel` for jointly-owned types — strictest change rules |
 | **Anti-corruption layer** | Declared in context map — enforced by boundary-enforcer agent |
-| **Ubiquitous language** | `language:` field in domains — terms that code and specs must use consistently |
+| **Ubiquitous language** | `language:` field in domains, with optional `spec/{domain}/index.md` support — terms that code and specs must use consistently |
+
+Ubiquitous language should be enriched on demand. Add new terms only when the domain needs sharper language, and get explicit developer approval before extending the glossary so the language stays intentional rather than drifting.
 
 ## Relationship to other plugins
 
@@ -88,8 +92,10 @@ Scans your codebase, proposes domains with classifications, detects cross-domain
 
 ### Day-to-day
 
-- **Before coding:** Domain Navigator resolves which domain you're in, checks classification-appropriate spec requirements.
-- **During coding:** Boundary enforcer consults the context map for cross-domain changes, guards shared kernel, prevents ACL bypass.
+- **Before coding:** Domain Navigator resolves which domain you're in, checks classification-appropriate spec requirements, and keeps normal work inside one domain at a time.
+- **During coding:** Boundary enforcer consults the context map for cross-domain changes, guards shared kernel, prevents ACL bypass, and helps break cross-domain work into a sequence of intra-domain tasks.
+- **When work must cross domains:** Favor domain-focused subagents and finish the domain-local tasks first. The last step should be the explicit cross-domain integration and end-to-end testing pass.
+- **For complex multi-domain work:** Start with a plan that the developer can challenge and approve before implementation begins.
 - **Periodic health check:** `/domain-tree:check` validates structure, context map, and classification gaps. `/domain-tree:map` shows coverage weighted by domain importance.
 
 ## The spec-on-touch convention
