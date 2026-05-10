@@ -6,31 +6,12 @@ let
   isDarwin = pkgs.stdenv.isDarwin;
 
   yubikeyKey = ../../keys/5137D6FF80B95202-2025-11-02.asc;
-  keyMetadata = pkgs.runCommand "yubikey-key-metadata"
-    { buildInputs = [ pkgs.gnupg pkgs.gawk ]; }
-    ''
-      export GNUPGHOME="$TMPDIR/gnupg"
-      mkdir -m 700 "$GNUPGHOME"
-      info="$TMPDIR/info"
-      ${pkgs.gnupg}/bin/gpg --with-colons --import-options show-only --import ${yubikeyKey} \
-        | ${pkgs.gawk}/bin/awk -F: '
-            /^pub:/ && key == "" { key = $5 }
-            /^fpr:/ && fpr == "" { fpr = $10 }
-            END {
-              if (key == "" || fpr == "")
-                exit 1
-              printf "%s\n%s\n", key, fpr
-            }
-          ' > "$info"
-      mv "$info" "$out"
-    '';
-  keyMetadataLines =
-    lib.splitString "\n"
-      (lib.removeSuffix "\n" (builtins.readFile keyMetadata));
-  primaryKeyId =
-    "0x" + lib.elemAt keyMetadataLines 0;
-  primaryFingerprint =
-    lib.elemAt keyMetadataLines 1;
+  # Keep this metadata pure so `nix flake check` does not need to build a
+  # target-platform derivation just to evaluate Home Manager activation text.
+  # When rotating the public key bundle, update these values alongside
+  # `keys/5137D6FF80B95202-2025-11-02.asc`.
+  primaryKeyId = "0x5137D6FF80B95202";
+  primaryFingerprint = "17048FE819B7C2BD7F59D6835137D6FF80B95202";
   pinentryPackage =
     if pkgs.stdenv.isDarwin then pkgs.pinentry_mac else pkgs.pinentry-gtk2;
   useSystemGpg =

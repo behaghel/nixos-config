@@ -8,7 +8,6 @@ in
   imports = [
     self.homeModules.default
     self.homeModules.emacs
-    self.homeModules.dev
     self.homeModules.password-store
     self.homeModules.linux-only
   ];

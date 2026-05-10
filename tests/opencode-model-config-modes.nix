@@ -15,6 +15,7 @@ let
     (hm.homeManagerConfiguration {
       inherit pkgs;
       modules = [
+        ../modules/home/pass-launchers.nix
         ../modules/home/opencode/default.nix
         {
           home.username = "tester";
