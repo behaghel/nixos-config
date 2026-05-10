@@ -35,6 +35,12 @@ let
       enable = true;
     };
   };
+  gptCfg = evalCfg {
+    enable = true;
+    gpt = {
+      enable = true;
+    };
+  };
 
   disabledCheck = assert' "hub.pi disabled leaves no managed models file"
     (!builtins.hasAttr ".pi/agent/models.json" disabledCfg.home.file);
@@ -50,11 +56,19 @@ let
       && builtins.match ".*pass show dev/deepseek-api-key.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
       && builtins.match ".*HUB_PASS_LAUNCHERS_BYPASS.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
       && !builtins.elem "secretspec" (packageNames ds4Cfg));
+
+  gptCheck = assert' "hub.pi gpt mode installs pass-backed pi-gpt wrapper"
+    (builtins.hasAttr ".local/bin/pi-gpt" gptCfg.home.file
+      && builtins.match ".*OPENAI_API_KEY.*" gptCfg.home.file.".local/bin/pi-gpt".text != null
+      && builtins.match ".*pass show veriff/api.openai.com/org-ai.*" gptCfg.home.file.".local/bin/pi-gpt".text != null
+      && builtins.match ".*--model openai/gpt-5\\.5.*" gptCfg.home.file.".local/bin/pi-gpt".text != null
+      && builtins.match ".*HUB_PASS_LAUNCHERS_BYPASS.*" gptCfg.home.file.".local/bin/pi-gpt".text != null
+      && !builtins.elem "secretspec" (packageNames gptCfg));
 in
 pkgs.runCommand "pi-module-tests" { } ''
   cat <<'RESULTS'
   ── Pi Home Manager module ──
-  ${disabledCheck}${localCheck}${ds4Check}RESULTS
+  ${disabledCheck}${localCheck}${ds4Check}${gptCheck}RESULTS
   echo "All Pi module tests passed."
   echo ok > $out
 ''

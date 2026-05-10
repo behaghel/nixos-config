@@ -204,6 +204,22 @@ in
         description = "Pi model name used by pi-ds4.";
       };
     };
+
+    gpt = {
+      enable = lib.mkEnableOption "OpenAI-backed Pi wrapper using pass";
+
+      passEntry = lib.mkOption {
+        type = lib.types.str;
+        default = "veriff/api.openai.com/org-ai";
+        description = "Password-store entry used to populate OPENAI_API_KEY for pi-gpt.";
+      };
+
+      model = lib.mkOption {
+        type = lib.types.str;
+        default = "openai/gpt-5.5";
+        description = "Pi model name used by pi-gpt.";
+      };
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -211,17 +227,29 @@ in
       [ cfg.package ]
       ++ lib.optionals cfg.local.enable [ piLocal pkgs.ollama ];
 
-    hub.passLaunchers = lib.mkIf cfg.ds4.enable {
-      pi-ds4 = {
-        enable = true;
-        command = [
-          (lib.getExe cfg.package)
-          "--model"
-          cfg.ds4.model
-        ];
-        passEnv.DEEPSEEK_API_KEY = cfg.ds4.passEntry;
+    hub.passLaunchers =
+      lib.optionalAttrs cfg.ds4.enable {
+        pi-ds4 = {
+          enable = true;
+          command = [
+            (lib.getExe cfg.package)
+            "--model"
+            cfg.ds4.model
+          ];
+          passEnv.DEEPSEEK_API_KEY = cfg.ds4.passEntry;
+        };
+      }
+      // lib.optionalAttrs cfg.gpt.enable {
+        pi-gpt = {
+          enable = true;
+          command = [
+            (lib.getExe cfg.package)
+            "--model"
+            cfg.gpt.model
+          ];
+          passEnv.OPENAI_API_KEY = cfg.gpt.passEntry;
+        };
       };
-    };
 
     home.file = lib.mkIf cfg.local.enable {
       ".pi/agent/models.json".text = localModelsJson;
