@@ -64,6 +64,7 @@ let
     text = ''
       set -euo pipefail
 
+      agent_dir="$HOME/.local/share/pi-local/agent"
       default_model=${lib.escapeShellArg cfg.local.defaultModel}
       selected_model="''${PI_LOCAL_MODEL:-$default_model}"
       explicit_pi_model=""
@@ -126,6 +127,9 @@ let
       esac
 
       ensure_ollama
+
+      mkdir -p "$agent_dir"
+      export PI_CODING_AGENT_DIR="$agent_dir"
 
       if ! ollama show "$ollama_model" >/dev/null 2>&1; then
         echo "Pulling $ollama_model..." >&2
@@ -205,21 +209,6 @@ in
       };
     };
 
-    gpt = {
-      enable = lib.mkEnableOption "OpenAI-backed Pi wrapper using pass";
-
-      passEntry = lib.mkOption {
-        type = lib.types.str;
-        default = "veriff/api.openai.com/org-ai";
-        description = "Password-store entry used to populate OPENAI_API_KEY for pi-gpt.";
-      };
-
-      model = lib.mkOption {
-        type = lib.types.str;
-        default = "openai/gpt-5.5";
-        description = "Pi model name used by pi-gpt.";
-      };
-    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -238,21 +227,10 @@ in
           ];
           passEnv.DEEPSEEK_API_KEY = cfg.ds4.passEntry;
         };
-      }
-      // lib.optionalAttrs cfg.gpt.enable {
-        pi-gpt = {
-          enable = true;
-          command = [
-            (lib.getExe cfg.package)
-            "--model"
-            cfg.gpt.model
-          ];
-          passEnv.OPENAI_API_KEY = cfg.gpt.passEntry;
-        };
       };
 
     home.file = lib.mkIf cfg.local.enable {
-      ".pi/agent/models.json".text = localModelsJson;
+      ".local/share/pi-local/agent/models.json".text = localModelsJson;
     };
   };
 }

@@ -54,7 +54,6 @@ in
     enable = true;
     local.enable = true;
     ds4.enable = true;
-    gpt.enable = true;
   };
 
   home.stateVersion = "24.11";
