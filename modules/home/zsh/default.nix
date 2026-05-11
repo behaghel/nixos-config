@@ -148,8 +148,8 @@ with lib;
       chpwd_functions+=(__zoxide_add)
       __zoxide_add
 
-      export -U PATH=~/.nix-profile/bin''${PATH:+:$PATH}
       export -U PATH=/etc/profiles/per-user/$USER/bin''${PATH:+:$PATH}
+      export -U PATH=${config.home.profileDirectory}/bin''${PATH:+:$PATH}
     '';
     completionInit = ''
       fpath=(${pkgs.pass}/share/zsh/site-functions $fpath)

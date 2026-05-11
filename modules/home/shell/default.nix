@@ -16,6 +16,7 @@
   xdg.configFile."profile.d/dark_theme.profile".source = ./.config/profile.d/dark_theme.profile;
 
   programs.bash.profileExtra = let
+    hmBin = "${config.home.profileDirectory}/bin";
     sysBin = "/nix/var/nix/profiles/default/bin";
     usrBin = "/etc/profiles/per-user/$USER/bin";
   in ''
@@ -27,6 +28,10 @@
         case :$PATH: in
           *:${usrBin}:*)  ;;  # do nothing
           *) PATH=${usrBin}:$PATH ;;
+        esac
+        case :$PATH: in
+          *:${hmBin}:*)  ;;  # do nothing
+          *) PATH=${hmBin}:$PATH ;;
         esac
         export PATH
       '';
