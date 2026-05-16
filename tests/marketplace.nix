@@ -109,8 +109,11 @@ let
     + assertNoAttr two.skills "story-writer" "select [spec-tdd,domain-tree] does NOT have story-writer";
 
   level1-standalone =
-    # Standalone skills (currently none — devenv-project-workflow moved to plugin)
-    assertNoAttr mp.skills "tdd-planner" "standalone skills do NOT include plugin skills"
+    # Standalone skills
+    assertHasAttr mp.skills "grill-me" "standalone skills include grill-me"
+    + assertPathExists (mp.skills.grill-me + "/SKILL.md") "grill-me skill file exists"
+    + assertIsString (builtins.readFile (mp.skills.grill-me + "/SKILL.md")) "grill-me skill file is readable"
+    + assertNoAttr mp.skills "tdd-planner" "standalone skills do NOT include plugin skills"
     + assertNoAttr mp.skills "devenv-project" "devenv-project is in plugin, not standalone";
 
   level1-no-auto-merge =
