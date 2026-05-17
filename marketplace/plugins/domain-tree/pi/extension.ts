@@ -78,17 +78,57 @@ function stripFrontmatter(content: string): string {
 async function tryLoadDomains(root: string): Promise<Record<string, any> | null> {
 	try {
 		const content = await readFile(join(root, "spec", "domains.yaml"), "utf-8");
-		// Simple YAML-like parse for the domains section (no full YAML parser dependency)
-		// We extract enough structure to use in enforcement
+		// Simple YAML-like parse for the domains section (no full YAML parser dependency).
+		// Keep this parser intentionally conservative: only keys under an explicit
+		// `subdomains:` block are subdomains. Domain metadata keys such as
+		// `language:` are not structural children and must not be treated as
+		// `<domain> > language`.
 		const domains: Record<string, any> = {};
 		const lines = content.split("\n");
 		let currentDomain: string | null = null;
 		let currentSubdomain: string | null = null;
 		let inDomains = false;
 		let inContextMap = false;
+		let inSubdomainsBlock = false;
+		let collectingCodeFor: { domain: string; subdomain: string | null } | null = null;
+
+		const indentation = (line: string) => line.match(/^ */)?.[0].length ?? 0;
+		const unquote = (value: string) => value.trim().replace(/^'(.*)'$/, "$1").replace(/^"(.*)"$/, "$1");
+		const splitInlineList = (value: string) => value.split(",").map(unquote).filter(Boolean);
+		const codeTarget = (indent: number): { domain: string; subdomain: string | null } | null => {
+			if (!currentDomain) return null;
+			if (inSubdomainsBlock && currentSubdomain && indent >= 8) {
+				return { domain: currentDomain, subdomain: currentSubdomain };
+			}
+			return { domain: currentDomain, subdomain: null };
+		};
+		const setCode = (target: { domain: string; subdomain: string | null }, paths: string[]) => {
+			if (target.subdomain) {
+				domains[target.domain].subdomains[target.subdomain].code = paths;
+			} else {
+				domains[target.domain].code = paths;
+			}
+		};
+		const appendCode = (target: { domain: string; subdomain: string | null }, pathValue: string) => {
+			if (target.subdomain) {
+				const sub = domains[target.domain].subdomains[target.subdomain];
+				sub.code = [...(sub.code || []), pathValue];
+			} else {
+				const domain = domains[target.domain];
+				domain.code = [...(domain.code || []), pathValue];
+			}
+		};
+		const setType = (target: { domain: string; subdomain: string | null }, type: string) => {
+			if (target.subdomain) {
+				domains[target.domain].subdomains[target.subdomain].type = type;
+			} else {
+				domains[target.domain].type = type;
+			}
+		};
 
 		for (const line of lines) {
 			const trimmed = line.trim();
+			const indent = indentation(line);
 
 			if (trimmed === "domains:") {
 				inDomains = true;
@@ -98,6 +138,9 @@ async function tryLoadDomains(root: string): Promise<Record<string, any> | null>
 			if (trimmed === "context-map:") {
 				inDomains = false;
 				inContextMap = true;
+				inSubdomainsBlock = false;
+				currentSubdomain = null;
+				collectingCodeFor = null;
 				continue;
 			}
 			if (trimmed.startsWith("project:") || trimmed === "") {
@@ -105,63 +148,74 @@ async function tryLoadDomains(root: string): Promise<Record<string, any> | null>
 			}
 
 			if (inDomains) {
-				// Top-level domain key
-				const topMatch = trimmed.match(/^(\w[\w-]*):$/);
-				if (topMatch && line.startsWith("  ") && !line.startsWith("    ")) {
-					currentDomain = topMatch[1];
+				// Top-level domain key: exactly two spaces under `domains:`.
+				const keyOnlyMatch = trimmed.match(/^(\w[\w-]*):$/);
+				if (keyOnlyMatch && indent === 2) {
+					currentDomain = keyOnlyMatch[1];
 					currentSubdomain = null;
+					inSubdomainsBlock = false;
+					collectingCodeFor = null;
 					domains[currentDomain] = { name: currentDomain, type: "supporting" };
 					continue;
 				}
-				// Subdomain key
-				const subMatch = trimmed.match(/^(\w[\w-]*):$/);
-				if (subMatch && line.startsWith("    ") && currentDomain) {
-					currentSubdomain = subMatch[1];
-					if (!domains[currentDomain].subdomains) {
-						domains[currentDomain].subdomains = {};
-					}
-					domains[currentDomain].subdomains[currentSubdomain] = { name: currentSubdomain };
+
+				if (!currentDomain) continue;
+
+				// Domain-level metadata key. Only `subdomains:` opens structural children.
+				if (indent === 4 && keyOnlyMatch) {
+					currentSubdomain = null;
+					collectingCodeFor = null;
+					inSubdomainsBlock = trimmed === "subdomains:";
 					continue;
 				}
+
+				// Subdomain key: exactly six spaces under an explicit `subdomains:` block.
+				if (inSubdomainsBlock && keyOnlyMatch && indent === 6) {
+					const domainName = currentDomain;
+					const subdomainName = keyOnlyMatch[1];
+					currentSubdomain = subdomainName;
+					collectingCodeFor = null;
+					if (!domains[domainName].subdomains) {
+						domains[domainName].subdomains = {};
+					}
+					domains[domainName].subdomains[subdomainName] = { name: subdomainName };
+					continue;
+				}
+
+				// Leaving the subdomain section for another domain-level field.
+				if (indent <= 4 && trimmed !== "subdomains:") {
+					currentSubdomain = null;
+					inSubdomainsBlock = false;
+				}
+
 				// type field
 				const typeMatch = trimmed.match(/^type:\s*(core|supporting|generic|shared-kernel)/);
 				if (typeMatch) {
-					if (currentSubdomain && domains[currentDomain]?.subdomains?.[currentSubdomain]) {
-						domains[currentDomain].subdomains[currentSubdomain].type = typeMatch[1];
-					} else if (currentDomain && domains[currentDomain]) {
-						domains[currentDomain].type = typeMatch[1];
-					}
+					const target = codeTarget(indent);
+					if (target) setType(target, typeMatch[1]);
+					continue;
 				}
-				// code field
-				const codeMatch = trimmed.match(/^code:\s*\[(.+)\]/);
-				if (codeMatch && currentDomain) {
-					const paths = codeMatch[1].split(",").map((p: string) => p.trim().replace(/^'(.*)'$/, "$1").replace(/^"(.*)"$/, "$1"));
-					if (currentSubdomain && domains[currentDomain]?.subdomains?.[currentSubdomain]) {
-						domains[currentDomain].subdomains[currentSubdomain].code = paths;
-					} else {
-						domains[currentDomain].code = paths;
-					}
+
+				// code field (inline list)
+				const codeInlineMatch = trimmed.match(/^code:\s*\[(.*)\]/);
+				if (codeInlineMatch) {
+					const target = codeTarget(indent);
+					if (target) setCode(target, splitInlineList(codeInlineMatch[1]));
+					collectingCodeFor = null;
+					continue;
 				}
-				// code-paths field (multiline)
+
+				// code field (multiline list)
+				if (trimmed === "code:") {
+					collectingCodeFor = codeTarget(indent);
+					if (collectingCodeFor) setCode(collectingCodeFor, []);
+					continue;
+				}
+
 				const codePathMatch = trimmed.match(/^-\s+(.+)$/);
-				if (codePathMatch && currentDomain && !trimmed.startsWith("#")) {
-					// Collect code paths - this is approximate for multiline arrays
-					const val = codePathMatch[1].replace(/^'(.*)'$/, "$1").replace(/^"(.*)"$/, "$1");
-					if (currentSubdomain && domains[currentDomain]?.subdomains?.[currentSubdomain]) {
-						if (!domains[currentDomain].subdomains[currentSubdomain].code) {
-							domains[currentDomain].subdomains[currentSubdomain].code = [];
-						}
-						if (typeof domains[currentDomain].subdomains[currentSubdomain].code !== "string" && !domains[currentDomain].subdomains[currentSubdomain].code.startsWith) {
-							domains[currentDomain].subdomains[currentSubdomain].code.push(val);
-						}
-					} else if (currentDomain && domains[currentDomain]) {
-						if (!domains[currentDomain].code) {
-							domains[currentDomain].code = [];
-						}
-						if (Array.isArray(domains[currentDomain].code)) {
-							domains[currentDomain].code.push(val);
-						}
-					}
+				if (codePathMatch && collectingCodeFor) {
+					appendCode(collectingCodeFor, unquote(codePathMatch[1]));
+					continue;
 				}
 			}
 
@@ -367,7 +421,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 	// ─── Tool monitoring: spec-on-touch & cross-domain enforcement ──
 
 	pi.on("tool_call", async (event, ctx) => {
-		if (!isActive || !domainRoot || !domainsCache) return;
+		if (!isActive || !domainRoot) return;
+		await refreshDomainCache();
+		if (!domainsCache) return;
 
 		if (event.toolName === "write" || event.toolName === "edit") {
 			const input = event.input as { path?: string; command?: string };
@@ -433,6 +489,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 			}),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
+			if (domainRoot) await refreshDomainCache();
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [
@@ -513,6 +570,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			if (domainRoot) await refreshDomainCache();
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
@@ -629,6 +687,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 		],
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
+			if (domainRoot) await refreshDomainCache();
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
