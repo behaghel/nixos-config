@@ -64,13 +64,16 @@ For each acceptance criterion:
    - "AC-1 needs a `welcome.svg` showing the value proposition"
    - "AC-3 needs both `vault-empty.svg` and `vault-populated.svg`"
 3. Check if matching wireframes already exist in `design/wireframes/`.
-4. Reference wireframes via `@wireframe:` tags on each scenario (see rules below).
-5. Write scenarios immediately — they ARE the acceptance criteria.
-6. Use `Scenario Outline` when the same flow applies with different data.
+4. Check `design/wireframes/components.svg`; create or update it when repeated UI parts are needed.
+5. Ensure planned screen SVGs compose canonical atoms, molecules, organisms, or templates instead of redrawing repeated controls.
+6. Reference wireframes via `@wireframe:` tags on each scenario (see rules below).
+7. Write scenarios immediately — they ARE the acceptance criteria.
+8. Use `Scenario Outline` when the same flow applies with different data.
 
 **Wireframe referencing:**
 
 Wireframes are referenced by path relative to `design/wireframes/`, NOT copied into story directories. This ensures a single source of truth for visual specs.
+`components.svg` is the canonical component library and is not normally referenced by `@wireframe:` tags; scenarios reference the page/state SVGs that use it.
 
 ```gherkin
 @wireframe:holder-01-onboarding-1.svg
@@ -104,4 +107,5 @@ Scenario: User swipes to second screen
 - Do NOT write implementation details — scenarios describe WHAT the user experiences, not HOW
 - Do NOT create `story.md` — the `.feature` file IS the story
 - Do NOT copy wireframe SVGs — reference them by path via tags
+- Do NOT redraw repeated UI patterns in page/state SVGs — add them to `design/wireframes/components.svg` at the smallest useful atomic level first
 - Use `Scenario Outline` with `Examples` table when the same flow has data variants — never duplicate scenarios that differ only in data

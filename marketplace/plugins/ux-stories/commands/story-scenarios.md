@@ -25,11 +25,13 @@ Every scenario must test a unique behavior. If the same flow applies with differ
 ### Step 2: Read the wireframes
 
 1. For each wireframe referenced via `@wireframe:` tags, read the SVG from `design/wireframes/`.
-2. Extract from comments and structure:
+2. Read `design/wireframes/components.svg` if it exists, so scenario wording uses canonical component names.
+3. Extract from comments and structure:
    - Screen name and state
    - Key UI elements (text, buttons, indicators)
+   - Canonical components used (atoms, molecules, organisms, templates)
    - Visual states (colors, enabled/disabled)
-3. Build a mental model of what the user sees at each step.
+4. Build a mental model of what the user sees at each step.
 
 ### Step 3: Generate or improve scenarios
 
@@ -101,6 +103,7 @@ Scenario: Revoked credential shows revocation banner
 - Scenarios describe what the USER sees, not what the CODE does
 - Every scenario must have at least one `@wireframe:` tag
 - Every acceptance criterion must have at least one scenario
+- Refer to canonical component names from `components.svg` when they clarify what the user sees
 - Use `Scenario Outline` for data variants — NEVER duplicate scenarios that differ only in data
 - Do NOT write "Visual match" scenarios — wireframe validation is handled by `@wireframe:` tags and the test runner
 - Do NOT duplicate scenarios that exist in other stories (e.g., tab switching belongs in one story only)

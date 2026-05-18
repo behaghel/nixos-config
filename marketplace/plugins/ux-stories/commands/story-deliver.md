@@ -15,10 +15,11 @@ Orchestrates the full delivery of a user story: BDD scenarios as the outer test 
 1. Find the story — check `spec/**/stories/*/scenarios.feature` or use the provided path.
 2. Read `scenarios.feature` (the single story artifact — contains persona, goal, scenarios, wireframe tags).
 3. Collect all `@wireframe:` tags and verify the referenced SVGs exist in `design/wireframes/`.
-4. If wireframes are missing: "These wireframes don't exist yet: [list]. Create them before delivery."
-5. Order scenarios from simplest to most complex (happy path first, edge cases last).
-6. Present the delivery plan: "This story has [N] scenarios. I'll deliver them in this order: [list]."
-7. **Pause for approval.** Do NOT proceed until the user confirms.
+4. Read `design/wireframes/components.svg` if it exists and note the canonical components/templates used by the referenced wireframes.
+5. If wireframes are missing: "These wireframes don't exist yet: [list]. Create them before delivery."
+6. Order scenarios from simplest to most complex (happy path first, edge cases last).
+7. Present the delivery plan: "This story has [N] scenarios. I'll deliver them in this order: [list]."
+8. **Pause for approval.** Do NOT proceed until the user confirms.
 
 ### Step 2: For each BDD scenario (in order)
 
@@ -65,7 +66,7 @@ During the inner loop:
 4. Compare the screenshot against the wireframe SVG element-by-element.
 5. Check the wireframe review checklist:
    - [ ] Layout order matches
-   - [ ] Correct components used
+   - [ ] Correct canonical components used from `components.svg` where reusable
    - [ ] Text content matches (including domain vocabulary)
    - [ ] Colors and states match
    - [ ] Interactive elements work
@@ -115,4 +116,5 @@ Delivered behaviors:
 - NEVER move to the next scenario without visual verification
 - NEVER move to the next scenario without user feedback
 - NEVER modify wireframes to match implementation — fix implementation to match wireframes
+- NEVER ignore component drift — if implementation uses a different reusable control than `components.svg`, fix the implementation or update the component library intentionally first
 - If wireframes are wrong, update them FIRST (with user agreement), then fix implementation
