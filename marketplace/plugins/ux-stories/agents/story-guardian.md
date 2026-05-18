@@ -63,10 +63,13 @@ You are the voice of the user in the development process. When implementation dr
 ### Wireframe-implementation mismatch
 - Implementation that doesn't match the referenced wireframe
 - Wireframes being modified to match implementation (wrong direction)
+- Page/state SVGs that redraw repeated UI instead of using `design/wireframes/components.svg`
+- Component drift between implementation and canonical atoms/molecules/organisms/templates
 
 **How to respond:**
 1. For implementation mismatch: "The wireframe shows [X] but the implementation has [Y]. Fix the implementation."
 2. For wireframe retroactive changes: "Wireframes are the spec. If the design should change, discuss it first, update the wireframe intentionally, then adjust the implementation."
+3. For uncomponentised SVGs: "This repeated UI belongs in `design/wireframes/components.svg` as an atom, molecule, organism, or template; compose it with `<use>` from the screen wireframe."
 
 ### BDD coverage gaps
 - New behaviors added during implementation without scenario coverage
