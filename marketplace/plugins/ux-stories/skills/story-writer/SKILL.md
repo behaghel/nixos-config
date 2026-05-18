@@ -25,8 +25,9 @@ Load `references/bdd-tdd-nesting.md` when planning or executing delivery.
 
 1. **No UX code without a story.** Every screen change traces back to a user story.
 2. **Wireframes are the visual spec.** SVG wireframes are the source of truth for what the user sees. Not mockups, not descriptions — precise, versioned SVGs.
-3. **BDD scenarios are the behavioral spec.** Given/When/Then scenarios written from the user's perspective define what "done" means.
-4. **BDD wraps TDD.** BDD scenarios are the outer test layer. TDD iterations happen inside to make each scenario pass.
+3. **SVG UX is componentised.** Shared visual parts live in `design/wireframes/components.svg` using atomic levels: atoms → molecules → organisms → templates → pages.
+4. **BDD scenarios are the behavioral spec.** Given/When/Then scenarios written from the user's perspective define what "done" means.
+5. **BDD wraps TDD.** BDD scenarios are the outer test layer. TDD iterations happen inside to make each scenario pass.
 
 ## Workflow
 
@@ -52,12 +53,14 @@ Save as `spec/{domain}/stories/{story-name}/scenarios.feature`.
 For each screen state in the story:
 
 1. Identify every distinct visual state (empty, loading, populated, error, success).
-2. Create an SVG wireframe for each state.
-3. Use the project's wireframe conventions (see `references/wireframe-conventions.md`).
-4. Save in `design/wireframes/` (single source of truth — never copy into story directories).
-5. Reference from scenarios via `@wireframe:` tags.
+2. Create or update `design/wireframes/components.svg` with reusable SVG symbols before drawing repeated UI in state wireframes.
+3. Create an SVG wireframe for each state by composing canonical components where possible.
+4. Use the project's wireframe conventions (see `references/wireframe-conventions.md`).
+5. Save in `design/wireframes/` (single source of truth — never copy into story directories).
+6. Reference screen-state wireframes from scenarios via `@wireframe:` tags.
 
 Wireframes are NOT sketches. They are precise, coordinate-level specs that implementation must match element-by-element.
+Componentisation is strict but pragmatic: do not create atoms for every rectangle or text label; promote only repeated, named UI concepts.
 
 ### 3. Ensure scenario quality
 
@@ -105,5 +108,6 @@ A story is done when:
 - Do NOT modify UI code without a user story context.
 - Do NOT create wireframes without a story (wireframes answer "what does the user see?" — the story provides "why?").
 - Do NOT write BDD scenarios without wireframes (scenarios validate what the wireframe specifies).
+- Do NOT redraw repeated UI in page wireframes when it belongs in `design/wireframes/components.svg`.
 - Do NOT skip BDD Red — if the scenario passes before implementation, either the feature exists or the test is wrong.
 - Do NOT treat wireframes as aspirational — they are the contract. Implementation must match.

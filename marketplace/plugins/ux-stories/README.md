@@ -47,6 +47,7 @@ Define the user story: persona, goal, acceptance criteria. Each AC maps to wiref
 ### 2. Wireframe
 
 Create SVG wireframes for each screen state. Hand-coded, precise, versioned. These are the visual contract.
+Shared UI parts live in `design/wireframes/components.svg` so screen SVGs compose canonical components instead of redrawing them.
 
 ### 3. Scenarios (`/ux-stories:scenarios`)
 
@@ -73,12 +74,15 @@ spec/{domain}/stories/{story-name}/
 └── scenarios.feature           ← the single story artifact (persona, goal, ACs, scenarios, wireframe tags)
 
 design/wireframes/
+├── components.svg              ← canonical SVG component library
 ├── welcome.svg                 ← wireframes live here (single source of truth)
 ├── populated.svg               ← referenced by @wireframe: tags in .feature files
 └── error.svg                   ← never copied into story directories
 ```
 
 The `.feature` file IS the story. There is no separate `story.md`. Wireframes live in `design/wireframes/` and are referenced by `@wireframe:` tags — never copied into story directories.
+
+`components.svg` follows a lightweight atomic structure: atoms form molecules, molecules form organisms, organisms form templates, and pages instantiate templates with story-specific content and state. Do not over-abstract: promote a shape or group only when it is a named, repeated UI concept.
 
 ## Wireframes as contracts
 
@@ -90,6 +94,8 @@ SVG wireframes are not mockups or sketches. They specify:
 - Interactive elements and navigation
 
 Implementation must match element-by-element. If there's a mismatch, fix the implementation — not the wireframe. If the wireframe is genuinely wrong, update it intentionally with user agreement first.
+
+Screen-state SVGs should mostly compose components from `components.svg` with `<use href="#...">`. They may set position, representative text, and state annotations, but repeated controls, cards, headers, navigation, and page layouts belong in the component library.
 
 ## BDD + TDD nesting
 

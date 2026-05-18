@@ -8,6 +8,7 @@ SVG wireframes are the visual spec. They define precisely what the user sees —
 2. **One SVG per screen state.** Welcome, loading, populated, error, empty, success — each is a separate file.
 3. **Hand-coded is preferred.** Hand-coded SVGs with HTML comments documenting intent are more maintainable and diffable than tool-exported SVGs.
 4. **Single source of truth.** Wireframes live in `design/wireframes/` — never copied into story directories. Stories reference them via `@wireframe:` tags in `.feature` files. This prevents duplication and ensures all stories reference the same canonical wireframe.
+5. **Strict componentisation.** Reusable UX parts live in `design/wireframes/components.svg`; screen-state SVGs compose them instead of redrawing repeated UI.
 
 ## SVG structure conventions
 
@@ -33,16 +34,69 @@ Every wireframe must document its intent:
      DOMAIN: wallet/credentials -->
 ```
 
+### Atomic component library
+
+Maintain a single component library at `design/wireframes/components.svg`.
+It is a small SVG sprite, not a full design-system implementation. Use `<defs>` and `<symbol>` for reusable components, and instantiate them with `<use>` from page/state wireframes.
+
+Structure it with atomic design levels:
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- ATOMS: indivisible primitives -->
+    <symbol id="atom-icon-search" viewBox="0 0 24 24">...</symbol>
+    <symbol id="atom-button-base" viewBox="0 0 120 40">...</symbol>
+
+    <!-- MOLECULES: small controls made from atoms -->
+    <symbol id="molecule-search-field" viewBox="0 0 320 48">
+      <use href="#atom-icon-search" x="12" y="12" />
+      <use href="#atom-button-base" x="200" y="4" />
+    </symbol>
+
+    <!-- ORGANISMS: distinct interface sections -->
+    <symbol id="organism-page-header" viewBox="0 0 393 72">
+      <use href="#molecule-search-field" x="48" y="12" />
+    </symbol>
+
+    <!-- TEMPLATES: reusable page layouts -->
+    <symbol id="template-list-page" viewBox="0 0 393 852">
+      <use href="#organism-page-header" />
+    </symbol>
+  </defs>
+</svg>
+```
+
+Page/state wireframes should compose the library:
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 393 852">
+  <!-- include or inline components.svg definitions before use -->
+  <use href="#template-list-page" />
+  <text x="24" y="128">Representative story content</text>
+</svg>
+```
+
+Atomic levels mean:
+
+- **Atoms** — indivisible UI primitives such as icons, base buttons, text styles, chips, fields.
+- **Molecules** — small reusable controls assembled from atoms, such as search fields, filter rows, cards.
+- **Organisms** — complete interface sections assembled from molecules/atoms, such as headers, sidebars, navigation, content lists.
+- **Templates** — reusable page layouts assembled from organisms, with placeholder content regions.
+- **Pages** — story-specific screen states that instantiate templates/components with realistic content and state.
+
+Keep it pragmatic: page → template → organism → molecule → atom is the maximum nesting depth. Do not create atoms for every rectangle or label. Promote only repeated, named UI concepts.
+
 ### Reusable symbols
 
-Define shared components as SVG `<symbol>` elements:
+Define shared components as SVG `<symbol>` elements in `components.svg`:
 
 ```xml
 <defs>
-  <symbol id="brand-shield" viewBox="0 0 400 480">
+  <symbol id="atom-brand-shield" viewBox="0 0 400 480">
     <!-- Shield path data -->
   </symbol>
-  <symbol id="fab-plus" viewBox="0 0 56 56">
+  <symbol id="molecule-fab-plus" viewBox="0 0 56 56">
     <!-- FAB button -->
   </symbol>
 </defs>
@@ -50,7 +104,7 @@ Define shared components as SVG `<symbol>` elements:
 
 Reference with `<use>`:
 ```xml
-<use href="#brand-shield" x="120" y="200" width="150" height="180"/>
+<use href="#atom-brand-shield" x="120" y="200" width="150" height="180"/>
 ```
 
 ### Color palette
@@ -89,9 +143,20 @@ Organize elements by semantic purpose:
 
 | Pattern | Example | When to use |
 |---------|---------|-------------|
+| `components.svg` | `components.svg` | Canonical atoms, molecules, organisms, and templates |
 | `{screen-state}.svg` | `welcome.svg`, `populated.svg` | Default — one state per file |
 | `{screen}-{variant}.svg` | `detail-revoked.svg`, `detail-hardware.svg` | Scenario-specific variants |
 | `{step-N}-{action}.svg` | `step-1-scan.svg`, `step-2-confirm.svg` | Multi-step flows |
+
+Component IDs must be stable kebab-case and prefixed by level:
+
+- `atom-button-primary`
+- `atom-icon-search`
+- `molecule-product-card`
+- `organism-filter-sidebar`
+- `template-marketplace-grid`
+
+Name components by product meaning, not visual trivia: prefer `molecule-product-card` over `molecule-gray-box-3`.
 
 ## What a wireframe must specify
 
@@ -99,7 +164,7 @@ For each screen state, the wireframe must include:
 
 1. **Layout** — Position and size of every element (x, y, width, height)
 2. **Typography** — Text content, font size, weight, color
-3. **Components** — Which UI component renders each element (shield, chip, button, card)
+3. **Components** — Which canonical component renders each element (shield, chip, button, card), preferably via `components.svg`
 4. **Colors** — Background, foreground, accent colors for each element
 5. **States** — Visual indicators (enabled/disabled, selected/unselected, expanded/collapsed)
 6. **Navigation** — Which elements are tappable and where they lead
@@ -116,7 +181,7 @@ For each screen state, the wireframe must include:
 When reviewing a wireframe against implementation (screenshot):
 
 - [ ] **Layout order** — Elements appear in the same top-to-bottom, left-to-right order
-- [ ] **Component types** — Correct UI components used (shield, chip, button match wireframe)
+- [ ] **Component types** — Correct canonical components used from `components.svg` where reusable
 - [ ] **Text content** — Labels, titles, body text match (including vocabulary: "cachets" not "credentials")
 - [ ] **Visual alignment** — Centering, edge alignment, spacing proportions
 - [ ] **Colors and states** — Status colors, enabled/disabled states, accent colors
