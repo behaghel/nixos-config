@@ -59,6 +59,13 @@ App-specific variables are fine, but deploys should not require local access to
 secret stores such as `pass` or a YubiKey. Use SecretSpec as a contract and make
 runtime secret resolution a platform concern.
 
+If `secretspec.toml` exists in the app repository, `mele:deploy` copies it to
+MeLE with `sudo mele-app update-secretspec <app> -` before streaming the image.
+The host validates the configured profile (default `prod`) against
+`/etc/mele-apps/<app>.env` without resolving secret values. A missing profile or
+missing required keys fail the deploy before `podman load`, image tags, or
+service restarts. Mark optional values with `required = false`.
+
 ## Packaging contract
 
 The project must expose an OCI archive as flake output:
@@ -246,7 +253,8 @@ The imported module supplies:
 - `mele:health`
 - `mele:logs`
 
-`mele:deploy` builds `.#ociImage` locally, streams it over SSH, and runs
+`mele:deploy` updates the host SecretSpec contract when `secretspec.toml` is
+present, builds `.#ociImage` locally, streams it over SSH, and runs
 `sudo mele-app deploy` on the MeLE host.
 
 The default host is `hub@192.168.1.199`. Override it per command with:

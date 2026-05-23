@@ -59,6 +59,11 @@ in
       repo="$(git config --get remote.origin.url || true)"
       target="''${MELE_HOST:-${cfg.host}}"
 
+      if [ -f secretspec.toml ]; then
+        echo "Updating ${cfg.name} SecretSpec contract on $target"
+        ssh "$target" "sudo mele-app update-secretspec ${cfg.name} -" < secretspec.toml
+      fi
+
       echo "Building linux/amd64 OCI image locally and deploying ${cfg.name} release $release to $target"
       nix build --extra-experimental-features 'nix-command flakes' ${shellQuote cfg.ociImage}
       gzip -dc result | ssh "$target" \

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import tempfile
 import unittest
@@ -38,6 +39,11 @@ class MeleAppCliTests(unittest.TestCase):
                     "healthPath": "/health",
                     "serviceName": "mele-app-home.service",
                     "stateDir": str(state_dir or (tmp / "state")),
+                    "envFile": str(tmp / "home.env"),
+                    "secretspec": {
+                        "profile": "prod",
+                        "path": str((state_dir or (tmp / "state")) / "secretspec.toml"),
+                    },
                     "user": "app-home",
                 }
             }
@@ -103,6 +109,123 @@ class MeleAppCliTests(unittest.TestCase):
             with mock.patch("pathlib.Path.exists", side_effect=PermissionError("nope")):
                 exit_code = mele_app_cli.main(["--config", str(config), "releases", "home"])
         self.assertEqual(exit_code, 2)
+
+    def test_required_secretspec_keys_use_profile_and_required_flag(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            path = Path(raw_tmp) / "secretspec.toml"
+            path.write_text(
+                "[profiles.prod]\n"
+                "API_KEY = { description = \"required by default\" }\n"
+                "OPTIONAL_TOKEN = { required = false }\n"
+                "[profiles.dev]\n"
+                "DEV_ONLY = { description = \"ignored\" }\n"
+            )
+            self.assertEqual(
+                mele_app_cli.required_secretspec_keys(path, "prod"),
+                {"API_KEY"},
+            )
+
+    def test_env_file_keys_ignore_comments_and_export_prefixes(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            path = Path(raw_tmp) / "home.env"
+            path.write_text(
+                "# ignored\n"
+                "export API_KEY=secret\n"
+                "EMPTY=\n"
+                "QUOTED='value with spaces'\n"
+            )
+            self.assertEqual(
+                mele_app_cli.env_file_keys(path),
+                {"API_KEY", "EMPTY", "QUOTED"},
+            )
+
+    def test_update_secretspec_requires_root(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            config = self.write_config(tmp, state)
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=1000):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "update-secretspec",
+                    "home",
+                    "-",
+                ])
+            self.assertEqual(exit_code, 2)
+            self.assertFalse((state / "secretspec.toml").exists())
+
+    def test_update_secretspec_stores_contract_in_app_state(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            config = self.write_config(tmp, state)
+            payload = b"[profiles.prod]\nAPI_KEY = {}\n"
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli.sys, "stdin") as stdin:
+                stdin.buffer = io.BytesIO(payload)
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "update-secretspec",
+                    "home",
+                    "-",
+                ])
+            self.assertEqual(exit_code, 0)
+            self.assertEqual((state / "secretspec.toml").read_bytes(), payload)
+
+    def test_deploy_fails_before_load_when_secretspec_profile_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            config = self.write_config(tmp, state)
+            (state / "secretspec.toml").write_text(
+                "[profiles.default]\n"
+                "API_KEY = { description = \"required\" }\n"
+            )
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir") as ensure_runtime, \
+                    mock.patch.object(mele_app_cli, "capture_command") as run:
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "deploy",
+                    "home",
+                    "--release",
+                    "abc1234",
+                ])
+            self.assertEqual(exit_code, 2)
+            ensure_runtime.assert_not_called()
+            run.assert_not_called()
+
+    def test_deploy_fails_before_load_when_required_secret_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            config = self.write_config(tmp, state)
+            (state / "secretspec.toml").write_text(
+                "[profiles.prod]\n"
+                "API_KEY = { description = \"required\" }\n"
+                "OPTIONAL_TOKEN = { required = false }\n"
+            )
+            (tmp / "home.env").write_text("OPTIONAL_TOKEN=present\n")
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir") as ensure_runtime, \
+                    mock.patch.object(mele_app_cli, "capture_command") as run:
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "deploy",
+                    "home",
+                    "--release",
+                    "abc1234",
+                ])
+            self.assertEqual(exit_code, 2)
+            ensure_runtime.assert_not_called()
+            run.assert_not_called()
+            self.assertFalse((state / "current").exists())
 
     def test_deploy_loads_tags_restarts_and_records_release(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

@@ -12,6 +12,7 @@ import re
 import shlex
 import subprocess
 import sys
+import tomllib
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -19,6 +20,7 @@ from typing import Any, BinaryIO, Sequence
 
 DEFAULT_CONFIG = Path("/etc/mele-apps/config.json")
 LOADED_IMAGE_RE = re.compile(r"Loaded image(?:s)?:\s*(?P<image>\S+)")
+ENV_KEY_RE = re.compile(r"(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=")
 
 
 class CliError(Exception):
@@ -125,6 +127,72 @@ def append_jsonl(path: Path, record: dict[str, Any]) -> None:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
+def secretspec_path(app: dict[str, Any]) -> Path:
+    configured = app.get("secretspec", {}).get("path")
+    return Path(configured or Path(app["stateDir"]) / "secretspec.toml")
+
+
+def secretspec_profile(app: dict[str, Any]) -> str:
+    return str(app.get("secretspec", {}).get("profile") or "prod")
+
+
+def env_file_path(app: dict[str, Any]) -> Path:
+    return Path(app.get("envFile") or f"/etc/mele-apps/{app['name']}.env")
+
+
+def required_secretspec_keys(path: Path, profile: str) -> set[str]:
+    if not path.exists():
+        return set()
+    try:
+        data = tomllib.loads(path.read_text())
+    except tomllib.TOMLDecodeError as exc:
+        raise CliError(f"invalid SecretSpec TOML {path}: {exc}") from exc
+    profiles = data.get("profiles", {})
+    if not isinstance(profiles, dict):
+        raise CliError(f"invalid SecretSpec {path}: profiles must be a table")
+    if profile not in profiles:
+        raise CliError(f"SecretSpec {path} does not contain profile {profile!r}")
+    raw_profile = profiles[profile]
+    if not isinstance(raw_profile, dict):
+        raise CliError(
+            f"invalid SecretSpec {path}: profiles.{profile} must be a table"
+        )
+    required: set[str] = set()
+    for key, value in raw_profile.items():
+        if isinstance(value, dict) and value.get("required") is False:
+            continue
+        required.add(key)
+    return required
+
+
+def env_file_keys(path: Path) -> set[str]:
+    if not path.exists():
+        return set()
+    keys: set[str] = set()
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = ENV_KEY_RE.match(line)
+        if match:
+            keys.add(match.group("key"))
+    return keys
+
+
+def validate_secret_contract(app: dict[str, Any]) -> None:
+    required = required_secretspec_keys(secretspec_path(app), secretspec_profile(app))
+    if not required:
+        return
+    env_path = env_file_path(app)
+    present = env_file_keys(env_path)
+    missing = sorted(required - present)
+    if missing:
+        raise CliError(
+            f"{app['name']}: missing required secrets in {env_path}: "
+            + ", ".join(missing)
+        )
+
+
 def cmd_status(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return run_command([
         "systemctl",
@@ -178,8 +246,27 @@ def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_update_secretspec(app: dict[str, Any], args: argparse.Namespace) -> int:
+    require_root()
+    if args.source != "-":
+        raise CliError("update-secretspec currently reads from stdin; use '-'")
+    content = sys.stdin.buffer.read()
+    try:
+        tomllib.loads(content.decode())
+    except UnicodeDecodeError as exc:
+        raise CliError("SecretSpec must be UTF-8 TOML") from exc
+    except tomllib.TOMLDecodeError as exc:
+        raise CliError(f"invalid SecretSpec TOML: {exc}") from exc
+    destination = secretspec_path(app)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(content)
+    print(f"{app['name']}: updated SecretSpec contract at {destination}")
+    return 0
+
+
 def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
     require_root()
+    validate_secret_contract(app)
     ensure_runtime_dir(app)
     load = capture_command(app_command(app, ["podman", "load"]), stdin=sys.stdin.buffer)
     load_output = load.stdout + load.stderr
@@ -235,6 +322,15 @@ def build_parser() -> argparse.ArgumentParser:
         sub = subparsers.add_parser(command)
         sub.add_argument("app")
 
+    update_secretspec = subparsers.add_parser("update-secretspec")
+    update_secretspec.add_argument("app")
+    update_secretspec.add_argument(
+        "source",
+        nargs="?",
+        default="-",
+        help="SecretSpec TOML source; only '-' is supported",
+    )
+
     deploy = subparsers.add_parser("deploy")
     deploy.add_argument("app")
     deploy.add_argument("--release", required=True)
@@ -266,6 +362,8 @@ def dispatch(app: dict[str, Any], args: argparse.Namespace) -> int:
         return cmd_health(app, args)
     if args.command == "releases":
         return cmd_releases(app, args)
+    if args.command == "update-secretspec":
+        return cmd_update_secretspec(app, args)
     if args.command == "deploy":
         if args.archive != "-":
             raise CliError("deploy currently reads image archives from stdin; use '-'")
