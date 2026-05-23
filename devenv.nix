@@ -92,11 +92,11 @@ in
       "$@"
   '';
 
-  scripts."mele-app:create".exec = ''
+  scripts."mele:create-app".exec = ''
     ${pkgs.python3}/bin/python3 ./scripts/mele-app-create.py "$@"
   '';
 
-  scripts."mele-app:onboard".exec = ''
+  scripts."mele:onboard-app".exec = ''
     ${pkgs.python3}/bin/python3 ./scripts/mele-app-onboard.py "$@"
   '';
 

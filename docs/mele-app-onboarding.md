@@ -1,11 +1,135 @@
 # Onboarding existing projects to MeLE apps
 
-MeLE app projects import a central devenv module from this repository. They do not copy scripts from `nixos-config`.
+This document is the contract for adapting an existing project to run on the
+MeLE personal PaaS.
 
-Use `mele-app:onboard` from this repository to print the snippets for an existing project:
+MeLE app projects import a central devenv module from this repository. They do
+not copy scripts from `nixos-config` and do not need this repository checked out
+at runtime.
+
+## Platform model
+
+- Caddy owns public routing and TLS.
+- Each app runs as its own Unix user on MeLE.
+- Each app is deployed as an OCI image streamed over SSH; there is no registry
+  requirement yet.
+- Normal app deploys must not require `nixos-rebuild switch`.
+- App slot onboarding may require MeLE activation; app releases must not.
+- The runtime host is `x86_64-linux`; images must be `linux/amd64`.
+- The app process listens inside the container on `PORT`, defaulting to `8080`.
+- Persistent private app data lives at `/data` in the container.
+
+## App HTTP contract
+
+Every MeLE app should expose these endpoints on the same HTTP server:
+
+| Endpoint | Required | Purpose |
+|---|---:|---|
+| `/health` | yes | Liveness/availability probe. Return `200` when the app is ready to serve traffic. |
+| `/metrics` | yes | Prometheus-format metrics for observability. Must not expose secrets or private domain data. |
+| `/` | app-specific | Public app entrypoint, usually a static UI or API root. |
+
+Recommended `/health` response:
+
+```json
+{"status":"ok"}
+```
+
+Recommended `/metrics` minimum:
+
+- process/runtime metrics if available;
+- request count by method/path/status;
+- request duration histogram;
+- app build/version info.
+
+Metrics labels must remain low-cardinality. Do not put user IDs, player names,
+card titles, sync-space IDs, tokens, or free-form paths in labels.
+
+## Runtime environment contract
+
+Apps should support these runtime variables:
+
+| Variable | Purpose |
+|---|---|
+| `PORT` | Container listen port. Default to `8080`. |
+| `APP_DATA_DIR` | Persistent data directory. Default to `/data` when deployed. |
+| `APP_VERSION` | Optional release/build identifier for logs and metrics. |
+
+App-specific variables are fine, but deploys should not require local access to
+secret stores such as `pass` or a YubiKey. Use SecretSpec as a contract and make
+runtime secret resolution a platform concern.
+
+## Packaging contract
+
+The project must expose an OCI archive as flake output:
+
+```text
+.#ociImage
+```
+
+`.#ociImage` must be a gzipped OCI/Docker-compatible image archive that Podman
+can load on MeLE.
+
+The image should:
+
+- target `linux/amd64`;
+- run one foreground process;
+- listen on `0.0.0.0:${PORT:-8080}`;
+- write durable state only under `/data`;
+- avoid writing to the Nix store or application source directory;
+- avoid embedding production secrets;
+- include only production runtime dependencies.
+
+Pure Go apps can use `pkgs.pkgsCross.gnu64` and `dockerTools.buildLayeredImage`.
+Node/TypeScript apps should build production artifacts locally with Nix and then
+package only the runtime closure into an amd64 Linux image.
+
+## Node/TypeScript and PWA guidance
+
+Do not deploy Vite's development server. Do not rely on `npm run preview` as the
+production server unless it has the required health, metrics, persistence, and
+routing behavior.
+
+For apps like Hédonis that have both a PWA and a backend:
+
+- build the static frontend (`dist/`) during the image build;
+- run a small production Node server in the container;
+- serve the static PWA and API/SSE backend from the same origin;
+- expose `/health` and `/metrics` from that production server;
+- bind to `0.0.0.0:${PORT:-8080}`;
+- store SQLite or other durable files under `/data`.
+
+Same-origin deployment is preferred. For example:
+
+```text
+https://hedonis.home.behaghel.org/          -> static PWA
+https://hedonis.home.behaghel.org/sync/...  -> encrypted sync API
+https://hedonis.home.behaghel.org/events    -> SSE stream
+https://hedonis.home.behaghel.org/health    -> health
+https://hedonis.home.behaghel.org/metrics   -> metrics
+```
+
+Avoid production builds that hardcode LAN or loopback backend URLs such as
+`http://127.0.0.1:8787`. If the frontend needs a backend URL, prefer relative
+same-origin paths.
+
+For Hédonis specifically:
+
+- `HEDONIS_SYNC_HOST` should be `0.0.0.0` in the container;
+- `HEDONIS_SYNC_DB_PATH` should point under `/data`, for example
+  `/data/sync.sqlite`;
+- raw inspection endpoints such as `/inspect` must remain disabled by default;
+- logs and metrics must not expose plaintext card/commitment/player data or
+  bearer tokens;
+- SSE events should remain operational hints only, such as `records-available`.
+
+## Import the MeLE devenv module
+
+Use `mele:onboard-app` from this repository to print snippets for an existing
+project:
 
 ```sh
-devenv -q shell -- mele-app:onboard ~/ws/hedonis --app-name hedonis
+devenv -q shell -- mele:onboard-app ~/ws/hedonis --app-name hedonis
 ```
 
 Add the module import to the project's `devenv.yaml`:
@@ -31,7 +155,6 @@ Then enable the app in the project's `devenv.nix`:
 }
 ```
 
-The project must expose an OCI archive as flake output `.#ociImage`.
 The imported module supplies:
 
 - `mele:deploy`
@@ -40,7 +163,8 @@ The imported module supplies:
 - `mele:health`
 - `mele:logs`
 
-`mele:deploy` builds `.#ociImage` locally, streams it over SSH, and runs `sudo mele-app deploy` on the MeLE host.
+`mele:deploy` builds `.#ociImage` locally, streams it over SSH, and runs
+`sudo mele-app deploy` on the MeLE host.
 
 The default host is `hub@192.168.1.199`. Override it per command with:
 
@@ -48,4 +172,53 @@ The default host is `hub@192.168.1.199`. Override it per command with:
 MELE_HOST=hub@other-host mele:deploy
 ```
 
-For MeLE, images should target `linux/amd64`. Pure Go apps can use `pkgs.pkgsCross.gnu64`. Node/TypeScript apps should build their production artifact locally and package it with `dockerTools.buildLayeredImage` as an amd64 Linux image.
+## Create the MeLE app slot
+
+Before the first deploy, create an app slot in `nixos-config`:
+
+```sh
+devenv -q shell -- mele:create-app hedonis
+```
+
+For apps that implement `/metrics` as required, keep metrics enabled. If an app
+is temporarily missing metrics during early development, create the slot with
+`--no-metrics` and treat adding `/metrics` as follow-up work.
+
+After creating a new slot, the operator activates MeLE manually:
+
+```sh
+devenv -q shell -- mele:activate
+```
+
+Do not expect normal app releases to require this activation step.
+
+## Release validation checklist
+
+After `mele:deploy`:
+
+```sh
+mele:status
+mele:health
+curl -fsS https://<app-domain>/health
+curl -fsS https://<app-domain>/metrics | head
+```
+
+Expected:
+
+- the systemd service is active;
+- `/health` returns HTTP `200`;
+- `/metrics` returns Prometheus text format;
+- Caddy routes public HTTPS to the app;
+- the app listens only through its configured localhost host port on MeLE;
+- release metadata appears in `mele-app releases <app>`.
+
+## Operational expectations
+
+- Log concise operational events, not request bodies or private payloads.
+- Prefer structured logs if practical.
+- Keep metrics useful but privacy-preserving.
+- Persist user data under `/data` only.
+- Document backup/restore for any durable state before relying on the app for
+  important data.
+- Design migrations to run safely on container start or provide an explicit
+  admin command before deployment.

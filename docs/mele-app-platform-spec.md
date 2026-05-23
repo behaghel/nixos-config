@@ -59,7 +59,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | Backups | Per-app backup default enabled for data/state, not images | Backs up irreplaceable data while avoiding large image archives. |
 | Restore validation | Manual first, later scheduled; include non-destructive restore verification helper/runbook | Backup must be proven restorable without risking live data. |
 | Module location | Start local at `configurations/nixos/mele-hub/apps.nix`, with app slot files under `configurations/nixos/mele-hub/apps/` | Keeps experimental MeLE-specific platform out of generic modules initially while making app onboarding easy to automate. |
-| App onboarding | Provide a `devenv` script `mele-app:create` that creates a per-app slot file using convention over configuration | New app slots should be guided, consistent, and low ceremony while remaining declarative. |
+| App onboarding | Provide a `devenv` script `mele:create-app` that creates a per-app slot file using convention over configuration | New app slots should be guided, consistent, and low ceremony while remaining declarative. |
 | App slot convention | Minimal per-app files should usually declare only name-derived/defaultable differences: domain override if needed, host port, exposure, health/metrics toggles | Avoids heavy repetitive wiring for every app. |
 | Devenv extension | Defer to v2, keep task/env conventions extension-ready | Avoids expanding v1 while preserving future native workflow. |
 
@@ -83,7 +83,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - [ ] AC-16: Given a backup has completed, when the non-destructive restore verification is run for `home`, then it restores app data/state to a temporary location and verifies a known marker without overwriting live app data.
 - [ ] AC-17: Given direct public Grafana port forwarding has been removed, when Grafana is later exposed, then it is reachable behind Caddy with authentication rather than directly on public port `3000`.
 - [ ] AC-18: Given the blueprint app repo exists, when `devenv tasks run mele:deploy` is run there, then it builds the app OCI image with `devenv`, updates SecretSpec metadata, streams the image to MeLE over SSH, and completes without requiring a MeLE switch.
-- [ ] AC-19: Given a developer runs `mele-app:create notes` from the devenv shell, when the command completes, then it creates a dedicated declarative app slot file under `configurations/nixos/mele-hub/apps/`, chooses the next available host port by convention, defaults the public domain to `notes.home.behaghel.org`, and Nix evaluation includes `notes` in `/etc/mele-apps/config.json`.
+- [ ] AC-19: Given a developer runs `mele:create-app notes` from the devenv shell, when the command completes, then it creates a dedicated declarative app slot file under `configurations/nixos/mele-hub/apps/`, chooses the next available host port by convention, defaults the public domain to `notes.home.behaghel.org`, and Nix evaluation includes `notes` in `/etc/mele-apps/config.json`.
 
 ## Invariants
 
@@ -110,7 +110,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - Firewall/Caddy/Podman/systemd configuration needed for the app substrate
 - Documentation/runbooks under `docs/`
 - A new external blueprint Go app repository to be created and worked on after the host substrate exists
-- `devenv.nix` for a local `mele-app:create` onboarding script
+- `devenv.nix` for a local `mele:create-app` onboarding script
 
 **Must not modify without separate approval:**
 
@@ -144,12 +144,12 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | AC-16 | Run restore verification helper/runbook and verify temporary restore marker | Partial |
 | AC-17 | Confirm router has no `3000` forward; later verify Grafana Caddy route/auth | No |
 | AC-18 | From blueprint repo, run `devenv tasks run mele:deploy`; verify MeLE generation unchanged and only app service restarted | No |
-| AC-19 | Run `mele-app:create notes` from the devenv shell; inspect new app slot file and evaluate generated config JSON for `notes` | Partial |
+| AC-19 | Run `mele:create-app notes` from the devenv shell; inspect new app slot file and evaluate generated config JSON for `notes` | Partial |
 
 ## Implementation Slices
 
 1. **Host substrate skeleton**: create local `apps.nix`, slot schema, app slot file convention under `configurations/nixos/mele-hub/apps/`, `home` slot, generated config JSON, directories/users, Podman package/config.
-2. **App slot onboarding script**: add `mele-app:create <name>` to create per-app slot files using defaults and the next available port.
+2. **App slot onboarding script**: add `mele:create-app <name>` to create per-app slot files using defaults and the next available port.
 3. **Caddy edge**: enable Caddy, open `80/443`, route `home.behaghel.org`, unknown-host 404, HTTP-01 TLS.
 4. **Systemd app runner**: generate `mele-app-home.service` using `localhost/home:current`, localhost-only port binding, data mount, env file.
 5. **`mele-app` CLI v1**: Python CLI with config loading, app validation, status/logs/health/releases, `update-secretspec`, deploy happy path.

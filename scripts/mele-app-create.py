@@ -118,9 +118,9 @@ def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
 
 
 def validate_generated_config(app_name: str) -> None:
-    # Flake evaluation ignores untracked files; intent-to-add is enough for
-    # local validation.
-    run(["git", "add", "-N", str(APPS_DIR / f"{app_name}.nix")])
+    # Flake evaluation ignores untracked files. Stage the generated slot before
+    # validation so getFlake sees the same app file the user is about to commit.
+    run(["git", "add", str(APPS_DIR / f"{app_name}.nix")])
     expr = (
         '(builtins.getAttr "mele-apps/config.json" '
         '(builtins.getFlake "git+file://'
@@ -172,6 +172,14 @@ def main() -> int:
     print(f"  domain: {domain}")
     print(f"  hostPort: {host_port}")
     print("Validated generated /etc/mele-apps/config.json")
+    print()
+    print("Next steps:")
+    print(f"  git add {rel_target}")
+    print("  git commit -m 'mele: add " + args.name + " app slot'")
+    print("  devenv -q shell -- mele:activate")
+    print()
+    print("Activation is required for this new app slot. Normal app releases after")
+    print("this onboarding step should use mele:deploy from the app project instead.")
     return 0
 
 
