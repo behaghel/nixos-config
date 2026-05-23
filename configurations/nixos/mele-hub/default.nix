@@ -296,6 +296,11 @@ in
       configDir = syncthingConfigDir;
       guiAddress = "127.0.0.1:8384";
       openDefaultPorts = false;
+      # Devices and folders for this hub are managed through Syncthing's GUI.
+      # Keep Nix from pruning them whenever we declare global Syncthing options
+      # below; otherwise peers are forgotten and show up as "unknown device".
+      overrideDevices = false;
+      overrideFolders = false;
       settings = {
         options = {
           relaysEnabled = true;

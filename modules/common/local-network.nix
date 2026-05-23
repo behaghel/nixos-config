@@ -31,7 +31,10 @@ in
     })
 
     (lib.mkIf pkgs.stdenv.isDarwin {
-      system.activationScripts.localNetworkHosts.text = ''
+      # nix-darwin only runs a fixed set of activation script phases. Append to
+      # postActivation instead of defining a custom activationScripts key, which
+      # would evaluate but never execute.
+      system.activationScripts.postActivation.text = lib.mkAfter ''
         echo "merging local network host aliases into /etc/hosts..." >&2
 
         hosts_file=/etc/hosts
@@ -56,12 +59,19 @@ in
         /bin/cp "$tmp_clean" "$tmp_final"
 
         if [ -s ${entriesFile} ]; then
+          needs_separator=
           if [ -s "$tmp_final" ]; then
-            printf '\n' >> "$tmp_final"
+            needs_separator=1
           fi
-          printf '%s\n' ${lib.escapeShellArg markerStart} >> "$tmp_final"
-          /bin/cat ${entriesFile} >> "$tmp_final"
-          printf '\n%s\n' ${lib.escapeShellArg markerEnd} >> "$tmp_final"
+
+          {
+            if [ -n "$needs_separator" ]; then
+              printf '\n'
+            fi
+            printf '%s\n' ${lib.escapeShellArg markerStart}
+            /bin/cat ${entriesFile}
+            printf '\n%s\n' ${lib.escapeShellArg markerEnd}
+          } >> "$tmp_final"
         fi
 
         if [ ! -f "$hosts_file" ] || ! /usr/bin/cmp -s "$tmp_final" "$hosts_file"; then

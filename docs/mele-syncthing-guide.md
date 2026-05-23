@@ -22,6 +22,13 @@
   - The script wipes the disk, creates EFI/root/syncthing/swap, formats, mounts `/mnt`, `/mnt/boot`, `/mnt/srv/syncthing`, and enables swap. With `--install` it also copies the built system closure to `/mnt` and runs `nixos-install --system …`.
 - After install completes, reboot without the USB key; the system should boot into the configured `mele-hub` profile with Syncthing enabled and SSH authorized keys pre-seeded.
 
+## Activation and updates
+- From the repo root, activate the configured MeLE host with:
+  - `devenv -q shell -- mele:activate`
+- This wraps the remote `nixos-rebuild switch --fast --flake .#mele-hub` invocation using `hub@192.168.1.199` as both build and target host.
+- If Home Manager needs the password store on first setup, pre-clone it interactively with SSH agent forwarding so your local YubiKey can authorize GitLab access:
+  - `ssh -A hub@192.168.1.199 'git clone git@gitlab.com:behaghel/pass.git ~/.password-store'`
+
 ## Troubleshooting
 - If the ISO build fails on remote builders, rerun with `KEYS_DIR=/path/to/keys` if keys are stored elsewhere.
 - Verify the USB write by re-plugging and checking `lsblk` shows the ISO9660 partition.

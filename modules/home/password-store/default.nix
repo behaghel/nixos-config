@@ -1,4 +1,3 @@
-
 { lib, pkgs, config, ... }:
 
 let
@@ -11,16 +10,17 @@ let
   expectSmartcard = config.programs.gpg.expectSmartcard;
   passPackage =
     if expectSmartcard then
-      pkgs.pass.overrideAttrs (old: {
-        postInstall =
-          (old.postInstall or "")
-          + ''
-            substituteInPlace "$out/bin/pass" \
-              --replace 'GPG="gpg"' 'GPG="${gpgBinary}"' \
-              --replace 'which gpg2 &>/dev/null && GPG="gpg2"' '# gpg2 check disabled'
-          '';
-        doInstallCheck = false;
-      })
+      pkgs.pass.overrideAttrs
+        (old: {
+          postInstall =
+            (old.postInstall or "")
+            + ''
+              substituteInPlace "$out/bin/pass" \
+                --replace 'GPG="gpg"' 'GPG="${gpgBinary}"' \
+                --replace 'which gpg2 &>/dev/null && GPG="gpg2"' '# gpg2 check disabled'
+            '';
+          doInstallCheck = false;
+        })
     else
       pkgs.pass;
   guiTarget = pkgs.stdenv.isDarwin || (pkgs.stdenv.isLinux && config.hub.linux.graphicalTools.enable);
@@ -41,7 +41,7 @@ in
 
   home.packages = lib.optionals guiTarget [ pkgs.browserpass ];
 
-  home.activation.ensurePasswordStore = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+  home.activation.ensurePasswordStore = lib.hm.dag.entryAfter [ "writeBoundary" "preseedGitKnownHosts" ] ''
     set -euo pipefail
     if [ ! -d "${passwordStoreDir}/.git" ]; then
       rm -rf "${passwordStoreDir}"

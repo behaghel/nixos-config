@@ -2,7 +2,9 @@
 
 let
   codebergEd25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIVIC02vnjFyL+I4RHfvIGNtOgJMe769VTF1VR4EB3ZB";
-  codebergEcdsa   = "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBL2pDxWr18SoiDJCGZ5LmxPygTlPu+cCKSkpqkvCyQzl5xmIMeKNdfdBpfbCGDPoZQghePzFZkKJNR/v9Win3Sc=";
+  codebergEcdsa = "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBL2pDxWr18SoiDJCGZ5LmxPygTlPu+cCKSkpqkvCyQzl5xmIMeKNdfdBpfbCGDPoZQghePzFZkKJNR/v9Win3Sc=";
+  gitlabEd25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf";
+  gitlabEcdsa = "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBFSMqzJeV9rUzU4kWitGjeR4PWSa29SPqJ1fVkhtj3Hw9xjLVXVYrU9QlYWrOLXBpQ6KWjbjTDTdDkoohFzgbEY=";
 in
 {
   programs.ssh = {
@@ -22,10 +24,10 @@ in
     };
   };
 
-  # Preseed Codeberg host keys into ~/.ssh/known_hosts idempotently.
+  # Preseed Git host keys into ~/.ssh/known_hosts idempotently.
   # Using activation avoids the need for wildcard includes, which some
   # OpenSSH builds may not expand in UserKnownHostsFile.
-  home.activation.preseedCodebergKnownHosts = ''
+  home.activation.preseedGitKnownHosts = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     set -euo pipefail
     sshdir="$HOME/.ssh"
     kh="$sshdir/known_hosts"
@@ -41,5 +43,7 @@ in
     }
     add_if_missing "codeberg.org ${codebergEd25519}"
     add_if_missing "codeberg.org ${codebergEcdsa}"
+    add_if_missing "gitlab.com ${gitlabEd25519}"
+    add_if_missing "gitlab.com ${gitlabEcdsa}"
   '';
 }

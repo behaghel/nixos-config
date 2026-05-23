@@ -72,7 +72,7 @@ in
   ];
   scripts.mail-tray-tests.exec = lib.strings.concatStringsSep "\n" [
     (if pkgs.stdenv.isLinux then ""
-     else "echo 'mail-tray tests are Linux-only (GTK/appindicator); skipping.'; exit 0")
+    else "echo 'mail-tray tests are Linux-only (GTK/appindicator); skipping.'; exit 0")
     ''
       export MAIL_TRAY_GI_TYPELIB_PATH=${giTypelibPath}
       export GI_TYPELIB_PATH=${giTypelibPath}
@@ -81,6 +81,16 @@ in
       pytest modules/home/mail/tray-src "$@"
     ''
   ];
+  scripts."mele:activate".exec = ''
+    nix run github:NixOS/nixpkgs/nixos-25.05#nixos-rebuild -- \
+      switch \
+      --fast \
+      --flake .#mele-hub \
+      --build-host hub@192.168.1.199 \
+      --target-host hub@192.168.1.199 \
+      --use-remote-sudo \
+      "$@"
+  '';
 
   git-hooks = {
     hooks.mail-sync-tests = {
