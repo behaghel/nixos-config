@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   cfg = config.services.meleApps;
@@ -23,6 +23,57 @@ let
     (fileName: _:
       lib.nameValuePair (lib.removeSuffix ".nix" fileName) (import (./apps + "/${fileName}")))
     appFiles;
+
+  appServiceScript = name: app:
+    pkgs.writeShellScript "mele-app-${name}-run" ''
+      set -euo pipefail
+      env_args=()
+      if [ -f /etc/mele-apps/${name}.env ]; then
+        env_args+=(--env-file /etc/mele-apps/${name}.env)
+      fi
+      exec ${pkgs.podman}/bin/podman run \
+        --rm \
+        --replace \
+        --name mele-app-${name} \
+        --userns=keep-id \
+        --cap-drop=all \
+        --security-opt=no-new-privileges \
+        --pids-limit=512 \
+        --publish 127.0.0.1:${toString app.hostPort}:${toString app.containerPort} \
+        --volume /srv/apps/${name}/data:/data:Z \
+        --env APP_DATA_DIR=/data \
+        "''${env_args[@]}" \
+        localhost/${name}:current
+    '';
+
+  appService = name: app: {
+    description = "MeLE app ${name}";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    path = [ pkgs.podman ];
+    serviceConfig = {
+      User = appUser name;
+      Group = appUser name;
+      WorkingDirectory = "/srv/apps/${name}";
+      RuntimeDirectory = "mele-app-${name}";
+      Environment = "XDG_RUNTIME_DIR=/run/mele-app-${name}";
+      ExecCondition = "${pkgs.podman}/bin/podman image exists localhost/${name}:current";
+      ExecStartPre = [ "-${pkgs.podman}/bin/podman rm -f mele-app-${name}" ];
+      ExecStart = appServiceScript name app;
+      Restart = "on-failure";
+      RestartSec = "5s";
+      TimeoutStartSec = "60s";
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      ProtectSystem = "strict";
+      ReadWritePaths = [
+        "/srv/apps/${name}"
+        "/run/mele-app-${name}"
+        "/tmp"
+      ];
+    };
+  };
 
   caddyVirtualHost = _name: app: {
     extraConfig = ''
@@ -149,6 +200,8 @@ in
 
       networking.firewall.allowedTCPPorts = [ 80 443 ];
 
+      virtualisation.podman.enable = true;
+
       services.caddy = {
         enable = true;
         virtualHosts = (lib.mapAttrs'
@@ -160,6 +213,9 @@ in
           '';
         };
       };
+
+      systemd.services = lib.mapAttrs' (name: app:
+        lib.nameValuePair "mele-app-${name}" (appService name app)) cfg.apps;
 
       systemd.tmpfiles.rules = [
         "d /etc/mele-apps 0755 root root -"
