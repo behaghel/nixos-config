@@ -12,6 +12,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 import tomllib
 import urllib.error
 import urllib.request
@@ -193,6 +194,47 @@ def validate_secret_contract(app: dict[str, Any]) -> None:
         )
 
 
+def current_release_path(app: dict[str, Any]) -> Path:
+    return Path(app["stateDir"]) / "current"
+
+
+def read_current_release(app: dict[str, Any]) -> str | None:
+    path = current_release_path(app)
+    if not path.exists():
+        return None
+    release = path.read_text().strip()
+    return release or None
+
+
+def health_url(app: dict[str, Any]) -> str | None:
+    health_path = app.get("healthPath")
+    if not health_path:
+        return None
+    return f"http://127.0.0.1:{app['hostPort']}{health_path}"
+
+
+def health_check_once(app: dict[str, Any]) -> bool:
+    url = health_url(app)
+    if url is None:
+        return True
+    try:
+        with urllib.request.urlopen(url, timeout=5) as response:
+            return 200 <= response.status < 300
+    except (urllib.error.HTTPError, urllib.error.URLError):
+        return False
+
+
+def poll_health(app: dict[str, Any], attempts: int = 12, delay: int = 5) -> bool:
+    if health_url(app) is None:
+        return True
+    for attempt in range(attempts):
+        if health_check_once(app):
+            return True
+        if attempt != attempts - 1:
+            time.sleep(delay)
+    return False
+
+
 def cmd_status(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return run_command([
         "systemctl",
@@ -213,11 +255,10 @@ def cmd_logs(app: dict[str, Any], args: argparse.Namespace) -> int:
 
 
 def cmd_health(app: dict[str, Any], _args: argparse.Namespace) -> int:
-    health_path = app.get("healthPath")
-    if not health_path:
+    url = health_url(app)
+    if url is None:
         print(f"{app['name']}: no healthPath configured")
         return 0
-    url = f"http://127.0.0.1:{app['hostPort']}{health_path}"
     try:
         with urllib.request.urlopen(url, timeout=5) as response:
             status = response.status
@@ -264,26 +305,7 @@ def cmd_update_secretspec(app: dict[str, Any], args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
-    require_root()
-    validate_secret_contract(app)
-    ensure_runtime_dir(app)
-    load = capture_command(app_command(app, ["podman", "load"]), stdin=sys.stdin.buffer)
-    load_output = load.stdout + load.stderr
-    if load.returncode != 0:
-        raise CliError(f"podman load failed for {app['name']}: {load_output.strip()}")
-    loaded_image = args.loaded_image or parse_loaded_image(load_output)
-    release_image = f"localhost/{app['name']}:{args.release}"
-    current_image = f"localhost/{app['name']}:current"
-
-    for target in (release_image, current_image):
-        tag = capture_command(app_command(app, ["podman", "tag", loaded_image, target]))
-        if tag.returncode != 0:
-            raise CliError(
-                f"podman tag failed for {target}: "
-                f"{(tag.stdout + tag.stderr).strip()}"
-            )
-
+def restart_service(app: dict[str, Any]) -> None:
     restart = capture_command(["systemctl", "restart", app["serviceName"]])
     if restart.returncode != 0:
         raise CliError(
@@ -291,6 +313,29 @@ def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
             f"{(restart.stdout + restart.stderr).strip()}"
         )
 
+
+def tag_image(app: dict[str, Any], source: str, target: str) -> None:
+    tag = capture_command(app_command(app, ["podman", "tag", source, target]))
+    if tag.returncode != 0:
+        raise CliError(
+            f"podman tag failed for {target}: "
+            f"{(tag.stdout + tag.stderr).strip()}"
+        )
+
+
+def app_image_exists(app: dict[str, Any], image: str) -> bool:
+    exists = capture_command(app_command(app, ["podman", "image", "exists", image]))
+    return exists.returncode == 0
+
+
+def deploy_record(
+    app: dict[str, Any],
+    args: argparse.Namespace,
+    release_image: str,
+    status: str,
+    previous_release: str | None = None,
+    rollback_status: str | None = None,
+) -> dict[str, Any]:
     record = {
         "app": app["name"],
         "release": args.release,
@@ -300,10 +345,76 @@ def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
         "dirty": args.dirty,
         "deployer": args.deployer or os.environ.get("SUDO_USER") or os.environ.get("USER"),
         "deployed_at": dt.datetime.now(dt.UTC).isoformat(),
-        "status": "deployed",
+        "status": status,
     }
+    if previous_release is not None:
+        record["previous_release"] = previous_release
+    if rollback_status is not None:
+        record["rollback_status"] = rollback_status
+    return record
+
+
+def rollback_after_failed_health(
+    app: dict[str, Any],
+    args: argparse.Namespace,
+    release_image: str,
+    previous_release: str | None,
+) -> int:
+    rollback_status = "none"
+    if previous_release is not None:
+        previous_image = f"localhost/{app['name']}:{previous_release}"
+        current_image = f"localhost/{app['name']}:current"
+        if app_image_exists(app, previous_image):
+            tag_image(app, previous_image, current_image)
+            restart_service(app)
+            if poll_health(app):
+                rollback_status = "succeeded"
+                current_release_path(app).write_text(previous_release + "\n")
+            else:
+                rollback_status = "failed"
+        else:
+            rollback_status = "unavailable"
+
+    record = deploy_record(
+        app,
+        args,
+        release_image,
+        "failed_health",
+        previous_release,
+        rollback_status,
+    )
     append_jsonl(Path(app["stateDir"]) / "releases.jsonl", record)
-    (Path(app["stateDir"]) / "current").write_text(args.release + "\n")
+    print(
+        f"{app['name']}: deploy {args.release} failed health check; "
+        f"rollback {rollback_status}"
+    )
+    return 2
+
+
+def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
+    require_root()
+    validate_secret_contract(app)
+    ensure_runtime_dir(app)
+    previous_release = read_current_release(app)
+    load = capture_command(app_command(app, ["podman", "load"]), stdin=sys.stdin.buffer)
+    load_output = load.stdout + load.stderr
+    if load.returncode != 0:
+        raise CliError(f"podman load failed for {app['name']}: {load_output.strip()}")
+    loaded_image = args.loaded_image or parse_loaded_image(load_output)
+    release_image = f"localhost/{app['name']}:{args.release}"
+    current_image = f"localhost/{app['name']}:current"
+
+    for target in (release_image, current_image):
+        tag_image(app, loaded_image, target)
+
+    restart_service(app)
+
+    if not poll_health(app):
+        return rollback_after_failed_health(app, args, release_image, previous_release)
+
+    record = deploy_record(app, args, release_image, "deployed")
+    append_jsonl(Path(app["stateDir"]) / "releases.jsonl", record)
+    current_release_path(app).write_text(args.release + "\n")
     print(f"{app['name']}: deployed {args.release}")
     return 0
 

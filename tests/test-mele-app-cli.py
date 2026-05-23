@@ -227,6 +227,60 @@ class MeleAppCliTests(unittest.TestCase):
             run.assert_not_called()
             self.assertFalse((state / "current").exists())
 
+    def test_deploy_rolls_back_to_previous_release_when_health_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            (state / "current").write_text("prev123\n")
+            config = self.write_config(tmp, state)
+            completed = [
+                subprocess_result("Loaded image: localhost/source:latest\n"),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(""),
+            ]
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir"), \
+                    mock.patch.object(mele_app_cli, "capture_command", side_effect=completed) as run, \
+                    mock.patch.object(mele_app_cli, "poll_health", side_effect=[False, True]):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "deploy",
+                    "home",
+                    "--release",
+                    "bad123",
+                ])
+            self.assertEqual(exit_code, 2)
+            self.assertEqual(
+                run.call_args_list[3].args[0],
+                ["systemctl", "restart", "mele-app-home.service"],
+            )
+            self.assertIn(
+                "podman image exists localhost/home:prev123",
+                run.call_args_list[4].args[0][-1],
+            )
+            self.assertIn(
+                "podman tag localhost/home:prev123 localhost/home:current",
+                run.call_args_list[5].args[0][-1],
+            )
+            self.assertEqual(
+                run.call_args_list[6].args[0],
+                ["systemctl", "restart", "mele-app-home.service"],
+            )
+            self.assertEqual((state / "current").read_text(), "prev123\n")
+            records = [
+                json.loads(line)
+                for line in (state / "releases.jsonl").read_text().splitlines()
+            ]
+            self.assertEqual(records[-1]["status"], "failed_health")
+            self.assertEqual(records[-1]["previous_release"], "prev123")
+            self.assertEqual(records[-1]["rollback_status"], "succeeded")
+
     def test_deploy_loads_tags_restarts_and_records_release(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -240,7 +294,8 @@ class MeleAppCliTests(unittest.TestCase):
             ]
             with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
                     mock.patch.object(mele_app_cli, "ensure_runtime_dir") as ensure_runtime, \
-                    mock.patch.object(mele_app_cli, "capture_command", side_effect=completed) as run:
+                    mock.patch.object(mele_app_cli, "capture_command", side_effect=completed) as run, \
+                    mock.patch.object(mele_app_cli, "poll_health", return_value=True):
                 exit_code = mele_app_cli.main([
                     "--config",
                     str(config),
