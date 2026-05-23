@@ -46,6 +46,16 @@ let
         localhost/${name}:current
     '';
 
+  meleAppCli = pkgs.writeShellApplication {
+    name = "mele-app";
+    runtimeInputs = [
+      pkgs.systemd
+    ];
+    text = ''
+      exec ${pkgs.python3}/bin/python3 ${../../../scripts/mele_app_cli.py} "$@"
+    '';
+  };
+
   appRuntimePath = lib.makeBinPath [
     pkgs.podman
     pkgs.shadow
@@ -233,6 +243,8 @@ in
 
       networking.firewall.allowedTCPPorts = [ 80 443 ];
 
+      environment.systemPackages = [ meleAppCli ];
+
       virtualisation.podman.enable = true;
 
       services.caddy = {
@@ -247,8 +259,10 @@ in
         };
       };
 
-      systemd.services = lib.mapAttrs' (name: app:
-        lib.nameValuePair "mele-app-${name}" (appService name app)) cfg.apps;
+      systemd.services = lib.mapAttrs'
+        (name: app:
+          lib.nameValuePair "mele-app-${name}" (appService name app))
+        cfg.apps;
 
       systemd.tmpfiles.rules = [
         "d /etc/mele-apps 0755 root root -"
