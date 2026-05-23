@@ -24,6 +24,16 @@ let
       lib.nameValuePair (lib.removeSuffix ".nix" fileName) (import (./apps + "/${fileName}")))
     appFiles;
 
+  caddyVirtualHost = _name: app: {
+    extraConfig = ''
+      encode zstd gzip
+      reverse_proxy 127.0.0.1:${toString app.hostPort}
+      handle_errors {
+        respond "App unavailable" {err.status_code}
+      }
+    '';
+  };
+
   appToJson = name: app: {
     inherit name;
     inherit (app) domain exposure hostPort containerPort healthPath keepReleases backup;
@@ -137,21 +147,39 @@ in
         apps = lib.mapAttrs appToJson cfg.apps;
       };
 
+      networking.firewall.allowedTCPPorts = [ 80 443 ];
+
+      services.caddy = {
+        enable = true;
+        virtualHosts = (lib.mapAttrs'
+          (_name: app:
+            lib.nameValuePair app.domain (caddyVirtualHost _name app))
+          cfg.apps) // {
+          ":80".extraConfig = ''
+            respond "Not found" 404
+          '';
+        };
+      };
+
       systemd.tmpfiles.rules = [
         "d /etc/mele-apps 0755 root root -"
         "d /srv/apps 0755 root root -"
       ] ++ lib.concatLists (lib.mapAttrsToList appTmpfiles cfg.apps);
 
-      users.groups = lib.mapAttrs' (name: _app:
-        lib.nameValuePair (appUser name) { }) cfg.apps;
+      users.groups = lib.mapAttrs'
+        (name: _app:
+          lib.nameValuePair (appUser name) { })
+        cfg.apps;
 
-      users.users = lib.mapAttrs' (name: _app:
-        lib.nameValuePair (appUser name) {
-          isSystemUser = true;
-          group = appUser name;
-          home = "/srv/apps/${name}";
-          createHome = false;
-        }) cfg.apps;
+      users.users = lib.mapAttrs'
+        (name: _app:
+          lib.nameValuePair (appUser name) {
+            isSystemUser = true;
+            group = appUser name;
+            home = "/srv/apps/${name}";
+            createHome = false;
+          })
+        cfg.apps;
     })
   ];
 }

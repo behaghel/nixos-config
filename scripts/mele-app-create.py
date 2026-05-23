@@ -20,21 +20,44 @@ FIRST_APP_PORT = 8101
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Create a conventional MeLE app slot under configurations/nixos/mele-hub/apps.",
+        description=(
+            "Create a conventional MeLE app slot under "
+            "configurations/nixos/mele-hub/apps."
+        ),
     )
     parser.add_argument("name", help="App name, e.g. notes or my-app")
-    parser.add_argument("--domain", help="Override domain; defaults to <name>.home.behaghel.org")
+    parser.add_argument(
+        "--domain",
+        help="Override domain; defaults to <name>.home.behaghel.org",
+    )
     parser.add_argument("--host-port", type=int, help="Override localhost host port")
-    parser.add_argument("--container-port", type=int, default=8080, help="Container port, default: 8080")
+    parser.add_argument(
+        "--container-port",
+        type=int,
+        default=8080,
+        help="Container port, default: 8080",
+    )
     parser.add_argument(
         "--exposure",
         choices=("public", "lan"),
         default="public",
         help="Exposure mode, default: public",
     )
-    parser.add_argument("--health-path", default="/health", help="Health path, default: /health")
-    parser.add_argument("--no-metrics", action="store_true", help="Disable /metrics scraping")
-    parser.add_argument("--dry-run", action="store_true", help="Print the file that would be written")
+    parser.add_argument(
+        "--health-path",
+        default="/health",
+        help="Health path, default: /health",
+    )
+    parser.add_argument(
+        "--no-metrics",
+        action="store_true",
+        help="Disable /metrics scraping",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the file that would be written",
+    )
     return parser.parse_args()
 
 
@@ -56,7 +79,7 @@ def next_port() -> int:
 
 
 def nix_string(value: str) -> str:
-    escaped = value.replace('\\', '\\\\').replace('"', '\\"')
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
     return f'"{escaped}"'
 
 
@@ -85,16 +108,24 @@ def render_slot(args: argparse.Namespace, host_port: int, domain: str) -> str:
 
 
 def run(cmd: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, check=False)
+    return subprocess.run(
+        cmd,
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
 
 
 def validate_generated_config(app_name: str) -> None:
-    # Flake evaluation ignores untracked files; intent-to-add is enough for local validation.
+    # Flake evaluation ignores untracked files; intent-to-add is enough for
+    # local validation.
     run(["git", "add", "-N", str(APPS_DIR / f"{app_name}.nix")])
     expr = (
         '(builtins.getAttr "mele-apps/config.json" '
-        '(builtins.getFlake "git+file://' + str(ROOT) + '")'
-        '.nixosConfigurations.mele-hub.config.environment.etc).text'
+        '(builtins.getFlake "git+file://'
+        + str(ROOT)
+        + '").nixosConfigurations.mele-hub.config.environment.etc).text'
     )
     result = run(["nix", "eval", "--impure", "--raw", "--expr", expr])
     if result.returncode != 0:
@@ -108,7 +139,10 @@ def validate_generated_config(app_name: str) -> None:
 def main() -> int:
     args = parse_args()
     if not APP_RE.fullmatch(args.name):
-        print("app name must be lowercase kebab-case, e.g. notes or my-app", file=sys.stderr)
+        print(
+            "app name must be lowercase kebab-case, e.g. notes or my-app",
+            file=sys.stderr,
+        )
         return 2
 
     APPS_DIR.mkdir(parents=True, exist_ok=True)
