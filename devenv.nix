@@ -96,6 +96,10 @@ in
     ${pkgs.python3}/bin/python3 ./scripts/mele-app-create.py "$@"
   '';
 
+  scripts."mele-app:onboard".exec = ''
+    ${pkgs.python3}/bin/python3 ./scripts/mele-app-onboard.py "$@"
+  '';
+
   git-hooks = {
     hooks.mail-sync-tests = {
       enable = true;
