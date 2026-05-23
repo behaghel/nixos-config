@@ -33,6 +33,7 @@ explicit user approval before execution.
 | SecretSpec gate | `mele-app update-secretspec <app> -` stores the app contract; deploy validates required keys in `/etc/mele-apps/<app>.env` before image load/tag/restart. |
 | Health-check rollback | Deploy polls configured health after restart and rolls back to the previous release image when health fails. |
 | Release retention | Deploy prunes older immutable app image tags beyond `keepReleases` while preserving current and rollback candidates. |
+| Deploy/health textfile metrics | `mele-app` emits per-app Prometheus textfile metrics for current release, deploy status, rollback, and health checks. |
 
 ### In progress / adjacent
 
@@ -70,7 +71,7 @@ explicit user approval before execution.
 
 ## Immediate next slice
 
-Resume with **Slice 12: Deploy and health observability on host**.
+Resume with **Slice 13: Prometheus scrape for app `/metrics`**.
 
 Planned behavior:
 
@@ -78,9 +79,9 @@ Planned behavior:
 sudo mele-app deploy home --release <id> -
 ```
 
-After deploy, rollback, or health checks, the host should expose per-app
-Prometheus-compatible textfile metrics showing the current release, last deploy
-status/time, rollback status when relevant, and last health result.
+Prometheus should scrape each app that has `metrics.enable = true` at
+`127.0.0.1:<hostPort><metrics.path>` and attach an `app="<name>"` label so app
+runtime metrics are queryable alongside platform metrics.
 
 ## Execution notes
 
