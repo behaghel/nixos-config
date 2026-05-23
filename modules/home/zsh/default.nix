@@ -1,8 +1,7 @@
-{
-  pkgs,
-  config,
-  lib,
-  ...
+{ pkgs
+, config
+, lib
+, ...
 }:
 with lib;
 
@@ -52,7 +51,7 @@ with lib;
           if [ "$search_dir" = "/" ]; then
             return 1
           fi
-          search_dir="$(/usr/bin/dirname "$search_dir")"
+          search_dir="$(${pkgs.coreutils}/bin/dirname "$search_dir")"
         done
       }
 
@@ -103,14 +102,14 @@ with lib;
             marker="$(__find_up_file .devenv.flake.nix 2>/dev/null || true)"
           fi
           if [ -n "''${marker}" ]; then
-            STARSHIP_PROJECT_LABEL="dev:$(/usr/bin/basename "$(/usr/bin/dirname "$marker")")"
+            STARSHIP_PROJECT_LABEL="dev:$(${pkgs.coreutils}/bin/basename "$(${pkgs.coreutils}/bin/dirname "$marker")")"
           fi
         fi
 
         if [ -z "''${STARSHIP_PROJECT_LABEL}" ]; then
           git_root="$(${pkgs.git}/bin/git rev-parse --show-toplevel 2>/dev/null || true)"
           if [ -n "''${git_root}" ]; then
-            STARSHIP_PROJECT_LABEL="$(/usr/bin/basename "$git_root")"
+            STARSHIP_PROJECT_LABEL="$(${pkgs.coreutils}/bin/basename "$git_root")"
           fi
         fi
 

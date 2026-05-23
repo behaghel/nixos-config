@@ -1,9 +1,11 @@
-{ ... }:
+{ pkgs, ... }:
 {
   programs.starship = {
     enable = true;
     settings = {
       add_newline = false;
+      command_timeout = 1000;
+      scan_timeout = 30;
       format = ''
         [╭](fg:#7aa2f7) $time $username@$hostname ''${custom.project} $nix_shell$fill$gcloud$python
         [╰](fg:#7aa2f7) $directory $git_branch $git_status$character
@@ -16,7 +18,10 @@
 
       aws = { disabled = true; };
       gcloud = {
-        disabled = false;
+        # On headless Linux hosts such as MeLE, the gcloud module can block
+        # prompt rendering while probing local/cloud credentials. Keep it for
+        # workstation prompts, but skip it on NixOS servers.
+        disabled = pkgs.stdenv.isLinux;
         symbol = "☁ ";
         format = " [$symbol$project]($style)";
         style = "fg:#7dcfff";
