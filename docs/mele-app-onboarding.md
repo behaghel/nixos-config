@@ -290,6 +290,7 @@ After `mele:deploy`:
 ```sh
 mele:status
 mele:health
+ssh "$MELE_HOST" "mele-app contract-check <app-name>"
 curl -fsS https://<app-domain>/health
 curl -fsS https://<app-domain>/metrics | head
 ```
@@ -301,6 +302,7 @@ Expected:
 - `/metrics` returns Prometheus text format;
 - Caddy routes public HTTPS to the app;
 - the app listens only through its configured localhost host port on MeLE;
+- `mele-app contract-check <app>` passes required health/metrics checks;
 - release metadata appears in `mele-app releases <app>`.
 
 ## Request hardening expectations
@@ -312,15 +314,31 @@ applies coarse edge defaults for every app slot:
 - `edge.dialTimeout = "5s"`
 - `edge.responseHeaderTimeout = "30s"`
 
-Override these in the app slot when needed, for example:
+Override these in the app slot when needed. Apps with representative write
+endpoints should also enable an oversized payload probe so `mele-app
+contract-check` can verify in-process rejection behavior.
+
+For example:
 
 ```nix
 {
   hostPort = 8103;
   edge.maxBodySize = "100MiB";
   edge.responseHeaderTimeout = "2m";
+  contract.writeProbe = {
+    enable = true;
+    path = "/api/write";
+    method = "POST";
+    contentType = "application/json";
+    bodySize = "11MiB";
+  };
 }
 ```
+
+`mele-app contract-check <app>` currently hard-fails missing or invalid
+`/health` and `/metrics` responses, hard-fails write probes that accept overlarge
+payloads with `2xx` or crash with `5xx`, and warns when generic checks cannot
+prove domain-specific behavior.
 
 Caddy can apply coarse edge limits, but each app must enforce domain-specific
 constraints.

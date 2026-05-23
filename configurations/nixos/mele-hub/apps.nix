@@ -173,6 +173,11 @@ let
     metrics = {
       inherit (app.metrics) enable path;
     };
+    contract = {
+      writeProbe = {
+        inherit (app.contract.writeProbe) enable path method contentType bodySize;
+      };
+    };
   };
 in
 {
@@ -266,6 +271,38 @@ in
               type = lib.types.str;
               default = "30s";
               description = "Caddy timeout waiting for app response headers.";
+            };
+          };
+
+          contract.writeProbe = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "Whether contract-check probes oversized writes.";
+            };
+
+            path = lib.mkOption {
+              type = lib.types.str;
+              default = "/";
+              description = "HTTP path used by the oversized write probe.";
+            };
+
+            method = lib.mkOption {
+              type = lib.types.str;
+              default = "POST";
+              description = "HTTP method used by the oversized write probe.";
+            };
+
+            contentType = lib.mkOption {
+              type = lib.types.str;
+              default = "application/json";
+              description = "Content-Type used by the oversized write probe.";
+            };
+
+            bodySize = lib.mkOption {
+              type = lib.types.str;
+              default = "11MiB";
+              description = "Payload size sent by the oversized write probe.";
             };
           };
         };

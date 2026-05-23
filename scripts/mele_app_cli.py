@@ -366,6 +366,123 @@ def cmd_health(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return 1
 
 
+def parse_size_bytes(value: str) -> int:
+    units = {
+        "b": 1,
+        "kib": 1024,
+        "mib": 1024 * 1024,
+        "gib": 1024 * 1024 * 1024,
+        "kb": 1000,
+        "mb": 1000 * 1000,
+        "gb": 1000 * 1000 * 1000,
+    }
+    match = re.fullmatch(r"\s*(\d+)\s*([A-Za-z]+)?\s*", value)
+    if not match:
+        raise CliError(f"invalid size: {value}")
+    number = int(match.group(1))
+    unit = (match.group(2) or "b").lower()
+    if unit not in units:
+        raise CliError(f"invalid size unit in {value}")
+    return number * units[unit]
+
+
+def http_request(
+    url: str,
+    method: str = "GET",
+    body: bytes | None = None,
+    content_type: str | None = None,
+) -> tuple[int, str, str]:
+    headers = {}
+    if content_type:
+        headers["Content-Type"] = content_type
+    request = urllib.request.Request(url, data=body, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(request, timeout=10) as response:
+            return (
+                response.status,
+                response.read(1024 * 1024).decode(errors="replace"),
+                response.headers.get("Content-Type", ""),
+            )
+    except urllib.error.HTTPError as exc:
+        return (
+            exc.code,
+            exc.read(1024 * 1024).decode(errors="replace"),
+            exc.headers.get("Content-Type", ""),
+        )
+    except urllib.error.URLError as exc:
+        raise CliError(f"request failed for {url}: {exc.reason}") from exc
+
+
+def looks_like_prometheus_text(body: str) -> bool:
+    for line in body.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("# HELP ") or stripped.startswith("# TYPE "):
+            return True
+        if re.match(r"^[A-Za-z_:][A-Za-z0-9_:]*(\{[^}]*\})?\s+[-+0-9.eE]+$", stripped):
+            return True
+    return False
+
+
+def suspicious_metric_labels(body: str) -> list[str]:
+    suspicious = {"user", "email", "token", "player", "sync_space"}
+    found: set[str] = set()
+    for labels in re.findall(r"\{([^}]*)\}", body):
+        for label in re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*=", labels):
+            if label.lower() in suspicious:
+                found.add(label)
+    return sorted(found)
+
+
+def cmd_contract_check(app: dict[str, Any], _args: argparse.Namespace) -> int:
+    failures: list[str] = []
+    warnings: list[str] = []
+    base_url = f"http://127.0.0.1:{app['hostPort']}"
+
+    health_path = app.get("healthPath")
+    if health_path:
+        status, _body, _content_type = http_request(base_url + health_path)
+        if not 200 <= status < 300:
+            failures.append(f"health returned HTTP {status}")
+
+    metrics = app.get("metrics", {})
+    if metrics.get("enable"):
+        status, body, _content_type = http_request(base_url + metrics.get("path", "/metrics"))
+        if not 200 <= status < 300:
+            failures.append(f"metrics returned HTTP {status}")
+        elif not looks_like_prometheus_text(body):
+            failures.append("metrics response does not look like Prometheus text")
+        labels = suspicious_metric_labels(body)
+        if labels:
+            warnings.append("metrics expose suspicious labels: " + ", ".join(labels))
+
+    probe = app.get("contract", {}).get("writeProbe", {})
+    if probe.get("enable"):
+        size = parse_size_bytes(str(probe.get("bodySize", "11MiB")))
+        status, _body, _content_type = http_request(
+            base_url + str(probe.get("path", "/")),
+            method=str(probe.get("method", "POST")),
+            body=b"x" * size,
+            content_type=str(probe.get("contentType", "application/json")),
+        )
+        if 200 <= status < 300:
+            failures.append(f"write probe accepted oversized payload: HTTP {status}")
+        elif 500 <= status < 600:
+            failures.append(f"write probe returned server error: HTTP {status}")
+    else:
+        warnings.append("write probe disabled; payload-limit behavior not verified")
+
+    for warning in warnings:
+        print(f"{app['name']}: warning: {warning}")
+    if failures:
+        for failure in failures:
+            print(f"{app['name']}: contract failure: {failure}", file=sys.stderr)
+        return 1
+    print(f"{app['name']}: contract check passed")
+    return 0
+
+
 def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
     releases = Path(app["stateDir"]) / "releases.jsonl"
     try:
@@ -644,7 +761,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    for command in ("status", "health", "releases"):
+    for command in ("status", "health", "releases", "contract-check"):
         sub = subparsers.add_parser(command)
         sub.add_argument("app")
 
@@ -688,6 +805,8 @@ def dispatch(app: dict[str, Any], args: argparse.Namespace) -> int:
         return cmd_health(app, args)
     if args.command == "releases":
         return cmd_releases(app, args)
+    if args.command == "contract-check":
+        return cmd_contract_check(app, args)
     if args.command == "update-secretspec":
         return cmd_update_secretspec(app, args)
     if args.command == "deploy":

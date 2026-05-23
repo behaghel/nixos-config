@@ -41,6 +41,16 @@ class MeleAppCliTests(unittest.TestCase):
                     "stateDir": str(state_dir or (tmp / "state")),
                     "metricsTextfile": str(tmp / "mele_app_home.prom"),
                     "keepReleases": 5,
+                    "metrics": {"enable": True, "path": "/metrics"},
+                    "contract": {
+                        "writeProbe": {
+                            "enable": False,
+                            "path": "/",
+                            "method": "POST",
+                            "contentType": "application/json",
+                            "bodySize": "11MiB",
+                        },
+                    },
                     "envFile": str(tmp / "home.env"),
                     "secretspec": {
                         "profile": "prod",
@@ -359,6 +369,73 @@ class MeleAppCliTests(unittest.TestCase):
             self.assertEqual(len(removed), 2)
             self.assertIn("podman rmi localhost/home:old1", removed[0])
             self.assertIn("podman rmi localhost/home:old2", removed[1])
+
+    def test_contract_check_requires_health_and_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            responses = [
+                (200, "ok", "application/json"),
+                (200, "# HELP app_requests_total Requests\napp_requests_total 1\n", "text/plain"),
+            ]
+            with mock.patch.object(
+                mele_app_cli,
+                "http_request",
+                side_effect=responses,
+            ):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "contract-check",
+                    "home",
+                ])
+            self.assertEqual(exit_code, 0)
+
+    def test_contract_check_fails_when_metrics_are_not_prometheus_text(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            responses = [
+                (200, "ok", "application/json"),
+                (200, "{\"not\": \"prometheus\"}", "application/json"),
+            ]
+            with mock.patch.object(
+                mele_app_cli,
+                "http_request",
+                side_effect=responses,
+            ):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "contract-check",
+                    "home",
+                ])
+            self.assertEqual(exit_code, 1)
+
+    def test_contract_check_write_probe_rejects_2xx_oversized_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config_data = json.loads(self.write_config(tmp).read_text())
+            config_data["apps"]["home"]["contract"]["writeProbe"]["enable"] = True
+            config = tmp / "config.json"
+            config.write_text(json.dumps(config_data))
+            responses = [
+                (200, "ok", "application/json"),
+                (200, "# TYPE app_requests_total counter\napp_requests_total 1\n", "text/plain"),
+                (200, "accepted", "text/plain"),
+            ]
+            with mock.patch.object(
+                mele_app_cli,
+                "http_request",
+                side_effect=responses,
+            ):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "contract-check",
+                    "home",
+                ])
+            self.assertEqual(exit_code, 1)
 
     def test_health_updates_textfile_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
