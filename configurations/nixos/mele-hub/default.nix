@@ -128,6 +128,7 @@ in
   imports = [
     self.nixosModules.default
     ./hardware-configuration.nix
+    ./apps.nix
   ];
 
   nixpkgs = {
