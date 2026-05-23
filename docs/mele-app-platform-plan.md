@@ -35,6 +35,7 @@ explicit user approval before execution.
 | Release retention | Deploy prunes older immutable app image tags beyond `keepReleases` while preserving current and rollback candidates. |
 | Deploy/health textfile metrics | `mele-app` emits per-app Prometheus textfile metrics for current release, deploy status, rollback, and health checks. |
 | App metrics scraping | Prometheus scrapes each metrics-enabled app at its localhost `/metrics` endpoint with `app` and `domain` labels. |
+| Edge request hardening | Caddy applies per-app request body limits and reverse-proxy dial/header timeouts, with documented overrides. |
 
 ### In progress / adjacent
 
@@ -72,7 +73,7 @@ explicit user approval before execution.
 
 ## Immediate next slice
 
-Resume with **Slice 14: Edge request hardening**.
+Resume with **Slice 15: App-level hardening contract**.
 
 Planned behavior:
 
@@ -80,9 +81,9 @@ Planned behavior:
 sudo mele-app deploy home --release <id> -
 ```
 
-Caddy should apply conservative per-app edge limits before proxying public
-traffic: bounded request bodies and timeouts by default, with documented app slot
-overrides for apps that need different limits.
+The onboarding contract should require apps to enforce domain-specific limits in
+process: bounded payloads/envelopes, safe logging, low-cardinality metrics, and
+explicit throttling or rejection behavior for expensive endpoints.
 
 ## Execution notes
 
