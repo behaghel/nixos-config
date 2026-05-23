@@ -32,6 +32,7 @@ explicit user approval before execution.
 | Onboarding docs | `docs/mele-app-onboarding.md` documents HTTP/runtime/OCI contracts, metrics, Node/PWA guidance, and cross-arch image patterns. |
 | SecretSpec gate | `mele-app update-secretspec <app> -` stores the app contract; deploy validates required keys in `/etc/mele-apps/<app>.env` before image load/tag/restart. |
 | Health-check rollback | Deploy polls configured health after restart and rolls back to the previous release image when health fails. |
+| Release retention | Deploy prunes older immutable app image tags beyond `keepReleases` while preserving current and rollback candidates. |
 
 ### In progress / adjacent
 
@@ -69,7 +70,7 @@ explicit user approval before execution.
 
 ## Immediate next slice
 
-Resume with **Slice 11: Release retention and image cleanup**.
+Resume with **Slice 12: Deploy and health observability on host**.
 
 Planned behavior:
 
@@ -77,9 +78,9 @@ Planned behavior:
 sudo mele-app deploy home --release <id> -
 ```
 
-After a successful deploy, the app should retain only the current release and the
-last `keepReleases` successful immutable release tags needed for rollback,
-pruning older immutable `localhost/<app>:<release>` images for that app only.
+After deploy, rollback, or health checks, the host should expose per-app
+Prometheus-compatible textfile metrics showing the current release, last deploy
+status/time, rollback status when relevant, and last health result.
 
 ## Execution notes
 
