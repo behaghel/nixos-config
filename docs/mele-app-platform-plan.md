@@ -34,6 +34,7 @@ explicit user approval before execution.
 | Health-check rollback | Deploy polls configured health after restart and rolls back to the previous release image when health fails. |
 | Release retention | Deploy prunes older immutable app image tags beyond `keepReleases` while preserving current and rollback candidates. |
 | Deploy/health textfile metrics | `mele-app` emits per-app Prometheus textfile metrics for current release, deploy status, rollback, and health checks. |
+| App metrics scraping | Prometheus scrapes each metrics-enabled app at its localhost `/metrics` endpoint with `app` and `domain` labels. |
 
 ### In progress / adjacent
 
@@ -71,7 +72,7 @@ explicit user approval before execution.
 
 ## Immediate next slice
 
-Resume with **Slice 13: Prometheus scrape for app `/metrics`**.
+Resume with **Slice 14: Edge request hardening**.
 
 Planned behavior:
 
@@ -79,9 +80,9 @@ Planned behavior:
 sudo mele-app deploy home --release <id> -
 ```
 
-Prometheus should scrape each app that has `metrics.enable = true` at
-`127.0.0.1:<hostPort><metrics.path>` and attach an `app="<name>"` label so app
-runtime metrics are queryable alongside platform metrics.
+Caddy should apply conservative per-app edge limits before proxying public
+traffic: bounded request bodies and timeouts by default, with documented app slot
+overrides for apps that need different limits.
 
 ## Execution notes
 
