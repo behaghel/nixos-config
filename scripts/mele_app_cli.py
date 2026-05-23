@@ -7,7 +7,9 @@ import argparse
 import datetime as dt
 import json
 import os
+import pwd
 import re
+import shlex
 import subprocess
 import sys
 import urllib.error
@@ -77,8 +79,29 @@ def capture_command(
     )
 
 
+def app_runtime_dir(app: dict[str, Any]) -> Path:
+    return Path("/run") / f"mele-app-{app['name']}"
+
+
+def ensure_runtime_dir(app: dict[str, Any]) -> None:
+    runtime_dir = app_runtime_dir(app)
+    runtime_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    user = pwd.getpwnam(app["user"])
+    os.chown(runtime_dir, user.pw_uid, user.pw_gid)
+
+
 def app_command(app: dict[str, Any], command: Sequence[str]) -> list[str]:
-    return ["runuser", "-u", app["user"], "--", *command]
+    quoted = " ".join(shlex.quote(part) for part in command)
+    runtime_dir = shlex.quote(str(app_runtime_dir(app)))
+    workdir = shlex.quote(f"/srv/apps/{app['name']}")
+    script = (
+        f"cd {workdir} && "
+        "exec env "
+        "PATH=/run/wrappers/bin:/run/current-system/sw/bin "
+        f"XDG_RUNTIME_DIR={runtime_dir} "
+        f"{quoted}"
+    )
+    return ["runuser", app["user"], "-s", "/bin/sh", "-c", script]
 
 
 def require_root() -> None:
@@ -157,6 +180,7 @@ def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
 
 def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
     require_root()
+    ensure_runtime_dir(app)
     load = capture_command(app_command(app, ["podman", "load"]), stdin=sys.stdin.buffer)
     load_output = load.stdout + load.stderr
     if load.returncode != 0:

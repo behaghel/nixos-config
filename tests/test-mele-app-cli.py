@@ -116,6 +116,7 @@ class MeleAppCliTests(unittest.TestCase):
                 subprocess_result(""),
             ]
             with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir") as ensure_runtime, \
                     mock.patch.object(mele_app_cli, "capture_command", side_effect=completed) as run:
                 exit_code = mele_app_cli.main([
                     "--config",
@@ -132,30 +133,12 @@ class MeleAppCliTests(unittest.TestCase):
                     "false",
                 ])
             self.assertEqual(exit_code, 0)
-            self.assertEqual(
-                run.call_args_list[0].args[0],
-                ["runuser", "-u", "app-home", "--", "podman", "load"],
-            )
-            self.assertEqual(run.call_args_list[1].args[0], [
-                "runuser",
-                "-u",
-                "app-home",
-                "--",
-                "podman",
-                "tag",
-                "localhost/source:latest",
-                "localhost/home:abc1234",
-            ])
-            self.assertEqual(run.call_args_list[2].args[0], [
-                "runuser",
-                "-u",
-                "app-home",
-                "--",
-                "podman",
-                "tag",
-                "localhost/source:latest",
-                "localhost/home:current",
-            ])
+            ensure_runtime.assert_called_once()
+            self.assertEqual(run.call_args_list[0].args[0][:4], ["runuser", "app-home", "-s", "/bin/sh"])
+            self.assertIn("podman load", run.call_args_list[0].args[0][-1])
+            self.assertIn("XDG_RUNTIME_DIR=/run/mele-app-home", run.call_args_list[0].args[0][-1])
+            self.assertIn("podman tag localhost/source:latest localhost/home:abc1234", run.call_args_list[1].args[0][-1])
+            self.assertIn("podman tag localhost/source:latest localhost/home:current", run.call_args_list[2].args[0][-1])
             self.assertEqual(
                 run.call_args_list[3].args[0],
                 ["systemctl", "restart", "mele-app-home.service"],
