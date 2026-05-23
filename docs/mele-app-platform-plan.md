@@ -36,6 +36,7 @@ explicit user approval before execution.
 | Deploy/health textfile metrics | `mele-app` emits per-app Prometheus textfile metrics for current release, deploy status, rollback, and health checks. |
 | App metrics scraping | Prometheus scrapes each metrics-enabled app at its localhost `/metrics` endpoint with `app` and `domain` labels. |
 | Edge request hardening | Caddy applies per-app request body limits and reverse-proxy dial/header timeouts, with documented overrides. |
+| App-level hardening contract | `mele-app contract-check <app>` verifies health/metrics contracts and optional oversized write probes; onboarding docs define in-process safeguards. |
 
 ### In progress / adjacent
 
@@ -73,7 +74,7 @@ explicit user approval before execution.
 
 ## Immediate next slice
 
-Resume with **Slice 15: App-level hardening contract**.
+Resume with **Slice 16: Generic Grafana MeLE Apps dashboard**.
 
 Planned behavior:
 
@@ -81,9 +82,9 @@ Planned behavior:
 sudo mele-app deploy home --release <id> -
 ```
 
-The onboarding contract should require apps to enforce domain-specific limits in
-process: bounded payloads/envelopes, safe logging, low-cardinality metrics, and
-explicit throttling or rejection behavior for expensive endpoints.
+Grafana should provision a generic MeLE Apps dashboard that answers core ops
+questions: app health/up status, current release, last deploy status/time,
+rollback status, and request rate/latency where app metrics expose them.
 
 ## Execution notes
 
