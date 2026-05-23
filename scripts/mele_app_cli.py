@@ -22,6 +22,7 @@ from typing import Any, BinaryIO, Sequence
 DEFAULT_CONFIG = Path("/etc/mele-apps/config.json")
 LOADED_IMAGE_RE = re.compile(r"Loaded image(?:s)?:\s*(?P<image>\S+)")
 ENV_KEY_RE = re.compile(r"(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=")
+APP_IMAGE_RE = re.compile(r"^localhost/(?P<app>[A-Za-z0-9_.-]+):(?P<tag>[^:]+)$")
 
 
 class CliError(Exception):
@@ -315,6 +316,7 @@ def restart_service(app: dict[str, Any]) -> None:
 
 
 def tag_image(app: dict[str, Any], source: str, target: str) -> None:
+    ensure_runtime_dir(app)
     tag = capture_command(app_command(app, ["podman", "tag", source, target]))
     if tag.returncode != 0:
         raise CliError(
@@ -324,8 +326,14 @@ def tag_image(app: dict[str, Any], source: str, target: str) -> None:
 
 
 def app_image_exists(app: dict[str, Any], image: str) -> bool:
+    ensure_runtime_dir(app)
     exists = capture_command(app_command(app, ["podman", "image", "exists", image]))
-    return exists.returncode == 0
+    if exists.returncode == 0:
+        return True
+    output = exists.stdout + exists.stderr
+    if "Failed to obtain podman configuration" in output:
+        raise CliError(f"podman image exists failed for {image}: {output.strip()}")
+    return False
 
 
 def deploy_record(
@@ -352,6 +360,98 @@ def deploy_record(
     if rollback_status is not None:
         record["rollback_status"] = rollback_status
     return record
+
+
+def release_log_path(app: dict[str, Any]) -> Path:
+    return Path(app["stateDir"]) / "releases.jsonl"
+
+
+def successful_release_ids(app: dict[str, Any]) -> list[str]:
+    path = release_log_path(app)
+    if not path.exists():
+        return []
+    releases: list[str] = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if record.get("status") == "deployed" and record.get("release"):
+            releases.append(str(record["release"]))
+    return releases
+
+
+def app_image_tags(app: dict[str, Any]) -> list[str]:
+    ensure_runtime_dir(app)
+    result = capture_command(app_command(
+        app,
+        [
+            "podman",
+            "images",
+            "--format",
+            "{{.Repository}}:{{.Tag}}",
+            f"localhost/{app['name']}",
+        ],
+    ))
+    if result.returncode != 0:
+        raise CliError(
+            f"podman images failed for {app['name']}: "
+            f"{(result.stdout + result.stderr).strip()}"
+        )
+    tags: list[str] = []
+    for raw_line in result.stdout.splitlines():
+        image = raw_line.strip()
+        match = APP_IMAGE_RE.match(image)
+        if not match:
+            continue
+        if match.group("app") != app["name"]:
+            continue
+        tag = match.group("tag")
+        if tag in ("current", "<none>"):
+            continue
+        tags.append(tag)
+    return tags
+
+
+def prune_release_images(
+    app: dict[str, Any],
+    extra_protected: set[str] | None = None,
+) -> list[str]:
+    keep_releases = int(app.get("keepReleases") or 5)
+    successful = successful_release_ids(app)
+    protected = set(successful[-keep_releases:])
+    current = read_current_release(app)
+    if current:
+        protected.add(current)
+    if extra_protected:
+        protected.update(extra_protected)
+
+    removed: list[str] = []
+    for tag in app_image_tags(app):
+        if tag in protected:
+            continue
+        image = f"localhost/{app['name']}:{tag}"
+        ensure_runtime_dir(app)
+        result = capture_command(app_command(app, ["podman", "rmi", image]))
+        if result.returncode != 0:
+            raise CliError(
+                f"podman rmi failed for {image}: "
+                f"{(result.stdout + result.stderr).strip()}"
+            )
+        removed.append(image)
+    return removed
+
+
+def cleanup_release_images(app: dict[str, Any], extra_protected: set[str] | None = None) -> None:
+    try:
+        removed = prune_release_images(app, extra_protected)
+    except CliError as exc:
+        print(f"{app['name']}: warning: image cleanup failed: {exc}", file=sys.stderr)
+        return
+    if removed:
+        print(f"{app['name']}: pruned {len(removed)} old release image(s)")
 
 
 def rollback_after_failed_health(
@@ -383,7 +483,9 @@ def rollback_after_failed_health(
         previous_release,
         rollback_status,
     )
-    append_jsonl(Path(app["stateDir"]) / "releases.jsonl", record)
+    append_jsonl(release_log_path(app), record)
+    extra_protected = {args.release} if rollback_status != "succeeded" else None
+    cleanup_release_images(app, extra_protected)
     print(
         f"{app['name']}: deploy {args.release} failed health check; "
         f"rollback {rollback_status}"
@@ -413,8 +515,9 @@ def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
         return rollback_after_failed_health(app, args, release_image, previous_release)
 
     record = deploy_record(app, args, release_image, "deployed")
-    append_jsonl(Path(app["stateDir"]) / "releases.jsonl", record)
+    append_jsonl(release_log_path(app), record)
     current_release_path(app).write_text(args.release + "\n")
+    cleanup_release_images(app)
     print(f"{app['name']}: deployed {args.release}")
     return 0
 

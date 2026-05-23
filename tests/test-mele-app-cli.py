@@ -39,6 +39,7 @@ class MeleAppCliTests(unittest.TestCase):
                     "healthPath": "/health",
                     "serviceName": "mele-app-home.service",
                     "stateDir": str(state_dir or (tmp / "state")),
+                    "keepReleases": 5,
                     "envFile": str(tmp / "home.env"),
                     "secretspec": {
                         "profile": "prod",
@@ -242,6 +243,8 @@ class MeleAppCliTests(unittest.TestCase):
                 subprocess_result(""),
                 subprocess_result(""),
                 subprocess_result(""),
+                subprocess_result("localhost/home:bad123\nlocalhost/home:current\n"),
+                subprocess_result(""),
             ]
             with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
                     mock.patch.object(mele_app_cli, "ensure_runtime_dir"), \
@@ -281,6 +284,81 @@ class MeleAppCliTests(unittest.TestCase):
             self.assertEqual(records[-1]["previous_release"], "prev123")
             self.assertEqual(records[-1]["rollback_status"], "succeeded")
 
+    def test_image_cleanup_recreates_runtime_dir_after_service_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            config = self.write_config(tmp, state)
+            (state / "releases.jsonl").write_text(
+                json.dumps({"release": "old1", "status": "deployed"}) + "\n"
+            )
+            completed = [
+                subprocess_result("localhost/home:old1\nlocalhost/home:current\n"),
+            ]
+            with mock.patch.object(mele_app_cli, "ensure_runtime_dir") as ensure_runtime, \
+                    mock.patch.object(mele_app_cli, "capture_command", side_effect=completed):
+                removed = mele_app_cli.prune_release_images(
+                    mele_app_cli.get_app(
+                        mele_app_cli.load_config(config),
+                        "home",
+                    )
+                )
+            self.assertEqual(removed, [])
+            ensure_runtime.assert_called()
+
+    def test_successful_deploy_prunes_old_successful_release_images(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            config_data = json.loads(self.write_config(tmp, state).read_text())
+            config_data["apps"]["home"]["keepReleases"] = 2
+            config = tmp / "config.json"
+            config.write_text(json.dumps(config_data))
+            releases = [
+                {"release": "old1", "status": "deployed"},
+                {"release": "old2", "status": "deployed"},
+                {"release": "old3", "status": "deployed"},
+            ]
+            (state / "releases.jsonl").write_text(
+                "".join(json.dumps(release) + "\n" for release in releases)
+            )
+            completed = [
+                subprocess_result("Loaded image: localhost/source:latest\n"),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(
+                    "localhost/home:old1\n"
+                    "localhost/home:old2\n"
+                    "localhost/home:old3\n"
+                    "localhost/home:new4\n"
+                    "localhost/home:current\n"
+                    "localhost/other:old1\n"
+                    "localhost/home:<none>\n"
+                ),
+                subprocess_result(""),
+                subprocess_result(""),
+            ]
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir"), \
+                    mock.patch.object(mele_app_cli, "capture_command", side_effect=completed) as run, \
+                    mock.patch.object(mele_app_cli, "poll_health", return_value=True):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "deploy",
+                    "home",
+                    "--release",
+                    "new4",
+                ])
+            self.assertEqual(exit_code, 0)
+            removed = [call.args[0][-1] for call in run.call_args_list[5:]]
+            self.assertEqual(len(removed), 2)
+            self.assertIn("podman rmi localhost/home:old1", removed[0])
+            self.assertIn("podman rmi localhost/home:old2", removed[1])
+
     def test_deploy_loads_tags_restarts_and_records_release(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)
@@ -291,6 +369,7 @@ class MeleAppCliTests(unittest.TestCase):
                 subprocess_result(""),
                 subprocess_result(""),
                 subprocess_result(""),
+                subprocess_result("localhost/home:abc1234\nlocalhost/home:current\n"),
             ]
             with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
                     mock.patch.object(mele_app_cli, "ensure_runtime_dir") as ensure_runtime, \
@@ -311,7 +390,7 @@ class MeleAppCliTests(unittest.TestCase):
                     "false",
                 ])
             self.assertEqual(exit_code, 0)
-            ensure_runtime.assert_called_once()
+            ensure_runtime.assert_called()
             self.assertEqual(run.call_args_list[0].args[0][:4], ["runuser", "app-home", "-s", "/bin/sh"])
             self.assertIn("podman load", run.call_args_list[0].args[0][-1])
             self.assertIn("XDG_RUNTIME_DIR=/run/mele-app-home", run.call_args_list[0].args[0][-1])
