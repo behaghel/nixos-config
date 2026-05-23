@@ -15,6 +15,15 @@ let
       "d /srv/apps/${name}/state 0750 ${user} ${user} -"
     ];
 
+  appFiles = lib.filterAttrs
+    (name: type: type == "regular" && lib.hasSuffix ".nix" name)
+    (builtins.readDir ./apps);
+
+  appSlots = lib.mapAttrs'
+    (fileName: _:
+      lib.nameValuePair (lib.removeSuffix ".nix" fileName) (import (./apps + "/${fileName}")))
+    appFiles;
+
   appToJson = name: app: {
     inherit name;
     inherit (app) domain exposure hostPort containerPort healthPath keepReleases backup;
@@ -118,17 +127,7 @@ in
       services.meleApps = {
         enable = true;
         baseDomain = "home.behaghel.org";
-        apps.home = {
-          domain = "home.behaghel.org";
-          exposure = "public";
-          hostPort = 8101;
-          containerPort = 8080;
-          healthPath = "/health";
-          metrics = {
-            enable = true;
-            path = "/metrics";
-          };
-        };
+        apps = appSlots;
       };
     }
 

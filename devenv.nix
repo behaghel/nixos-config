@@ -92,6 +92,10 @@ in
       "$@"
   '';
 
+  scripts."mele-app:create".exec = ''
+    ${pkgs.python3}/bin/python3 ./scripts/mele-app-create.py "$@"
+  '';
+
   git-hooks = {
     hooks.mail-sync-tests = {
       enable = true;
