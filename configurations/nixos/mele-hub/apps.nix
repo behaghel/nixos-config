@@ -130,6 +130,24 @@ let
     '';
   };
 
+  sanitizePrometheusName = name:
+    lib.replaceStrings [ "." "_" ] [ "-" "-" ]
+      (lib.strings.sanitizeDerivationName name);
+
+  prometheusScrapeConfig = name: app: {
+    job_name = "mele-app-${sanitizePrometheusName name}";
+    metrics_path = app.metrics.path;
+    static_configs = [
+      {
+        targets = [ "127.0.0.1:${toString app.hostPort}" ];
+        labels = {
+          app = name;
+          domain = app.domain;
+        };
+      }
+    ];
+  };
+
   appToJson = name: app: {
     inherit name;
     inherit (app) domain exposure hostPort containerPort healthPath keepReleases backup;
@@ -243,6 +261,9 @@ in
         baseDomain = cfg.baseDomain;
         apps = lib.mapAttrs appToJson cfg.apps;
       };
+
+      services.prometheus.scrapeConfigs = lib.mapAttrsToList prometheusScrapeConfig
+        (lib.filterAttrs (_name: app: app.metrics.enable) cfg.apps);
 
       networking.firewall.allowedTCPPorts = [ 80 443 ];
 
