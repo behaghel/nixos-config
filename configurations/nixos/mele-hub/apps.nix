@@ -46,6 +46,16 @@ let
         localhost/${name}:current
     '';
 
+  appRuntimePath = lib.makeBinPath [
+    pkgs.podman
+    pkgs.shadow
+    pkgs.coreutils
+    pkgs.findutils
+    pkgs.gnugrep
+    pkgs.gnused
+    pkgs.systemd
+  ];
+
   appService = name: app: {
     description = "MeLE app ${name}";
     wantedBy = [ "multi-user.target" ];
@@ -57,14 +67,18 @@ let
       Group = appUser name;
       WorkingDirectory = "/srv/apps/${name}";
       RuntimeDirectory = "mele-app-${name}";
-      Environment = "XDG_RUNTIME_DIR=/run/mele-app-${name}";
+      Environment = [
+        "XDG_RUNTIME_DIR=/run/mele-app-${name}"
+        "PATH=/run/wrappers/bin:${appRuntimePath}"
+      ];
       ExecCondition = "${pkgs.podman}/bin/podman image exists localhost/${name}:current";
       ExecStartPre = [ "-${pkgs.podman}/bin/podman rm -f mele-app-${name}" ];
       ExecStart = appServiceScript name app;
       Restart = "on-failure";
       RestartSec = "5s";
       TimeoutStartSec = "60s";
-      NoNewPrivileges = true;
+      # Rootless Podman needs setuid newuidmap/newgidmap during namespace setup.
+      # Keep no-new-privileges inside the container instead.
       PrivateTmp = true;
       ProtectSystem = "strict";
       ReadWritePaths = [
@@ -74,6 +88,25 @@ let
       ];
     };
   };
+
+  appUsers =
+    lib.listToAttrs (lib.imap0
+      (index: name:
+        lib.nameValuePair (appUser name) {
+          isSystemUser = true;
+          group = appUser name;
+          home = "/srv/apps/${name}";
+          createHome = false;
+          subUidRanges = [{
+            startUid = 200000 + (index * 65536);
+            count = 65536;
+          }];
+          subGidRanges = [{
+            startGid = 200000 + (index * 65536);
+            count = 65536;
+          }];
+        })
+      (lib.attrNames cfg.apps));
 
   caddyVirtualHost = _name: app: {
     extraConfig = ''
@@ -227,15 +260,7 @@ in
           lib.nameValuePair (appUser name) { })
         cfg.apps;
 
-      users.users = lib.mapAttrs'
-        (name: _app:
-          lib.nameValuePair (appUser name) {
-            isSystemUser = true;
-            group = appUser name;
-            home = "/srv/apps/${name}";
-            createHome = false;
-          })
-        cfg.apps;
+      users.users = appUsers;
     })
   ];
 }
