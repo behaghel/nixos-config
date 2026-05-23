@@ -90,10 +90,13 @@ def cmd_health(app: dict[str, Any], _args: argparse.Namespace) -> int:
 
 def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
     releases = Path(app["stateDir"]) / "releases.jsonl"
-    if not releases.exists():
-        print(f"{app['name']}: no releases recorded")
-        return 0
-    sys.stdout.write(releases.read_text())
+    try:
+        if not releases.exists():
+            print(f"{app['name']}: no releases recorded")
+            return 0
+        sys.stdout.write(releases.read_text())
+    except PermissionError as exc:
+        raise CliError(f"cannot read releases for {app['name']}: {exc}") from exc
     return 0
 
 

@@ -20,7 +20,7 @@ spec.loader.exec_module(mele_app_cli)
 
 
 class MeleAppCliTests(unittest.TestCase):
-    def write_config(self, tmp: Path) -> Path:
+    def write_config(self, tmp: Path, state_dir: Path | None = None) -> Path:
         config = {
             "apps": {
                 "home": {
@@ -28,7 +28,7 @@ class MeleAppCliTests(unittest.TestCase):
                     "hostPort": 8101,
                     "healthPath": "/health",
                     "serviceName": "mele-app-home.service",
-                    "stateDir": str(tmp / "state"),
+                    "stateDir": str(state_dir or (tmp / "state")),
                 }
             }
         }
@@ -83,6 +83,16 @@ class MeleAppCliTests(unittest.TestCase):
             config = self.write_config(Path(raw_tmp))
             exit_code = mele_app_cli.main(["--config", str(config), "releases", "home"])
         self.assertEqual(exit_code, 0)
+
+    def test_releases_reports_permission_error_cleanly(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            config = self.write_config(tmp, state)
+            with mock.patch("pathlib.Path.exists", side_effect=PermissionError("nope")):
+                exit_code = mele_app_cli.main(["--config", str(config), "releases", "home"])
+        self.assertEqual(exit_code, 2)
 
 
 if __name__ == "__main__":

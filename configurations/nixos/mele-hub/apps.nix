@@ -10,9 +10,9 @@ let
       user = appUser name;
     in
     [
-      "d /srv/apps/${name} 0750 ${user} ${user} -"
+      "d /srv/apps/${name} 0751 ${user} ${user} -"
       "d /srv/apps/${name}/data 0750 ${user} ${user} -"
-      "d /srv/apps/${name}/state 0750 ${user} ${user} -"
+      "d /srv/apps/${name}/state 0755 root root -"
     ];
 
   appFiles = lib.filterAttrs
