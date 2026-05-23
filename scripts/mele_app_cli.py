@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import datetime as dt
 import json
+import os
+import re
 import subprocess
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, BinaryIO, Sequence
 
 DEFAULT_CONFIG = Path("/etc/mele-apps/config.json")
+LOADED_IMAGE_RE = re.compile(r"Loaded image(?:s)?:\s*(?P<image>\S+)")
 
 
 class CliError(Exception):
@@ -45,6 +49,57 @@ def get_app(config: dict[str, Any], name: str) -> dict[str, Any]:
 
 def run_command(command: Sequence[str]) -> int:
     return subprocess.run(list(command), check=False).returncode
+
+
+def capture_command(
+    command: Sequence[str],
+    stdin: BinaryIO | None = None,
+) -> subprocess.CompletedProcess[str]:
+    if stdin is None:
+        return subprocess.run(
+            list(command),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+    result = subprocess.run(
+        list(command),
+        stdin=stdin,
+        text=False,
+        capture_output=True,
+        check=False,
+    )
+    return subprocess.CompletedProcess(
+        result.args,
+        result.returncode,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+    )
+
+
+def app_command(app: dict[str, Any], command: Sequence[str]) -> list[str]:
+    return ["runuser", "-u", app["user"], "--", *command]
+
+
+def require_root() -> None:
+    if os.geteuid() != 0:
+        raise CliError("deploy must run as root, e.g. sudo mele-app deploy ...")
+
+
+def parse_loaded_image(output: str) -> str:
+    matches = list(LOADED_IMAGE_RE.finditer(output))
+    if not matches:
+        raise CliError(
+            "could not determine loaded image from podman load output: "
+            f"{output.strip()}"
+        )
+    return matches[-1].group("image")
+
+
+def append_jsonl(path: Path, record: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
 
 
 def cmd_status(app: dict[str, Any], _args: argparse.Namespace) -> int:
@@ -100,6 +155,48 @@ def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
+    require_root()
+    load = capture_command(app_command(app, ["podman", "load"]), stdin=sys.stdin.buffer)
+    load_output = load.stdout + load.stderr
+    if load.returncode != 0:
+        raise CliError(f"podman load failed for {app['name']}: {load_output.strip()}")
+    loaded_image = args.loaded_image or parse_loaded_image(load_output)
+    release_image = f"localhost/{app['name']}:{args.release}"
+    current_image = f"localhost/{app['name']}:current"
+
+    for target in (release_image, current_image):
+        tag = capture_command(app_command(app, ["podman", "tag", loaded_image, target]))
+        if tag.returncode != 0:
+            raise CliError(
+                f"podman tag failed for {target}: "
+                f"{(tag.stdout + tag.stderr).strip()}"
+            )
+
+    restart = capture_command(["systemctl", "restart", app["serviceName"]])
+    if restart.returncode != 0:
+        raise CliError(
+            f"failed to restart {app['serviceName']}: "
+            f"{(restart.stdout + restart.stderr).strip()}"
+        )
+
+    record = {
+        "app": app["name"],
+        "release": args.release,
+        "image": release_image,
+        "repo": args.repo,
+        "branch": args.branch,
+        "dirty": args.dirty,
+        "deployer": args.deployer or os.environ.get("SUDO_USER") or os.environ.get("USER"),
+        "deployed_at": dt.datetime.now(dt.UTC).isoformat(),
+        "status": "deployed",
+    }
+    append_jsonl(Path(app["stateDir"]) / "releases.jsonl", record)
+    (Path(app["stateDir"]) / "current").write_text(args.release + "\n")
+    print(f"{app['name']}: deployed {args.release}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Operate MeLE app slots")
     parser.add_argument(
@@ -113,6 +210,21 @@ def build_parser() -> argparse.ArgumentParser:
     for command in ("status", "health", "releases"):
         sub = subparsers.add_parser(command)
         sub.add_argument("app")
+
+    deploy = subparsers.add_parser("deploy")
+    deploy.add_argument("app")
+    deploy.add_argument("--release", required=True)
+    deploy.add_argument("--loaded-image", help="Image reference reported by podman load")
+    deploy.add_argument("--repo")
+    deploy.add_argument("--branch")
+    deploy.add_argument("--dirty", choices=("true", "false"))
+    deploy.add_argument("--deployer")
+    deploy.add_argument(
+        "archive",
+        nargs="?",
+        default="-",
+        help="OCI/docker archive; only '-' is supported",
+    )
 
     logs = subparsers.add_parser("logs")
     logs.add_argument("app")
@@ -130,6 +242,10 @@ def dispatch(app: dict[str, Any], args: argparse.Namespace) -> int:
         return cmd_health(app, args)
     if args.command == "releases":
         return cmd_releases(app, args)
+    if args.command == "deploy":
+        if args.archive != "-":
+            raise CliError("deploy currently reads image archives from stdin; use '-'")
+        return cmd_deploy(app, args)
     raise CliError(f"unimplemented command: {args.command}")
 
 

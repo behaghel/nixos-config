@@ -49,7 +49,9 @@ let
   meleAppCli = pkgs.writeShellApplication {
     name = "mele-app";
     runtimeInputs = [
+      pkgs.podman
       pkgs.systemd
+      pkgs.util-linux
     ];
     text = ''
       exec ${pkgs.python3}/bin/python3 ${../../../scripts/mele_app_cli.py} "$@"
