@@ -30,6 +30,8 @@ explicit user approval before execution.
 | Central app module | External projects import `nixos-config/modules/flake/mele-app` in `devenv.yaml`; no helper file copying. |
 | Onboarding commands | `mele:create-app` creates/stages app slots and reminds about `mele:activate`; `mele:onboard-app` prints app-side devenv snippets. |
 | Onboarding docs | `docs/mele-app-onboarding.md` documents HTTP/runtime/OCI contracts, metrics, Node/PWA guidance, and cross-arch image patterns. |
+| SecretSpec gate | `mele-app update-secretspec <app> -` stores the app contract; deploy validates required keys in `/etc/mele-apps/<app>.env` before image load/tag/restart. |
+| Health-check rollback | Deploy polls configured health after restart and rolls back to the previous release image when health fails. |
 
 ### In progress / adjacent
 
@@ -67,18 +69,17 @@ explicit user approval before execution.
 
 ## Immediate next slice
 
-Resume with **Slice 9: SecretSpec contract gate**.
+Resume with **Slice 11: Release retention and image cleanup**.
 
 Planned behavior:
 
 ```sh
-mele-app update-secretspec home - < secretspec.toml
 sudo mele-app deploy home --release <id> -
 ```
 
-Deploy must fail before image load/tag/restart if the app has required keys in
-its active SecretSpec profile and `/etc/mele-apps/<app>.env` does not define
-them.
+After a successful deploy, the app should retain only the current release and the
+last `keepReleases` successful immutable release tags needed for rollback,
+pruning older immutable `localhost/<app>:<release>` images for that app only.
 
 ## Execution notes
 
