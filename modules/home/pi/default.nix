@@ -56,7 +56,6 @@ let
   piLocal = pkgs.writeShellApplication {
     name = "pi-local";
     runtimeInputs = [
-      cfg.package
       pkgs.ollama
       pkgs.curl
       pkgs.coreutils
@@ -66,6 +65,7 @@ let
 
       agent_dir="$HOME/.local/share/pi-local/agent"
       default_model=${lib.escapeShellArg cfg.local.defaultModel}
+      pi_bin="''${PI_BIN:-pi}"
       selected_model="''${PI_LOCAL_MODEL:-$default_model}"
       explicit_pi_model=""
       previous=""
@@ -122,7 +122,7 @@ let
           ollama_model="''${explicit_pi_model#ollama/}"
           ;;
         *)
-          exec ${lib.getExe cfg.package} "$@"
+          exec "$pi_bin" "$@"
           ;;
       esac
 
@@ -137,9 +137,9 @@ let
       fi
 
       if [ -z "$explicit_pi_model" ]; then
-        exec ${lib.getExe cfg.package} --model "$pi_model" "$@"
+        exec "$pi_bin" --model "$pi_model" "$@"
       else
-        exec ${lib.getExe cfg.package} "$@"
+        exec "$pi_bin" "$@"
       fi
     '';
   };
@@ -180,7 +180,33 @@ in
     package = lib.mkOption {
       type = lib.types.package;
       default = piPackage;
-      description = "Pi package to install when hub.pi is enabled.";
+      description = "Legacy Nix-managed Pi package, used only when hub.pi.installPackage is enabled.";
+    };
+
+    installPackage = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Install Pi through Home Manager's legacy Nix-pinned package.";
+    };
+
+    npm = {
+      enable = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Install/update Pi with npm during Home Manager activation.";
+      };
+
+      package = lib.mkOption {
+        type = lib.types.str;
+        default = "@earendil-works/pi-coding-agent";
+        description = "npm package spec used to install Pi.";
+      };
+
+      prefix = lib.mkOption {
+        type = lib.types.str;
+        default = ".local/share/pi-npm";
+        description = "npm global prefix used for the activation-managed Pi install, relative to HOME unless absolute.";
+      };
     };
 
     local = {
@@ -213,21 +239,44 @@ in
 
   config = lib.mkIf cfg.enable {
     home.packages =
-      [ cfg.package ]
+      lib.optionals cfg.installPackage [ cfg.package ]
+      ++ lib.optionals cfg.npm.enable [ pkgs.nodejs ]
       ++ lib.optionals cfg.local.enable [ piLocal pkgs.ollama ];
 
     hub.passLaunchers =
       lib.optionalAttrs cfg.ds4.enable {
         pi-ds4 = {
           enable = true;
-          command = [
-            (lib.getExe cfg.package)
+          lookupCommand = "pi";
+          lookupArgs = [
             "--model"
             cfg.ds4.model
           ];
           passEnv.DEEPSEEK_API_KEY = cfg.ds4.passEntry;
         };
       };
+
+    home.activation.installPiWithNpm = lib.mkIf cfg.npm.enable (
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        set -euo pipefail
+
+        npm=${lib.escapeShellArg (lib.getExe' pkgs.nodejs "npm")}
+        package=${lib.escapeShellArg cfg.npm.package}
+        configured_prefix=${lib.escapeShellArg cfg.npm.prefix}
+        case "$configured_prefix" in
+          /*) prefix="$configured_prefix" ;;
+          *) prefix="$HOME/$configured_prefix" ;;
+        esac
+        bin_dir="$HOME/.local/bin"
+
+        mkdir -p "$prefix" "$bin_dir"
+        export npm_config_prefix="$prefix"
+
+        echo "Installing/updating Pi with npm: $package"
+        "$npm" install -g --ignore-scripts "$package"
+        ln -sfn "$prefix/bin/pi" "$bin_dir/pi"
+      ''
+    );
 
     home.file = lib.mkIf cfg.local.enable {
       ".local/share/pi-local/agent/models.json".text = localModelsJson;

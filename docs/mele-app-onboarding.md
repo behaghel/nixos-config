@@ -84,6 +84,89 @@ Pure Go apps can use `pkgs.pkgsCross.gnu64` and `dockerTools.buildLayeredImage`.
 Node/TypeScript apps should build production artifacts locally with Nix and then
 package only the runtime closure into an amd64 Linux image.
 
+### Cross-architecture build guidance
+
+Avoid making the entire `.#ociImage` derivation an `x86_64-linux` derivation
+when developing on macOS ARM. That forces Nix to use an x86_64 Linux builder and
+will fail if the remote builder is unavailable:
+
+```text
+Required system: x86_64-linux
+Current system: aarch64-darwin
+```
+
+Preferred pattern:
+
+- build portable application artifacts locally where practical;
+- assemble the OCI archive locally with the host package set's
+  `dockerTools.buildLayeredImage`;
+- set `architecture = "amd64"` on the image;
+- include target-runtime Linux packages from an imported Linux package set only
+  as image contents or command paths.
+
+For example, a Node/TypeScript app can build `dist/` and `server.mjs` on Darwin,
+then put `linuxPkgs.nodejs-slim_22` into the image:
+
+```nix
+let
+  pkgs = import nixpkgs { system = "aarch64-darwin"; };
+  linuxPkgs = import nixpkgs { system = "x86_64-linux"; };
+  app = pkgs.buildNpmPackage { ... };
+in
+pkgs.dockerTools.buildLayeredImage {
+  name = "my-app";
+  tag = "latest";
+  architecture = "amd64";
+  contents = [
+    app
+    linuxPkgs.nodejs-slim_22
+  ];
+  config = {
+    Cmd = [
+      "${linuxPkgs.nodejs-slim_22}/bin/node"
+      "${app}/share/my-app/server.mjs"
+    ];
+    Env = [
+      "NODE_ENV=production"
+      "PORT=8080"
+      "APP_DATA_DIR=/data"
+    ];
+  };
+}
+```
+
+This works because JavaScript/static assets are architecture-independent, while
+Node itself comes from a cached `linux/amd64` package. If the app has native npm
+modules, this simple pattern may not be sufficient; build those modules for
+Linux amd64 or use an actual x86_64 Linux builder/CI.
+
+For Go, Rust, or other compiled apps, prefer true cross-compilation when
+available. For pure Go, `pkgs.pkgsCross.gnu64` plus `CGO_ENABLED=0` is usually
+straightforward.
+
+Validate locally without remote builders when possible:
+
+```sh
+nix build --builders '' .#ociImage
+```
+
+Then inspect the image config:
+
+```sh
+tmp=$(mktemp -d)
+tar -xf result -C "$tmp" manifest.json
+config=$(jq -r '.[0].Config' "$tmp/manifest.json")
+tar -xf result -C "$tmp" "$config"
+jq '{architecture, os, config}' "$tmp/$config"
+rm -rf "$tmp"
+```
+
+Expected:
+
+```json
+{"architecture":"amd64","os":"linux"}
+```
+
 ## Node/TypeScript and PWA guidance
 
 Do not deploy Vite's development server. Do not rely on `npm run preview` as the
@@ -211,6 +294,28 @@ Expected:
 - Caddy routes public HTTPS to the app;
 - the app listens only through its configured localhost host port on MeLE;
 - release metadata appears in `mele-app releases <app>`.
+
+## Request hardening expectations
+
+Apps should not rely on the reverse proxy alone for abuse protection. Caddy can
+apply coarse edge limits, but each app must enforce domain-specific constraints.
+
+Minimum expectations:
+
+- reject overlarge request bodies with a clear `4xx` response;
+- define maximum JSON/envelope sizes for write endpoints;
+- define maximum string/array counts where domain data is accepted;
+- rate-limit or debounce expensive or abuse-prone endpoints where practical;
+- keep SSE/WebSocket connection counts and idle behavior bounded;
+- expose metrics for rejected requests, rate-limited requests, and payload-size
+  failures;
+- never log request bodies, bearer tokens, ciphertext payloads, or private domain
+  data when rejecting requests.
+
+For Hédonis specifically, encrypted sync endpoints should bound pairing package
+size, record envelope size, batch size, and SSE subscriptions per sync space or
+client where practical. Metrics should report aggregate rejection counts without
+sync-space IDs or player-identifying labels.
 
 ## Operational expectations
 

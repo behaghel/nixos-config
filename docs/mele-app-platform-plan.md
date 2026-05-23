@@ -2,28 +2,91 @@
 
 **Source spec:** `docs/mele-app-platform-spec.md`
 
-**Vertical-slice rule:** each iteration must produce behavior a human can exercise through Nix evaluation, MeLE host commands, HTTP requests, or a blueprint app deploy. Host activation (`nix run`, switch, boot, test, activate) requires explicit user approval before execution.
+**Destination:** a small personal PaaS on MeLE where existing devenv projects can
+be onboarded, packaged as `linux/amd64` OCI images, deployed frequently without a
+MeLE rebuild, observed through shared metrics/logs, protected by deploy-time
+checks and rollback, and covered by backup/restore runbooks.
+
+**Vertical-slice rule:** each iteration must produce behavior a human can
+exercise through Nix evaluation, MeLE host commands, HTTP requests, or an app
+deploy. Host activation (`nix run`, switch, boot, test, activate) requires
+explicit user approval before execution.
+
+## Current status
+
+### Completed and validated
+
+| Area | Status |
+|---|---|
+| App slot model | `services.meleApps.apps` loads per-app files from `configurations/nixos/mele-hub/apps/`. |
+| `home` slot | `home.behaghel.org`, host port `8101`, container port `8080`, `/health`, `/metrics`. |
+| `hedonis` slot | `hedonis.home.behaghel.org`, host port `8102`, container port `8080`, `/health`, `/metrics`; activation performed by user. |
+| App Unix identity | One Unix user/group per app; `/srv/apps/<app>/data` and `/srv/apps/<app>/state`. |
+| Public edge | Caddy owns public routing/TLS; unknown hosts return safe errors; router/DNS/NAT loopback verified. |
+| Podman runner | Root-managed systemd units run rootless Podman as app users, bind localhost-only host ports, mount `/data`. |
+| CLI read operations | `mele-app status`, `health`, `logs`, `releases` read `/etc/mele-apps/config.json`. |
+| Deploy happy path | `mele-app deploy <app> --release <id> -` loads image, tags immutable/current, restarts only that app, records release metadata. |
+| Go blueprint app | `~/ws/mele-home` builds `linux/amd64` OCI image locally, deploys with `mele:deploy`, serves `/health` and `/metrics`. |
+| Central app module | External projects import `nixos-config/modules/flake/mele-app` in `devenv.yaml`; no helper file copying. |
+| Onboarding commands | `mele:create-app` creates/stages app slots and reminds about `mele:activate`; `mele:onboard-app` prints app-side devenv snippets. |
+| Onboarding docs | `docs/mele-app-onboarding.md` documents HTTP/runtime/OCI contracts, metrics, Node/PWA guidance, and cross-arch image patterns. |
+
+### In progress / adjacent
+
+| Area | Status |
+|---|---|
+| Hédonis packaging | Hédonis agent has a WIP production server and `.#ociImage`; cross-arch builder issue was diagnosed. Preferred pattern is now documented: build portable JS artifacts locally, assemble OCI locally, include `linuxPkgs.nodejs-slim_22`. |
+| Pi install/web access | Home module changes staged to install/update Pi via npm at activation and stop exposing Nix-pinned `pi`; current Pi session may still be old, so use a fresh Pi session after activation before relying on `pi-web-access`. |
+
+### Known constraints
+
+- Normal app releases must not run `mele:activate` or switch MeLE.
+- New app slots do require user-approved activation.
+- The assistant must not run activation or `sudo` directly.
+- App images must target `linux/amd64`; avoid requiring a remote builder unless
+  the app truly needs native Linux builds.
+- Metrics are required for onboarded apps unless explicitly waived as temporary
+  early-development debt.
+
+## Remaining slices to destination
 
 | # | Slice Goal | User Interaction Path | Tests to Write First | Expected Red Signal | Minimal Green Target | Feedback Checkpoint |
 |---|---|---|---|---|---|---|
-| 1 | Declare the `home` app slot with per-app file convention and generate host-readable config | Evaluate MeLE config; inspect generated `/etc/mele-apps/config.json` in the system closure | Nix evaluation/check that `apps.nix` imports app files from `configurations/nixos/mele-hub/apps/`, `services.meleApps.apps.home` exists, and JSON contains `home`, `home.behaghel.org`, `8101`, `8080`, `healthPath`, `metrics.path` | Evaluation fails because module/options/config file do not exist | Local `configurations/nixos/mele-hub/apps.nix`, `apps/home.nix`, `home` slot, generated config JSON, no runtime services yet | Show generated config and confirm slot-file convention before adding runtime effects |
-| 2 | Provision app identity and durable directories without app image | After approved MeLE switch, run `id app-home` and `stat /srv/apps/home/{data,state}` | Nix eval/check for user, group, tmpfiles rules, `/etc/mele-apps` directory, no managed secret value file | User/tmpfiles entries absent | Per-app user/group, `/srv/apps/home/data`, `/srv/apps/home/state`, `/etc/mele-apps` directory; activation does not require image | Confirm filesystem/user layout and secret-file policy |
-| 3 | Add guided app-slot onboarding | Run `mele:create-app notes` from the devenv shell; inspect generated `apps/notes.nix`; evaluate config JSON | Script test/smoke check that command rejects invalid/colliding names, chooses next free port, writes conventional app file, and generated config includes `notes` | No onboarding command; manual copy/paste required | Local devenv script creates per-app slot files by convention and validates Nix evaluation | Confirm the next app can be bootstrapped consistently without remembering wiring |
-| 4 | Put Caddy at the public edge with safe default routing | From LAN/cellular, request `http(s)://home.behaghel.org`; request unknown host with `Host:` header | Nix eval/check for Caddy enabled, firewall ports `80/443`, virtual host for `home.behaghel.org`, catch-all 404 | No Caddy config or firewall rules | Caddy serves `home.behaghel.org` placeholder/route and returns 404 for unknown subdomains | Confirm DNS/TLS/NAT loopback behavior before app runtime |
-| 5 | Add the systemd/Podman app runner that is safe before first deploy | Run `systemctl cat mele-app-home.service`; before image exists, service absence/failure must not break host; after image exists it should bind localhost only | Nix eval/check for Podman package/config and `mele-app-home.service` ExecStart using declared ports, env file, data mount | Unit missing or binds public interface | Root-managed service definition for `localhost/home:current`, app env file path, `/data` mount, localhost-only port | Confirm service contract before building deploy tooling |
-| 6 | Provide `mele-app` CLI read-only operations | SSH to MeLE and run `mele-app status home`, `health home`, `logs home`, `releases home`, and an unknown app | Python unit tests for config loading, app validation, command dispatch; unknown app rejection | CLI missing or accepts unknown apps | Python CLI installed from Nix, reads `/etc/mele-apps/config.json`, implements safe read-only subcommands | Demo CLI UX and error messages |
-| 7 | Deploy a minimal candidate image and restart only `home` | Stream a known OCI archive to `mele-app deploy home --release test`; inspect Podman tags, service restart, release state | Python tests for deploy command sequencing with mocked subprocesses; integration dry-run if practical | No deploy command or no tag/restart/state behavior | Load archive from stdin, tag immutable release and `current`, restart `mele-app-home.service`, append release metadata | Confirm happy-path deploy semantics before secrets/rollback complexity |
-| 8 | Create the external blueprint Go app with devenv deploy tasks | In the new repo, run `devenv tasks run mele:deploy`; visit `/health` and `/metrics` | Go tests for `/health`, `/metrics`; devenv/Nix parse checks; task smoke checks | App repo missing; health/metrics absent | Tiny Go service with `/`, `/health`, `/metrics`, container build, hardcoded `MELE_*` env/tasks | Show first real app deployed without MeLE switch |
-| 9 | Validate SecretSpec contract without resolving secrets | Update `secretspec.toml`; run `mele-app update-secretspec`; deploy with missing env key and verify no restart/current retag | Python tests for TOML profile parsing and env-file validation; deploy missing-secret test with mocked retag/restart | Deploy ignores missing secrets or requires pass/YubiKey | `update-secretspec` copies schema; deploy validates `/etc/mele-apps/home.env` against configured profile and fails before retag/restart | Confirm no YubiKey/pass interaction in deploy path |
-| 10 | Add health-check rollback and release retention | Deploy intentionally unhealthy image; verify rollback; deploy >5 releases and inspect retained images | Python tests for health success/failure, rollback retagging, metadata, retention pruning | Failed health leaves broken release running; old images accumulate | Optional HTTP health check, automatic rollback, metrics/state recording, keep last 5 releases | Demo safe failed deploy and rollback path |
-| 11 | Wire observability into Prometheus and Grafana baseline | Open Prometheus target/query; open generic MeLE Apps dashboard for `home` | Nix eval/check for Prometheus scrape config and dashboard provisioning; optional dashboard JSON validation | No scrape target/dashboard data | App metrics scrape when enabled, deploy/health textfile metrics, generic dashboard panels | Confirm operator view answers “what is running and healthy?” |
-| 12 | Include app data/state in backup and prove non-destructive restore | Create marker in `/srv/apps/home/data`; run backup; restore to temp; verify marker | Script/unit tests for restore helper path safety; manual runbook dry-run | Restore check risks live data or backup omits app files | Restic includes app data/state, excludes images, restore verification helper/runbook uses temp dir only | Confirm backup/restore confidence before relying on apps |
-| 13 | Move Grafana behind Caddy with authentication | Visit `grafana.home.behaghel.org` through Caddy; confirm public `:3000` is not used | Nix eval/check for Caddy route/auth and Grafana bind behavior | Grafana still directly exposed or unauthenticated public route | Grafana proxied behind Caddy auth; no direct router/public `3000` dependency | Confirm final observability access model |
+| 9 | SecretSpec contract gate without resolving secrets | From an app repo, stream/copy `secretspec.toml` with `mele-app update-secretspec <app> -`; deploy with a missing required env key and verify no tag/restart | Python tests for TOML profile parsing, required-key extraction, env-file parsing, `update-secretspec`, deploy failing before `podman load`/tag/restart | Deploy ignores missing env or requires `pass`/YubiKey | CLI stores contract in `/srv/apps/<app>/state/secretspec.toml`; deploy validates `/etc/mele-apps/<app>.env` against configured profile and fails early with missing keys | Confirm deploy hot path remains secret-store-free and broken config cannot restart apps |
+| 10 | Health-check rollback | Deploy an intentionally unhealthy image; verify previous release is restored and service is healthy again | Python tests for previous-release lookup, health success/failure, retagging previous release, restart sequencing, rollback metadata | Failed health leaves `current` pointing at broken image | After restart, poll app health; on failure, retag previous successful release as `current`, restart, record rollback | Demo safe failed deploy against a test image/app |
+| 11 | Release retention and image cleanup | Deploy more than `keepReleases`; inspect release log and Podman images | Python tests for retaining last N successful releases, preserving current/rollback target, pruning old image tags | Old images accumulate forever or rollback image is deleted | Keep last `keepReleases` successful release images per app and prune older immutable tags | Confirm disk usage stays bounded without sacrificing rollback |
+| 12 | Deploy and health observability on host | Inspect textfile metrics or CLI status after deploy/rollback/health check | Tests for metrics record formatting and privacy; Nix eval for textfile collector path if used | No operator-visible deploy/rollback status except logs | Emit per-app deploy metadata and last health result as Prometheus-compatible textfile metrics under app/platform state | Confirm operator can answer “what version is running and was last deploy healthy?” |
+| 13 | Prometheus scrape for app `/metrics` | Open Prometheus target/query for `home` and `hedonis` after deploy | Nix eval/check for scrape configs derived from `services.meleApps.apps.*.metrics`; optional generated config test | Metrics-enabled apps are not scraped | Prometheus scrapes each app with `metrics.enable = true` at `127.0.0.1:<hostPort><metrics.path>` | Confirm app metrics appear in Prometheus |
+| 14 | Edge request hardening | Send oversized request bodies and bursts to a public app; verify Caddy rejects/throttles before app overload | Nix eval/check for generated Caddy request body limits and rate-limit config; HTTP smoke tests for `413`/`429` where practical | Public apps accept unbounded request bodies or request bursts | Per-app defaults for max request body size, header/read timeouts where available, and rate limiting for sensitive endpoints; app override knobs documented | Confirm malformed/abusive traffic is constrained at the edge without touching app code |
+| 15 | App-level hardening contract | Run app contract tests against `/health`, `/metrics`, and representative write endpoints | App-template/contract tests or docs checklist for max payload, low-cardinality metrics, safe logging, and endpoint-specific throttling | Apps rely entirely on Caddy and accept unbounded JSON/envelopes internally | Onboarding doc requires apps to enforce domain-specific size limits, reject overlarge sync records, avoid logging payloads, and expose counters for rejected/limited requests | Confirm Hédonis and future apps have explicit in-process safeguards for domain-specific abuse |
+| 16 | Generic Grafana MeLE Apps dashboard | Open dashboard and inspect app health/deploy/HTTP panels | Dashboard JSON validation if practical; Nix eval for provisioning | No single operator view for apps | Dashboard panels for service state, last deploy, health status, request rate/latency where exposed | Confirm dashboard answers core ops questions quickly |
+| 17 | App data/state backup inclusion | Create marker under `/srv/apps/<app>/data`; run backup; restore to temp; verify marker | Script tests for restore-helper path safety and excludes | Backup omits app data/state or restore risks live paths | Restic includes `/srv/apps/*/{data,state}` and excludes container images; restore helper/runbook uses temp dirs only | Confirm data can be recovered non-destructively |
+| 18 | App restore/migration runbook | Follow documented restore of one app into a temp or replacement slot | Runbook dry-run checks; shell helper tests if added | Restore requires ad-hoc unsafe commands | Document stop/restore/ownership/restart sequence and migration expectations | Confirm restore is executable under stress |
+| 19 | Grafana behind Caddy with authentication | Visit `grafana.home.behaghel.org`; verify no direct public `:3000` dependency | Nix eval/check for Caddy route/auth and Grafana bind behavior | Grafana directly exposed or unauthenticated | Grafana proxied behind Caddy auth; direct router/public port not required | Confirm final observability access model |
+| 20 | Multi-app hardening pass | Onboard/deploy two apps (`home`, `hedonis`) and verify isolation | Tests/eval for per-app users, dirs, env files, config JSON; manual cross-app checks | One app can read/write another app’s private data or deploy restarts unrelated app | App users, dirs, env files, services, releases, request limits, and metrics remain isolated by convention and permissions | Confirm PaaS is safe enough for additional apps |
 
-## Execution Notes
+## Immediate next slice
 
-- Do not run host activation commands without explicit approval in the current session.
+Resume with **Slice 9: SecretSpec contract gate**.
+
+Planned behavior:
+
+```sh
+mele-app update-secretspec home - < secretspec.toml
+sudo mele-app deploy home --release <id> -
+```
+
+Deploy must fail before image load/tag/restart if the app has required keys in
+its active SecretSpec profile and `/etc/mele-apps/<app>.env` does not define
+them.
+
+## Execution notes
+
+- Do not run host activation commands without explicit approval in the current
+  session.
 - Prefer `nix eval`/`nix build --dry-run`/parse checks before host switches.
 - Keep each slice green before moving to the next.
-- If implementation uncovers option-name uncertainty, search NixOS/devenv options rather than guessing.
-- For app repo work, use `devenv` declaratively; do not install tooling globally.
+- If implementation uncovers option-name or API uncertainty, use Pi web access
+  from a fresh npm-installed Pi session rather than guessing.
+- For app repo work, use `devenv` declaratively; do not install tooling inside
+  projects imperatively.
