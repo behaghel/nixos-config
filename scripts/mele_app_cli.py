@@ -214,15 +214,108 @@ def health_url(app: dict[str, Any]) -> str | None:
     return f"http://127.0.0.1:{app['hostPort']}{health_path}"
 
 
-def health_check_once(app: dict[str, Any]) -> bool:
+def health_status_once(app: dict[str, Any]) -> tuple[bool, int | None, str | None]:
     url = health_url(app)
     if url is None:
-        return True
+        return True, None, None
     try:
         with urllib.request.urlopen(url, timeout=5) as response:
-            return 200 <= response.status < 300
-    except (urllib.error.HTTPError, urllib.error.URLError):
-        return False
+            return 200 <= response.status < 300, response.status, None
+    except urllib.error.HTTPError as exc:
+        return False, exc.code, None
+    except urllib.error.URLError as exc:
+        return False, None, str(exc.reason)
+
+
+def health_check_once(app: dict[str, Any]) -> bool:
+    healthy, _status, _error = health_status_once(app)
+    return healthy
+
+
+def metrics_textfile_path(app: dict[str, Any]) -> Path:
+    configured = app.get("metricsTextfile")
+    if configured:
+        return Path(configured)
+    return Path("/var/lib/node_exporter/textfile_collector") / f"mele_app_{app['name']}.prom"
+
+
+def metric_labels(labels: dict[str, str]) -> str:
+    escaped = {
+        key: value.replace("\\", "\\\\").replace('"', '\\"')
+        for key, value in labels.items()
+    }
+    return ",".join(f'{key}="{value}"' for key, value in escaped.items())
+
+
+def render_metrics(app: dict[str, Any], updates: dict[str, Any]) -> str:
+    lines = [
+        "# HELP mele_app_current_release_info Current app release.",
+        "# TYPE mele_app_current_release_info gauge",
+    ]
+    current = updates.get("current_release") or read_current_release(app)
+    if current:
+        labels = metric_labels({"app": app["name"], "release": str(current)})
+        lines.append(f"mele_app_current_release_info{{{labels}}} 1")
+
+    if "deploy" in updates:
+        deploy = updates["deploy"]
+        lines.extend([
+            "# HELP mele_app_last_deploy_timestamp_seconds Last deploy event time.",
+            "# TYPE mele_app_last_deploy_timestamp_seconds gauge",
+        ])
+        labels = metric_labels({
+            "app": app["name"],
+            "status": str(deploy["status"]),
+            "release": str(deploy["release"]),
+        })
+        lines.append(
+            f"mele_app_last_deploy_timestamp_seconds{{{labels}}} "
+            f"{int(deploy['timestamp'])}"
+        )
+
+    if "health" in updates:
+        health = updates["health"]
+        labels = metric_labels({"app": app["name"]})
+        lines.extend([
+            "# HELP mele_app_last_health_status Last health status, 1=healthy.",
+            "# TYPE mele_app_last_health_status gauge",
+            f"mele_app_last_health_status{{{labels}}} "
+            f"{1 if health['healthy'] else 0}",
+            "# HELP mele_app_last_health_timestamp_seconds Last health check time.",
+            "# TYPE mele_app_last_health_timestamp_seconds gauge",
+            f"mele_app_last_health_timestamp_seconds{{{labels}}} "
+            f"{int(health['timestamp'])}",
+        ])
+
+    if "rollback" in updates:
+        rollback = updates["rollback"]
+        labels = metric_labels({
+            "app": app["name"],
+            "status": str(rollback["status"]),
+            "previous_release": str(rollback.get("previous_release") or ""),
+        })
+        lines.extend([
+            "# HELP mele_app_last_rollback_info Last rollback outcome.",
+            "# TYPE mele_app_last_rollback_info gauge",
+            f"mele_app_last_rollback_info{{{labels}}} 1",
+        ])
+
+    return "\n".join(lines) + "\n"
+
+
+def write_metrics(app: dict[str, Any], updates: dict[str, Any]) -> None:
+    path = metrics_textfile_path(app)
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path.write_text(render_metrics(app, updates))
+        tmp_path.replace(path)
+    except OSError as exc:
+        print(f"{app['name']}: warning: metrics update failed: {exc}", file=sys.stderr)
+
+
+def health_metrics(healthy: bool) -> dict[str, Any]:
+    return {"healthy": healthy, "timestamp": int(dt.datetime.now(dt.UTC).timestamp())}
 
 
 def poll_health(app: dict[str, Any], attempts: int = 12, delay: int = 5) -> bool:
@@ -259,17 +352,14 @@ def cmd_health(app: dict[str, Any], _args: argparse.Namespace) -> int:
     url = health_url(app)
     if url is None:
         print(f"{app['name']}: no healthPath configured")
+        write_metrics(app, {"health": health_metrics(True)})
         return 0
-    try:
-        with urllib.request.urlopen(url, timeout=5) as response:
-            status = response.status
-    except urllib.error.HTTPError as exc:
-        print(f"{app['name']}: unhealthy {exc.code} {url}")
+    healthy, status, error = health_status_once(app)
+    write_metrics(app, {"health": health_metrics(healthy)})
+    if error is not None:
+        print(f"{app['name']}: health check failed {url}: {error}")
         return 1
-    except urllib.error.URLError as exc:
-        print(f"{app['name']}: health check failed {url}: {exc.reason}")
-        return 1
-    if 200 <= status < 300:
+    if status is not None and 200 <= status < 300:
         print(f"{app['name']}: healthy {status} {url}")
         return 0
     print(f"{app['name']}: unhealthy {status} {url}")
@@ -454,6 +544,14 @@ def cleanup_release_images(app: dict[str, Any], extra_protected: set[str] | None
         print(f"{app['name']}: pruned {len(removed)} old release image(s)")
 
 
+def deploy_metrics(release: str, status: str) -> dict[str, Any]:
+    return {
+        "release": release,
+        "status": status,
+        "timestamp": int(dt.datetime.now(dt.UTC).timestamp()),
+    }
+
+
 def rollback_after_failed_health(
     app: dict[str, Any],
     args: argparse.Namespace,
@@ -486,6 +584,15 @@ def rollback_after_failed_health(
     append_jsonl(release_log_path(app), record)
     extra_protected = {args.release} if rollback_status != "succeeded" else None
     cleanup_release_images(app, extra_protected)
+    write_metrics(app, {
+        "current_release": read_current_release(app),
+        "deploy": deploy_metrics(args.release, "failed_health"),
+        "health": health_metrics(rollback_status == "succeeded"),
+        "rollback": {
+            "status": rollback_status,
+            "previous_release": previous_release or "",
+        },
+    })
     print(
         f"{app['name']}: deploy {args.release} failed health check; "
         f"rollback {rollback_status}"
@@ -518,6 +625,11 @@ def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
     append_jsonl(release_log_path(app), record)
     current_release_path(app).write_text(args.release + "\n")
     cleanup_release_images(app)
+    write_metrics(app, {
+        "current_release": args.release,
+        "deploy": deploy_metrics(args.release, "deployed"),
+        "health": health_metrics(True),
+    })
     print(f"{app['name']}: deployed {args.release}")
     return 0
 

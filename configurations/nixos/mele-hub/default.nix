@@ -339,7 +339,9 @@ in
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"
     "d ${syncthingConfigDir} 0700 syncthing syncthing -"
-    "d /var/lib/node_exporter/textfile_collector 0755 root root -"
+    # Allow trusted wheel operators to refresh app textfile metrics via
+    # read-only commands such as `mele-app health` without sudo.
+    "d /var/lib/node_exporter/textfile_collector 0775 root wheel -"
   ];
 
   # Harden networking a bit for a public host

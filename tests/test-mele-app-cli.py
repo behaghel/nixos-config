@@ -39,6 +39,7 @@ class MeleAppCliTests(unittest.TestCase):
                     "healthPath": "/health",
                     "serviceName": "mele-app-home.service",
                     "stateDir": str(state_dir or (tmp / "state")),
+                    "metricsTextfile": str(tmp / "mele_app_home.prom"),
                     "keepReleases": 5,
                     "envFile": str(tmp / "home.env"),
                     "secretspec": {
@@ -358,6 +359,63 @@ class MeleAppCliTests(unittest.TestCase):
             self.assertEqual(len(removed), 2)
             self.assertIn("podman rmi localhost/home:old1", removed[0])
             self.assertIn("podman rmi localhost/home:old2", removed[1])
+
+    def test_health_updates_textfile_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            with mock.patch.object(
+                mele_app_cli,
+                "health_status_once",
+                return_value=(True, 200, None),
+            ):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "health",
+                    "home",
+                ])
+            self.assertEqual(exit_code, 0)
+            metrics = (tmp / "mele_app_home.prom").read_text()
+            self.assertIn('mele_app_last_health_status{app="home"} 1', metrics)
+            self.assertIn('mele_app_last_health_timestamp_seconds{app="home"}', metrics)
+
+    def test_deploy_writes_current_release_and_deploy_metrics(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            config = self.write_config(tmp, state)
+            completed = [
+                subprocess_result("Loaded image: localhost/source:latest\n"),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result(""),
+                subprocess_result("localhost/home:abc1234\nlocalhost/home:current\n"),
+            ]
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir"), \
+                    mock.patch.object(mele_app_cli, "capture_command", side_effect=completed), \
+                    mock.patch.object(mele_app_cli, "poll_health", return_value=True):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "deploy",
+                    "home",
+                    "--release",
+                    "abc1234",
+                ])
+            self.assertEqual(exit_code, 0)
+            metrics = (tmp / "mele_app_home.prom").read_text()
+            self.assertIn(
+                'mele_app_current_release_info{app="home",release="abc1234"} 1',
+                metrics,
+            )
+            self.assertIn(
+                'mele_app_last_deploy_timestamp_seconds{app="home",'
+                'status="deployed",release="abc1234"}',
+                metrics,
+            )
+            self.assertIn('mele_app_last_health_status{app="home"} 1', metrics)
 
     def test_deploy_loads_tags_restarts_and_records_release(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

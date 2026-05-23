@@ -139,6 +139,7 @@ let
     envFile = "/etc/mele-apps/${name}.env";
     dataDir = "/srv/apps/${name}/data";
     stateDir = "/srv/apps/${name}/state";
+    metricsTextfile = "/var/lib/node_exporter/textfile_collector/mele_app_${name}.prom";
     secretspec = {
       profile = app.secretspec.profile;
       path = "/srv/apps/${name}/state/secretspec.toml";
