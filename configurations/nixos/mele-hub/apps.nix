@@ -123,7 +123,15 @@ let
   caddyVirtualHost = _name: app: {
     extraConfig = ''
       encode zstd gzip
-      reverse_proxy 127.0.0.1:${toString app.hostPort}
+      request_body {
+        max_size ${app.edge.maxBodySize}
+      }
+      reverse_proxy 127.0.0.1:${toString app.hostPort} {
+        transport http {
+          dial_timeout ${app.edge.dialTimeout}
+          response_header_timeout ${app.edge.responseHeaderTimeout}
+        }
+      }
       handle_errors {
         respond "App unavailable" {err.status_code}
       }
@@ -238,6 +246,26 @@ in
               type = lib.types.str;
               default = "/metrics";
               description = "HTTP metrics path exposed by the app.";
+            };
+          };
+
+          edge = {
+            maxBodySize = lib.mkOption {
+              type = lib.types.str;
+              default = "10MiB";
+              description = "Maximum request body size accepted by Caddy.";
+            };
+
+            dialTimeout = lib.mkOption {
+              type = lib.types.str;
+              default = "5s";
+              description = "Caddy reverse proxy dial timeout for this app.";
+            };
+
+            responseHeaderTimeout = lib.mkOption {
+              type = lib.types.str;
+              default = "30s";
+              description = "Caddy timeout waiting for app response headers.";
             };
           };
         };

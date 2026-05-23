@@ -305,8 +305,25 @@ Expected:
 
 ## Request hardening expectations
 
-Apps should not rely on the reverse proxy alone for abuse protection. Caddy can
-apply coarse edge limits, but each app must enforce domain-specific constraints.
+Apps should not rely on the reverse proxy alone for abuse protection. Caddy
+applies coarse edge defaults for every app slot:
+
+- `edge.maxBodySize = "10MiB"`
+- `edge.dialTimeout = "5s"`
+- `edge.responseHeaderTimeout = "30s"`
+
+Override these in the app slot when needed, for example:
+
+```nix
+{
+  hostPort = 8103;
+  edge.maxBodySize = "100MiB";
+  edge.responseHeaderTimeout = "2m";
+}
+```
+
+Caddy can apply coarse edge limits, but each app must enforce domain-specific
+constraints.
 
 Minimum expectations:
 
