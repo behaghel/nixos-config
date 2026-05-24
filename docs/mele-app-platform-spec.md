@@ -39,8 +39,8 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | Migrations | No automatic migrations in v1 | Migration rollback semantics are app-specific and should not block platform v1. |
 | Persistent data | Default `/srv/apps/<app>/data` mounted as `/data` | Simple durable storage convention. |
 | Logs | Journald primary | Existing persistent journald provides standard access via `journalctl`. |
-| Observability | Built-in systemd/deploy/health observability; optional Prometheus `/metrics` scraping | Baseline visibility for every app; richer metrics for apps that opt in. |
-| Grafana dashboard | Generic MeLE Apps dashboard first; app-specific dashboards later | Immediate baseline with low provisioning complexity. |
+| Observability | Built-in systemd/deploy/health observability; optional Prometheus `/metrics` scraping | Baseline visibility for every app; richer metrics for apps that opt in. Apps should expose generic HTTP metrics (`http_requests_total`, `http_request_duration_seconds`) with low-cardinality labels so shared dashboards can show request rate, error rate, and latency. |
+| Grafana dashboard | Generic MeLE Apps dashboard first; app-specific dashboards later | Immediate baseline with low provisioning complexity. The generic dashboard separates service availability, request behavior, platform rollout/version events, and observability scrape health. |
 | Release metadata | Record SHA, repo, branch, dirty state, deployer, timestamp | Makes status, rollback, and Grafana useful. |
 | Rollback | First-class `mele-app rollback` with health check and metric recording | Operator-safe recovery path. |
 | Hardening | Hardened defaults with per-app escape hatches | Improves security while allowing practical app exceptions. |
@@ -78,7 +78,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - [ ] AC-11: Given more than five successful releases exist for `home`, when a successful deploy completes, then old non-current images beyond the retention window are pruned while the current and recent rollback candidates remain.
 - [ ] AC-12: Given the blueprint Go `home` app is deployed, when `GET /health` is requested through Caddy, then it returns a success response.
 - [ ] AC-13: Given the blueprint Go `home` app is deployed and metrics are enabled for the slot, when Prometheus scrapes the configured app metrics endpoint, then app metrics are collected under labels that identify `app="home"`.
-- [ ] AC-14: Given a deploy or rollback occurs, when Grafana displays the generic MeLE Apps dashboard, then the `home` app shows current release, last deploy status/time, health status, and service state.
+- [ ] AC-14: Given a deploy or rollback occurs, when Grafana displays the generic MeLE Apps dashboard, then the `home` app shows current release, last deploy status/time, rollout/rollback events, service availability, request rate/error/latency where app metrics expose them, and separate observability scrape health.
 - [ ] AC-15: Given `backup = true` for the `home` slot, when the MeLE restic backup runs, then `/srv/apps/home/data` and `/srv/apps/home/state` are included and container images are not included.
 - [ ] AC-16: Given a backup has completed, when the non-destructive restore verification is run for `home`, then it restores app data/state to a temporary location and verifies a known marker without overwriting live app data.
 - [ ] AC-17: Given direct public Grafana port forwarding has been removed, when Grafana is later exposed, then it is reachable behind Caddy with authentication rather than directly on public port `3000`.
@@ -156,7 +156,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 6. **Blueprint Go app repo**: tiny Go service with `/`, `/health`, `/metrics`, `devenv` container build, hardcoded MeLE deploy/status/log tasks.
 7. **Secrets validation**: parse copied SecretSpec, validate `/etc/mele-apps/<app>.env`, fail before retag/restart.
 8. **Health rollback and release retention**: automatic rollback, release metadata JSONL, textfile metrics, keep last 5 releases.
-9. **Observability**: Prometheus scrape config for app metrics, deploy/health textfile metrics, generic Grafana MeLE Apps dashboard.
+9. **Observability**: Prometheus scrape config for app metrics, deploy/health textfile metrics, periodic health probes, bounded rollout event metrics, generic Grafana MeLE Apps dashboard.
 10. **Backup/restore validation**: include app data/state in restic, add non-destructive restore verification helper and manual runbook.
 11. **Grafana behind Caddy**: move Grafana route behind Caddy with authentication; keep direct public `3000` closed.
 12. **V2 deferred**: extract reusable devenv extension for native `mele` tasks/options after the blueprint path stabilizes.

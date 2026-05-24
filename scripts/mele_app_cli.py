@@ -247,18 +247,89 @@ def metric_labels(labels: dict[str, str]) -> str:
     return ",".join(f'{key}="{value}"' for key, value in escaped.items())
 
 
+def release_records(app: dict[str, Any]) -> list[dict[str, Any]]:
+    path = release_log_path(app)
+    if not path.exists():
+        return []
+    records: list[dict[str, Any]] = []
+    for line in path.read_text().splitlines():
+        if not line.strip():
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(record, dict):
+            records.append(record)
+    return records
+
+
+def record_timestamp(record: dict[str, Any]) -> int | None:
+    raw = record.get("deployed_at")
+    if not raw:
+        return None
+    try:
+        return int(dt.datetime.fromisoformat(str(raw)).timestamp())
+    except ValueError:
+        return None
+
+
+def health_last_success_path(app: dict[str, Any]) -> Path:
+    return Path(app["stateDir"]) / "health-last-success"
+
+
+def read_health_last_success(app: dict[str, Any]) -> int | None:
+    path = health_last_success_path(app)
+    if not path.exists():
+        return None
+    try:
+        return int(path.read_text().strip())
+    except ValueError:
+        return None
+
+
+def remember_health_success(app: dict[str, Any], timestamp: int) -> None:
+    path = health_last_success_path(app)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{timestamp}\n")
+
+
 def render_metrics(app: dict[str, Any], updates: dict[str, Any]) -> str:
     lines = [
         "# HELP mele_app_current_release_info Current app release.",
         "# TYPE mele_app_current_release_info gauge",
     ]
     current = updates.get("current_release") or read_current_release(app)
+    records = release_records(app)
     if current:
         labels = metric_labels({"app": app["name"], "release": str(current)})
         lines.append(f"mele_app_current_release_info{{{labels}}} 1")
+        for record in reversed(records):
+            if str(record.get("release") or "") == str(current):
+                timestamp = record_timestamp(record)
+                if timestamp is not None:
+                    timestamp_labels = metric_labels({
+                        "app": app["name"],
+                        "release": str(current),
+                    })
+                    lines.extend([
+                        "# HELP mele_app_current_release_timestamp_seconds Current release deploy time.",
+                        "# TYPE mele_app_current_release_timestamp_seconds gauge",
+                        f"mele_app_current_release_timestamp_seconds{{{timestamp_labels}}} {timestamp}",
+                    ])
+                break
 
-    if "deploy" in updates:
-        deploy = updates["deploy"]
+    last = records[-1] if records else None
+    deploy = updates.get("deploy")
+    if deploy is None and last is not None and last.get("release"):
+        timestamp = record_timestamp(last)
+        if timestamp is not None:
+            deploy = {
+                "release": str(last["release"]),
+                "status": str(last.get("status") or "unknown"),
+                "timestamp": timestamp,
+            }
+    if deploy is not None:
         lines.extend([
             "# HELP mele_app_last_deploy_timestamp_seconds Last deploy event time.",
             "# TYPE mele_app_last_deploy_timestamp_seconds gauge",
@@ -273,22 +344,45 @@ def render_metrics(app: dict[str, Any], updates: dict[str, Any]) -> str:
             f"{int(deploy['timestamp'])}"
         )
 
-    if "health" in updates:
-        health = updates["health"]
+    health = updates.get("health")
+    if health is not None:
         labels = metric_labels({"app": app["name"]})
+        healthy_value = 1 if health["healthy"] else 0
         lines.extend([
+            "# HELP mele_app_health_status Regular service health status, 1=healthy.",
+            "# TYPE mele_app_health_status gauge",
+            f"mele_app_health_status{{{labels}}} {healthy_value}",
+            "# HELP mele_app_health_check_timestamp_seconds Last health probe time.",
+            "# TYPE mele_app_health_check_timestamp_seconds gauge",
+            f"mele_app_health_check_timestamp_seconds{{{labels}}} "
+            f"{int(health['timestamp'])}",
             "# HELP mele_app_last_health_status Last health status, 1=healthy.",
             "# TYPE mele_app_last_health_status gauge",
-            f"mele_app_last_health_status{{{labels}}} "
-            f"{1 if health['healthy'] else 0}",
+            f"mele_app_last_health_status{{{labels}}} {healthy_value}",
             "# HELP mele_app_last_health_timestamp_seconds Last health check time.",
             "# TYPE mele_app_last_health_timestamp_seconds gauge",
             f"mele_app_last_health_timestamp_seconds{{{labels}}} "
             f"{int(health['timestamp'])}",
         ])
+        last_success = int(health["timestamp"]) if health["healthy"] else read_health_last_success(app)
+        if last_success is not None:
+            lines.extend([
+                "# HELP mele_app_health_last_success_timestamp_seconds Last successful health probe time.",
+                "# TYPE mele_app_health_last_success_timestamp_seconds gauge",
+                f"mele_app_health_last_success_timestamp_seconds{{{labels}}} "
+                f"{last_success}",
+            ])
 
-    if "rollback" in updates:
-        rollback = updates["rollback"]
+    rollback = updates.get("rollback")
+    if rollback is None:
+        for record in reversed(records):
+            if record.get("rollback_status"):
+                rollback = {
+                    "status": str(record["rollback_status"]),
+                    "previous_release": str(record.get("previous_release") or ""),
+                }
+                break
+    if rollback is not None:
         labels = metric_labels({
             "app": app["name"],
             "status": str(rollback["status"]),
@@ -300,10 +394,47 @@ def render_metrics(app: dict[str, Any], updates: dict[str, Any]) -> str:
             f"mele_app_last_rollback_info{{{labels}}} 1",
         ])
 
+    recent = records[-20:]
+    if recent:
+        lines.extend([
+            "# HELP mele_app_deploy_event_info Recent deploy events, value is Unix timestamp.",
+            "# TYPE mele_app_deploy_event_info gauge",
+        ])
+    rollback_lines: list[str] = []
+    for record in recent:
+        timestamp = record_timestamp(record)
+        if timestamp is None or not record.get("release"):
+            continue
+        labels = metric_labels({
+            "app": app["name"],
+            "release": str(record["release"]),
+            "status": str(record.get("status") or "unknown"),
+        })
+        lines.append(f"mele_app_deploy_event_info{{{labels}}} {timestamp}")
+        if record.get("rollback_status"):
+            rollback_labels = metric_labels({
+                "app": app["name"],
+                "release": str(record["release"]),
+                "previous_release": str(record.get("previous_release") or ""),
+                "status": str(record["rollback_status"]),
+            })
+            rollback_lines.append(
+                f"mele_app_rollback_event_info{{{rollback_labels}}} {timestamp}"
+            )
+    if rollback_lines:
+        lines.extend([
+            "# HELP mele_app_rollback_event_info Recent rollback events, value is Unix timestamp.",
+            "# TYPE mele_app_rollback_event_info gauge",
+            *rollback_lines,
+        ])
+
     return "\n".join(lines) + "\n"
 
 
 def write_metrics(app: dict[str, Any], updates: dict[str, Any]) -> None:
+    health = updates.get("health")
+    if health is not None and health.get("healthy"):
+        remember_health_success(app, int(health["timestamp"]))
     path = metrics_textfile_path(app)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
@@ -346,6 +477,23 @@ def cmd_logs(app: dict[str, Any], args: argparse.Namespace) -> int:
     if args.follow:
         command.append("-f")
     return run_command(command)
+
+
+def probe_app_health(app: dict[str, Any]) -> bool:
+    healthy = health_check_once(app)
+    write_metrics(app, {"health": health_metrics(healthy)})
+    return healthy
+
+
+def cmd_probe_health(config: dict[str, Any], _args: argparse.Namespace) -> int:
+    failures = 0
+    for app in config["apps"].values():
+        if not isinstance(app, dict) or not app.get("healthPath"):
+            continue
+        if not probe_app_health(app):
+            failures += 1
+            print(f"{app['name']}: health probe failed", file=sys.stderr)
+    return 1 if failures else 0
 
 
 def cmd_health(app: dict[str, Any], _args: argparse.Namespace) -> int:
@@ -761,6 +909,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    probe_health = subparsers.add_parser("probe-health")
+    probe_health.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Only print failed probes",
+    )
+
     for command in ("status", "health", "releases", "contract-check"):
         sub = subparsers.add_parser(command)
         sub.add_argument("app")
@@ -821,6 +976,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         config = load_config(args.config)
+        if args.command == "probe-health":
+            return cmd_probe_health(config, args)
         app = get_app(config, args.app)
         return dispatch(app, args)
     except CliError as exc:

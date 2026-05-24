@@ -35,13 +35,30 @@ Recommended `/health` response:
 {"status":"ok"}
 ```
 
-Recommended `/metrics` minimum:
+Required generic `/metrics` series:
 
-- process/runtime metrics if available;
-- request count by method/path/status;
-- request duration histogram;
-- app build/version info.
+```text
+http_requests_total{method,route,status}
+http_request_duration_seconds_bucket{method,route,status,le}
+http_request_duration_seconds_count{method,route,status}
+http_request_duration_seconds_sum{method,route,status}
+```
 
+Use seconds for duration metrics, following Prometheus/OpenMetrics base-unit
+conventions. Grafana can render these values as milliseconds. The `route` label
+must be a normalized route template such as `/api/items/:id`, not a raw path.
+
+Recommended additional metrics where applicable:
+
+```text
+app_build_info{version,commit} 1
+http_requests_in_flight
+app_rejected_requests_total{reason}
+app_dependency_up{name}
+```
+
+Keep `reason` and `name` values low-cardinality, for example
+`payload_too_large`, `rate_limited`, `invalid_envelope`, `database`, or `redis`.
 Metrics labels must remain low-cardinality. Do not put user IDs, player names,
 card titles, sync-space IDs, tokens, or free-form paths in labels.
 

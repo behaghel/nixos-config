@@ -437,6 +437,64 @@ class MeleAppCliTests(unittest.TestCase):
                 ])
             self.assertEqual(exit_code, 1)
 
+    def test_probe_health_updates_availability_metrics_for_all_apps(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            with mock.patch.object(mele_app_cli, "health_check_once", return_value=True):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "probe-health",
+                    "--quiet",
+                ])
+            self.assertEqual(exit_code, 0)
+            metrics = (tmp / "mele_app_home.prom").read_text()
+            self.assertIn('mele_app_health_status{app="home"} 1', metrics)
+            self.assertIn(
+                'mele_app_health_last_success_timestamp_seconds{app="home"}',
+                metrics,
+            )
+
+    def test_metrics_include_recent_deploy_and_rollback_events(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            config = self.write_config(tmp, state)
+            app = mele_app_cli.get_app(mele_app_cli.load_config(config), "home")
+            (state / "current").write_text("abc123\n")
+            (state / "releases.jsonl").write_text(
+                json.dumps({
+                    "release": "abc123",
+                    "status": "deployed",
+                    "deployed_at": "2026-05-23T12:00:00+00:00",
+                }) + "\n" +
+                json.dumps({
+                    "release": "bad123",
+                    "status": "failed_health",
+                    "previous_release": "abc123",
+                    "rollback_status": "succeeded",
+                    "deployed_at": "2026-05-23T12:05:00+00:00",
+                }) + "\n"
+            )
+            metrics = mele_app_cli.render_metrics(app, {})
+            self.assertIn(
+                'mele_app_current_release_timestamp_seconds{app="home",'
+                'release="abc123"}',
+                metrics,
+            )
+            self.assertIn(
+                'mele_app_deploy_event_info{app="home",release="abc123",'
+                'status="deployed"}',
+                metrics,
+            )
+            self.assertIn(
+                'mele_app_rollback_event_info{app="home",release="bad123",'
+                'previous_release="abc123",status="succeeded"}',
+                metrics,
+            )
+
     def test_health_updates_textfile_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)

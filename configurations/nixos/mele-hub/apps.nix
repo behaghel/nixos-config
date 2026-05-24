@@ -348,10 +348,27 @@ in
         };
       };
 
-      systemd.services = lib.mapAttrs'
+      systemd.services = (lib.mapAttrs'
         (name: app:
           lib.nameValuePair "mele-app-${name}" (appService name app))
-        cfg.apps;
+        cfg.apps) // {
+        mele-app-health-probe = {
+          description = "Probe MeLE app health endpoints";
+          serviceConfig = {
+            Type = "oneshot";
+            ExecStart = "${meleAppCli}/bin/mele-app probe-health --quiet";
+          };
+        };
+      };
+
+      systemd.timers.mele-app-health-probe = {
+        wantedBy = [ "timers.target" ];
+        timerConfig = {
+          OnBootSec = "30s";
+          OnUnitActiveSec = "30s";
+          Unit = "mele-app-health-probe.service";
+        };
+      };
 
       systemd.tmpfiles.rules = [
         "d /etc/mele-apps 0755 root root -"

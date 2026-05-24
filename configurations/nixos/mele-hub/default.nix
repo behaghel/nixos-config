@@ -13,6 +13,7 @@ let
     '';
   });
   grafanaDashboardsPath = pkgs.linkFarm "grafana-dashboards" {
+    "mele-apps.json" = ./grafana/apps.json;
     "mele-hub-health.json" = ./grafana/health.json;
     "syncthing-restic.json" = ./grafana/syncthing-restic.json;
   };
