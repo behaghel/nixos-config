@@ -705,10 +705,22 @@
             },
             "inspect": false
           },
-          "mappings": [],
-          "unit": "dateTimeAsIso"
+          "mappings": []
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Timestamp"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -731,10 +743,6 @@
         }
       ],
       "transformations": [
-        {
-          "id": "labelsToFields",
-          "options": {}
-        },
         {
           "id": "organize",
           "options": {
@@ -781,10 +789,22 @@
             },
             "inspect": false
           },
-          "mappings": [],
-          "unit": "dateTimeAsIso"
+          "mappings": []
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Timestamp"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -807,10 +827,6 @@
         }
       ],
       "transformations": [
-        {
-          "id": "labelsToFields",
-          "options": {}
-        },
         {
           "id": "organize",
           "options": {
@@ -1001,10 +1017,6 @@
       ],
       "transformations": [
         {
-          "id": "labelsToFields",
-          "options": {}
-        },
-        {
           "id": "organize",
           "options": {
             "excludeByName": {
@@ -1046,10 +1058,22 @@
             },
             "inspect": false
           },
-          "mappings": [],
-          "unit": "dateTimeAsIso"
+          "mappings": []
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Timestamp"
+            },
+            "properties": [
+              {
+                "id": "unit",
+                "value": "dateTimeAsIso"
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "cellHeight": "sm",
@@ -1078,10 +1102,6 @@
         }
       ],
       "transformations": [
-        {
-          "id": "labelsToFields",
-          "options": {}
-        },
         {
           "id": "organize",
           "options": {
@@ -1157,6 +1177,6 @@
   "timezone": "browser",
   "title": "MeLE Apps",
   "uid": "mele-apps",
-  "version": 6,
+  "version": 7,
   "weekStart": ""
 }
