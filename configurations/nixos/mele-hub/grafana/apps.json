@@ -76,8 +76,8 @@
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "justifyMode": "start",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -86,12 +86,13 @@
           "values": false
         },
         "text": {},
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "targets": [
         {
-          "expr": "100 * avg_over_time(mele_app_health_status{app=~\"$app\"}[$__range])",
-          "refId": "A"
+          "expr": "100 * avg by (app) (avg_over_time(mele_app_health_status{app=~\"$app\"}[$__range]))",
+          "refId": "A",
+          "legendFormat": "{{app}}"
         }
       ]
     },
@@ -132,8 +133,8 @@
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "justifyMode": "start",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -142,12 +143,13 @@
           "values": false
         },
         "text": {},
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "targets": [
         {
-          "expr": "min(mele_app_health_status{app=~\"$app\"})",
-          "refId": "A"
+          "expr": "min by (app) (mele_app_health_status{app=~\"$app\"})",
+          "refId": "A",
+          "legendFormat": "{{app}}"
         }
       ]
     },
@@ -175,8 +177,8 @@
       "options": {
         "colorMode": "value",
         "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "justifyMode": "start",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -185,19 +187,20 @@
           "values": false
         },
         "text": {},
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "targets": [
         {
           "expr": "time() - mele_app_health_last_success_timestamp_seconds{app=~\"$app\"}",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{app}}"
         }
       ]
     },
     {
       "id": 5,
       "type": "row",
-      "title": "Service delivery / request behavior",
+      "title": "User-facing request behavior (excludes /metrics and /health)",
       "collapsed": false,
       "gridPos": {
         "x": 0,
@@ -210,7 +213,7 @@
     {
       "id": 6,
       "type": "timeseries",
-      "title": "Request rate",
+      "title": "User-facing request rate",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -251,7 +254,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\"}[$__rate_interval]))",
+          "expr": "sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "{{app}}"
         }
@@ -260,7 +263,7 @@
     {
       "id": 7,
       "type": "timeseries",
-      "title": "5xx error rate",
+      "title": "User-facing 5xx error rate",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -301,7 +304,7 @@
       },
       "targets": [
         {
-          "expr": "sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", status=~\"5..\"}[$__rate_interval]))",
+          "expr": "sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\", status=~\"5..\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "{{app}}"
         }
@@ -310,7 +313,7 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "5xx error percentage",
+      "title": "User-facing 5xx percentage",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -351,7 +354,7 @@
       },
       "targets": [
         {
-          "expr": "100 * sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", status=~\"5..\"}[$__rate_interval])) / sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\"}[$__rate_interval]))",
+          "expr": "100 * sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\", status=~\"5..\"}[$__rate_interval])) / sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\"}[$__rate_interval]))",
           "refId": "A",
           "legendFormat": "{{app}}"
         }
@@ -360,7 +363,7 @@
     {
       "id": 9,
       "type": "timeseries",
-      "title": "p50 latency",
+      "title": "User-facing p50 latency",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -401,7 +404,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.50, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.50, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "{{app}}"
         }
@@ -410,7 +413,7 @@
     {
       "id": 10,
       "type": "timeseries",
-      "title": "p95 latency",
+      "title": "User-facing p95 latency",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -451,7 +454,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.95, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "{{app}}"
         }
@@ -460,7 +463,7 @@
     {
       "id": 11,
       "type": "timeseries",
-      "title": "p99 latency",
+      "title": "User-facing p99 latency",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -501,7 +504,7 @@
       },
       "targets": [
         {
-          "expr": "histogram_quantile(0.99, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.99, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\", route!~\"/(metrics|health)\"}[$__rate_interval])))",
           "refId": "A",
           "legendFormat": "{{app}}"
         }
@@ -608,13 +611,176 @@
       ]
     },
     {
+      "id": 26,
+      "type": "row",
+      "title": "Operational request behavior (excludes metrics scrapes)",
+      "collapsed": false,
+      "gridPos": {
+        "x": 0,
+        "y": 27,
+        "w": 24,
+        "h": 1
+      },
+      "panels": []
+    },
+    {
+      "id": 27,
+      "type": "timeseries",
+      "title": "Operational request rate",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 28,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!=\"/metrics\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{app}}"
+        }
+      ]
+    },
+    {
+      "id": 28,
+      "type": "timeseries",
+      "title": "Operational 5xx percentage",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 28,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "unit": "percent"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "100 * sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!=\"/metrics\", status=~\"5..\"}[$__rate_interval])) / sum by (app) (rate(http_requests_total{job=~\"mele-app-.*\", app=~\"$app\", route!=\"/metrics\"}[$__rate_interval]))",
+          "refId": "A",
+          "legendFormat": "{{app}}"
+        }
+      ]
+    },
+    {
+      "id": 29,
+      "type": "timeseries",
+      "title": "Operational p95 latency",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 28,
+        "w": 8,
+        "h": 7
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "linear",
+            "lineWidth": 1,
+            "fillOpacity": 10,
+            "showPoints": "never"
+          },
+          "mappings": [],
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum by (app, le) (rate(http_request_duration_seconds_bucket{job=~\"mele-app-.*\", app=~\"$app\", route!=\"/metrics\"}[$__rate_interval])))",
+          "refId": "A",
+          "legendFormat": "{{app}}"
+        }
+      ]
+    },
+    {
       "id": 14,
       "type": "row",
       "title": "Platform events and versions",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 27,
+        "y": 35,
         "w": 24,
         "h": 1
       },
@@ -630,7 +796,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 28,
+        "y": 36,
         "w": 24,
         "h": 8
       },
@@ -692,7 +858,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 36,
+        "y": 44,
         "w": 8,
         "h": 7
       },
@@ -767,99 +933,13 @@
       ]
     },
     {
-      "id": 16,
-      "type": "table",
-      "title": "Last deploy",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 36,
-        "w": 8,
-        "h": 7
-      },
-      "fieldConfig": {
-        "defaults": {
-          "custom": {
-            "align": "auto",
-            "cellOptions": {
-              "type": "auto"
-            },
-            "inspect": false
-          },
-          "mappings": []
-        },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "Timestamp"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "dateTimeAsIso"
-              }
-            ]
-          }
-        ]
-      },
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "countRows": false,
-          "fields": "",
-          "reducer": [
-            "sum"
-          ],
-          "show": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "expr": "mele_app_last_deploy_timestamp_seconds{app=~\"$app\"} * 1000",
-          "format": "table",
-          "instant": true,
-          "refId": "A"
-        }
-      ],
-      "transformations": [
-        {
-          "id": "organize",
-          "options": {
-            "excludeByName": {
-              "__name__": true,
-              "Time": true,
-              "instance": true,
-              "job": true
-            },
-            "indexByName": {
-              "Value": 0,
-              "app": 1,
-              "release": 2,
-              "status": 3
-            },
-            "renameByName": {
-              "app": "App",
-              "release": "Release",
-              "status": "Status",
-              "Value": "Timestamp"
-            }
-          }
-        }
-      ]
-    },
-    {
       "id": 20,
       "type": "row",
       "title": "Observability health",
       "collapsed": false,
       "gridPos": {
         "x": 0,
-        "y": 43,
+        "y": 51,
         "w": 24,
         "h": 1
       },
@@ -875,7 +955,7 @@
       },
       "gridPos": {
         "x": 0,
-        "y": 44,
+        "y": 52,
         "w": 8,
         "h": 4
       },
@@ -918,7 +998,7 @@
       },
       "gridPos": {
         "x": 8,
-        "y": 44,
+        "y": 52,
         "w": 8,
         "h": 4
       },
@@ -978,7 +1058,7 @@
       },
       "gridPos": {
         "x": 16,
-        "y": 44,
+        "y": 52,
         "w": 8,
         "h": 7
       },
@@ -1044,9 +1124,9 @@
         "uid": "prometheus"
       },
       "gridPos": {
-        "x": 16,
-        "y": 36,
-        "w": 8,
+        "x": 8,
+        "y": 44,
+        "w": 16,
         "h": 7
       },
       "fieldConfig": {
@@ -1085,7 +1165,13 @@
           ],
           "show": false
         },
-        "showHeader": true
+        "showHeader": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Timestamp"
+          }
+        ]
       },
       "targets": [
         {
@@ -1113,11 +1199,11 @@
               "le": true
             },
             "indexByName": {
-              "Value": 0,
-              "app": 1,
-              "release": 2,
-              "status": 3,
-              "previous_release": 4
+              "app": 0,
+              "release": 1,
+              "status": 2,
+              "previous_release": 3,
+              "Value": 4
             },
             "renameByName": {
               "app": "App",
