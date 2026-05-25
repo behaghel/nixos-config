@@ -34,9 +34,11 @@
 - Verify the USB write by re-plugging and checking `lsblk` shows the ISO9660 partition.
 
 ## Observability
-- **Built-in Grafana (internal, open access):** Grafana listens on `http://<mele-hub-ip>:3000` with anonymous read-only access. Dashboards:
-  - "MeLE Hub Health" – uptime, CPU, memory, root + `/srv/syncthing` disk usage, network, disk IO.
-  - "Syncthing & Restic" – Syncthing scrape status and Restic backup age/status/duration (via node_exporter textfile metrics).
+- **Grafana:** Grafana is served by Caddy at `https://grafana.home.behaghel.org` with basic auth. Grafana itself listens on `127.0.0.1:3000`; port `3000` is not opened directly.
+  - Store the long-term password in `pass`.
+  - Store only the Caddy bcrypt hash on MeLE in `/etc/caddy/grafana-basicauth` (`root:caddy`, `0640`), one line like `hubert <hash>`.
+  - Generate the hash with `caddy hash-password` and verify after activation with `curl -I https://grafana.home.behaghel.org`.
+  - Dashboards: "MeLE Hub Health", "Syncthing & Restic", and "MeLE Apps".
   Datasource is the local Prometheus (`127.0.0.1:9090`); node_exporter is bound to `127.0.0.1:9100`; Syncthing Prometheus endpoint is `127.0.0.1:9091`.
 - **Disk/health alerts (low overhead):** set up a simple cron/systemd timer that runs `df -h / /srv/syncthing` and posts to a webhook (e.g., healthchecks.io, ntfy, Apprise). One-liner example for a timer: `df -h /srv/syncthing | tail -n +2 | awk '$5+0 > 85 {print}'` and send if triggered.
 - **Disk SMART checks:** the ISO enables `services.smartd`; configure email/webhook notifications for failing drives.

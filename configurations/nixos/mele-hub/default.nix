@@ -198,7 +198,7 @@ in
     useDHCP = lib.mkDefault true;
     firewall = {
       enable = true;
-      allowedTCPPorts = [ 22 22000 3000 ];
+      allowedTCPPorts = [ 22 22000 ];
       allowedUDPPorts = [ 22000 21027 ];
       logRefusedConnections = true;
     };
@@ -315,9 +315,10 @@ in
       enable = true;
       settings = {
         server = {
-          http_addr = "0.0.0.0";
+          http_addr = "127.0.0.1";
           http_port = 3000;
-          domain = "mele-hub";
+          domain = "grafana.home.behaghel.org";
+          root_url = "https://grafana.home.behaghel.org/";
         };
         "auth.anonymous".enabled = true;
         "auth.anonymous".org_role = "Viewer";
@@ -344,6 +345,13 @@ in
         ];
       };
     };
+    caddy.virtualHosts."grafana.home.behaghel.org".extraConfig = ''
+      encode zstd gzip
+      basic_auth {
+        import /etc/caddy/grafana-basicauth
+      }
+      reverse_proxy 127.0.0.1:3000
+    '';
     syncthing = {
       enable = true;
       user = "syncthing";
