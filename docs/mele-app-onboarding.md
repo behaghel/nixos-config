@@ -392,7 +392,7 @@ sync-space IDs or player-identifying labels.
   (`mele-apps-backup/apps-backup`) via `bkp-apps` and
   `/etc/restic-mele-apps.env`. Syncthing uses `/etc/restic-syncthing.env`.
   Keeping separate env files, keys, and repository names reduces emergency
-  restore ambiguity.
+  restore ambiguity. See [MeLE backup and restore](./mele-backup-restore.md).
 - Document backup/restore for any durable state before relying on the app for
   important data. Use `mele-app verify-restore <app> --target <temp-dir>` for a
   non-destructive restore check into a temporary location.
