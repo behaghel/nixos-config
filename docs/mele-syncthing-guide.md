@@ -48,11 +48,25 @@
 - Firewall allows TCP 22000 and UDP 21027 on the hub; peers must be able to reach those ports.
 
 ## Backups (Restic to B2)
-- Secrets live in `/etc/restic.env` (root:root, 600) with `RESTIC_REPOSITORY`, `RESTIC_PASSWORD`, `AWS_ACCESS_KEY_ID/SECRET_ACCESS_KEY`, `AWS_DEFAULT_REGION`, `RESTIC_CACHE_DIR`. Choose a simple password (no shell quoting needed).
-- Helper CLI: `bkp …` (root path) wraps restic with the env file. Examples:
-  - `sudo bkp snapshots`
-  - `sudo bkp backup /srv/syncthing --tag manual`
-- Scheduled backup: systemd timer `restic-backup-syncthing.timer` (02:30 CET ± random delay) runs `restic backup /srv/syncthing --exclude-file=…` then `forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune`.
-- One-time init (after placing `/etc/restic.env` and choosing the password): `sudo bkp init` (or `restic init` via the helper) against the B2 bucket.
-- Restore (staging): `sudo mkdir -p /srv/restore-syncthing` then `sudo bkp restore latest --target /srv/restore-syncthing --verbose`.
-- Excludes: `**/.stversions/**` so Syncthing’s versioning copies don’t bloat backups.
+- Secrets live in root-owned `0600` env files managed manually outside this repo:
+  - `/etc/restic-syncthing.env` for the Syncthing repository.
+  - `/etc/restic-mele-apps.env` for the MeLE apps repository.
+- The Syncthing env file should contain `RESTIC_REPOSITORY=s3:https://s3.eu-central-003.backblazeb2.com/mele-syncthing-backup/syncthing-backup` plus its Backblaze S3 key, `RESTIC_PASSWORD`, `AWS_DEFAULT_REGION`, and `RESTIC_CACHE_DIR`.
+- The apps env file should contain `RESTIC_REPOSITORY=s3:https://s3.eu-central-003.backblazeb2.com/mele-apps-backup/apps-backup` plus the apps bucket Backblaze S3 key, `RESTIC_PASSWORD`, `AWS_DEFAULT_REGION`, and `RESTIC_CACHE_DIR`.
+- Helper CLIs:
+  - `bkp-syncthing …` wraps restic for the Syncthing repository.
+  - `bkp-apps …` wraps restic for the MeLE apps repository.
+  - `bkp …` is a deprecated compatibility alias for `bkp-syncthing …`.
+- Syncthing scheduled backup: systemd timer `restic-backup-syncthing.timer` (02:30 CET ± random delay) backs up `/srv/syncthing` and `/var/lib/syncthing`, then runs `forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune`.
+- MeLE apps scheduled backup: systemd timer `restic-backup-mele-apps.timer` (03:15 CET ± random delay) backs up `/srv/apps/<app>/data` and `/srv/apps/<app>/state` for app slots with `backup = true`, then runs the same retention policy.
+- One-time secret-file migration/setup:
+  - Rename the existing generic file: `sudo mv /etc/restic.env /etc/restic-syncthing.env`.
+  - Create `/etc/restic-mele-apps.env` with the apps repository URL, the apps bucket key, and the Restic password.
+  - Lock both files down with `sudo chown root:root /etc/restic-syncthing.env /etc/restic-mele-apps.env && sudo chmod 600 /etc/restic-syncthing.env /etc/restic-mele-apps.env`.
+- One-time init:
+  - Syncthing repo: `sudo bkp-syncthing init` if the existing repo ever needs reinitialization.
+  - Apps repo: `sudo bkp-apps init` after creating `/etc/restic-mele-apps.env` and before the first app backup.
+- Restore (Syncthing staging): `sudo mkdir -p /srv/restore-syncthing` then `sudo bkp-syncthing restore latest --target /srv/restore-syncthing --verbose`.
+- App restore verification: `sudo mele-app verify-restore home --target /tmp/mele-restore-home --marker data/marker.txt` restores only that app's data/state from the apps repo into the temporary target and refuses live `/srv/apps` targets.
+- Excludes: `**/.stversions/**` so Syncthing’s versioning copies don’t bloat backups. Container images are intentionally not backed up.
+- Restic textfile metrics use a `job` label (`job="syncthing"` or `job="mele-apps"`) so alerts and dashboards can distinguish the two backup jobs.

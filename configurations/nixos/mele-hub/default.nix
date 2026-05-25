@@ -1,4 +1,4 @@
-{ flake, pkgs, lib, ... }:
+{ config, flake, pkgs, lib, ... }:
 let
   inherit (flake) inputs;
   inherit (inputs) self;
@@ -17,22 +17,28 @@ let
     "mele-hub-health.json" = ./grafana/health.json;
     "syncthing-restic.json" = ./grafana/syncthing-restic.json;
   };
-  resticExcludes = pkgs.writeText "restic-syncthing-excludes.txt" ''
+  appBackupPaths = lib.flatten (lib.mapAttrsToList
+    (name: app: lib.optionals app.backup [
+      "/srv/apps/${name}/data"
+      "/srv/apps/${name}/state"
+    ])
+    config.services.meleApps.apps);
+  syncthingResticExcludes = pkgs.writeText "restic-syncthing-excludes.txt" ''
     **/.stversions/**
   '';
-  resticBackupScript = pkgs.writeShellScript "restic-backup-syncthing.sh" ''
+  resticSyncthingBackupScript = pkgs.writeShellScript "restic-backup-syncthing.sh" ''
     set -euo pipefail
-    if [ ! -f /etc/restic.env ]; then
-      echo "restic env file missing: /etc/restic.env" >&2
+    if [ ! -f /etc/restic-syncthing.env ]; then
+      echo "restic env file missing: /etc/restic-syncthing.env" >&2
       exit 1
     fi
     set -a
-    source /etc/restic.env
+    source /etc/restic-syncthing.env
     set +a
     ${pkgs.coreutils}/bin/mkdir -p /var/cache/restic /var/lib/node_exporter/textfile_collector
     start_ts=$(${pkgs.coreutils}/bin/date +%s)
     status=0
-    if ! ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} /var/lib/syncthing --exclude-file=${resticExcludes} --tag mele-hub --cleanup-cache; then
+    if ! ${pkgs.restic}/bin/restic --verbose backup ${syncthingDataDir} ${syncthingConfigDir} --exclude-file=${syncthingResticExcludes} --tag mele-hub --tag syncthing --cleanup-cache; then
       status=1
     fi
     if ! ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune; then
@@ -40,29 +46,77 @@ let
     fi
     end_ts=$(${pkgs.coreutils}/bin/date +%s)
     duration=$((end_ts - start_ts))
-    cat > /var/lib/node_exporter/textfile_collector/restic.prom <<EOF
+    cat > /var/lib/node_exporter/textfile_collector/restic_syncthing.prom <<EOF
 # HELP restic_last_backup_timestamp Unix time of last restic backup completion
 # TYPE restic_last_backup_timestamp gauge
-restic_last_backup_timestamp ''${end_ts}
+restic_last_backup_timestamp{job="syncthing"} ''${end_ts}
 # HELP restic_last_backup_status 0=success,1=failure
 # TYPE restic_last_backup_status gauge
-restic_last_backup_status ''${status}
+restic_last_backup_status{job="syncthing"} ''${status}
 # HELP restic_backup_duration_seconds Duration of last restic backup+prune
 # TYPE restic_backup_duration_seconds gauge
-restic_backup_duration_seconds ''${duration}
+restic_backup_duration_seconds{job="syncthing"} ''${duration}
 EOF
     exit ''${status}
   '';
-  resticHelper = pkgs.writeShellScriptBin "bkp" ''
+  resticMeleAppsBackupScript = pkgs.writeShellScript "restic-backup-mele-apps.sh" ''
     set -euo pipefail
-    if [ ! -f /etc/restic.env ]; then
-      echo "restic env file missing: /etc/restic.env" >&2
+    if [ ! -f /etc/restic-mele-apps.env ]; then
+      echo "restic env file missing: /etc/restic-mele-apps.env" >&2
       exit 1
     fi
     set -a
-    source /etc/restic.env
+    source /etc/restic-mele-apps.env
+    set +a
+    ${pkgs.coreutils}/bin/mkdir -p /var/cache/restic /var/lib/node_exporter/textfile_collector
+    start_ts=$(${pkgs.coreutils}/bin/date +%s)
+    status=0
+    if ! ${pkgs.restic}/bin/restic --verbose backup ${lib.escapeShellArgs appBackupPaths} --tag mele-hub --tag mele-apps --cleanup-cache; then
+      status=1
+    fi
+    if ! ${pkgs.restic}/bin/restic --verbose forget --keep-daily 4 --keep-weekly 4 --keep-monthly 12 --prune; then
+      status=1
+    fi
+    end_ts=$(${pkgs.coreutils}/bin/date +%s)
+    duration=$((end_ts - start_ts))
+    cat > /var/lib/node_exporter/textfile_collector/restic_mele_apps.prom <<EOF
+# HELP restic_last_backup_timestamp Unix time of last restic backup completion
+# TYPE restic_last_backup_timestamp gauge
+restic_last_backup_timestamp{job="mele-apps"} ''${end_ts}
+# HELP restic_last_backup_status 0=success,1=failure
+# TYPE restic_last_backup_status gauge
+restic_last_backup_status{job="mele-apps"} ''${status}
+# HELP restic_backup_duration_seconds Duration of last restic backup+prune
+# TYPE restic_backup_duration_seconds gauge
+restic_backup_duration_seconds{job="mele-apps"} ''${duration}
+EOF
+    exit ''${status}
+  '';
+  resticSyncthingHelper = pkgs.writeShellScriptBin "bkp-syncthing" ''
+    set -euo pipefail
+    if [ ! -f /etc/restic-syncthing.env ]; then
+      echo "restic env file missing: /etc/restic-syncthing.env" >&2
+      exit 1
+    fi
+    set -a
+    source /etc/restic-syncthing.env
     set +a
     exec ${pkgs.restic}/bin/restic "$@"
+  '';
+  resticMeleAppsHelper = pkgs.writeShellScriptBin "bkp-apps" ''
+    set -euo pipefail
+    if [ ! -f /etc/restic-mele-apps.env ]; then
+      echo "restic env file missing: /etc/restic-mele-apps.env" >&2
+      exit 1
+    fi
+    set -a
+    source /etc/restic-mele-apps.env
+    set +a
+    exec ${pkgs.restic}/bin/restic "$@"
+  '';
+  resticHelper = pkgs.writeShellScriptBin "bkp" ''
+    echo "warning: bkp is deprecated; use bkp-syncthing or bkp-apps" >&2
+    exec ${resticSyncthingHelper}/bin/bkp-syncthing "$@"
   '';
   alertsFile = pkgs.writeText "prometheus-alerts.yml" ''
     groups:
@@ -74,7 +128,7 @@ EOF
             labels: { severity: warning }
             annotations:
               summary: "Restic backup stale"
-              description: "Last restic backup older than 48h"
+              description: "Restic backup {{ $labels.job }} older than 48h"
 
           - alert: ResticBackupFailed
             expr: restic_last_backup_status == 1
@@ -82,7 +136,7 @@ EOF
             labels: { severity: critical }
             annotations:
               summary: "Restic backup failing"
-              description: "Restic last run exited non-zero"
+              description: "Restic backup {{ $labels.job }} last run exited non-zero"
 
           - alert: HighCPU
             expr: 1 - avg(rate(node_cpu_seconds_total{mode="idle"}[10m])) > 0.95
@@ -371,10 +425,12 @@ in
     curl
     restic
     resticHelper
+    resticSyncthingHelper
+    resticMeleAppsHelper
   ];
 
   systemd.services.restic-backup-syncthing = {
-    description = "Restic backup of /srv/syncthing";
+    description = "Restic backup of Syncthing data";
     wantedBy = [ ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
@@ -383,7 +439,7 @@ in
       Nice = 10;
       IOSchedulingClass = "best-effort";
       IOSchedulingPriority = 7;
-      ExecStart = [ resticBackupScript ];
+      ExecStart = [ resticSyncthingBackupScript ];
     };
   };
 
@@ -391,6 +447,29 @@ in
     wantedBy = [ "timers.target" ];
     timerConfig = {
       OnCalendar = "02:30";
+      Persistent = true;
+      RandomizedDelaySec = "30m";
+    };
+  };
+
+  systemd.services.restic-backup-mele-apps = {
+    description = "Restic backup of MeLE app data/state";
+    wantedBy = [ ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      Nice = 10;
+      IOSchedulingClass = "best-effort";
+      IOSchedulingPriority = 7;
+      ExecStart = [ resticMeleAppsBackupScript ];
+    };
+  };
+
+  systemd.timers.restic-backup-mele-apps = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnCalendar = "03:15";
       Persistent = true;
       RandomizedDelaySec = "30m";
     };

@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, BinaryIO, Sequence
 
 DEFAULT_CONFIG = Path("/etc/mele-apps/config.json")
+BKP_APPS = "/run/current-system/sw/bin/bkp-apps"
 LOADED_IMAGE_RE = re.compile(r"Loaded image(?:s)?:\s*(?P<image>\S+)")
 ENV_KEY_RE = re.compile(r"(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=")
 APP_IMAGE_RE = re.compile(r"^localhost/(?P<app>[A-Za-z0-9_.-]+):(?P<tag>[^:]+)$")
@@ -643,6 +644,68 @@ def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return 0
 
 
+def safe_relative_path(value: str, label: str) -> Path:
+    path = Path(value)
+    if not path.parts or path == Path(".") or path.is_absolute() or ".." in path.parts:
+        raise CliError(f"{label} must be a relative path without '..': {value}")
+    return path
+
+
+def validate_restore_target(target: Path) -> None:
+    resolved = target.resolve(strict=False)
+    live_root = Path("/srv/apps").resolve(strict=False)
+    if resolved == live_root or live_root in resolved.parents:
+        raise CliError(f"restore target must not be under live app storage: {target}")
+    if target.exists() and any(target.iterdir()):
+        raise CliError(f"restore target must be absent or empty: {target}")
+
+
+def restored_path(target: Path, source: Path, relative: Path | None = None) -> Path:
+    destination = target / str(source).lstrip("/")
+    if relative is not None:
+        destination = destination / relative
+    return destination
+
+
+def cmd_verify_restore(app: dict[str, Any], args: argparse.Namespace) -> int:
+    target = args.target
+    validate_restore_target(target)
+    marker = safe_relative_path(args.marker, "marker") if args.marker else None
+    if marker and marker.parts[0] not in ("data", "state"):
+        raise CliError("marker must start with data/ or state/")
+    data_dir = Path(app["dataDir"])
+    state_dir = Path(app["stateDir"])
+    target.mkdir(mode=0o700, parents=True, exist_ok=True)
+    command = [
+        BKP_APPS,
+        "restore",
+        "latest",
+        "--include",
+        str(data_dir),
+        "--include",
+        str(state_dir),
+        "--target",
+        str(target),
+    ]
+    result = capture_command(command)
+    if result.returncode != 0:
+        raise CliError(
+            f"restic restore failed for {app['name']}: "
+            f"{(result.stdout + result.stderr).strip()}"
+        )
+    for source in (data_dir, state_dir):
+        restored = restored_path(target, source)
+        if not restored.exists():
+            raise CliError(f"restore did not produce expected path: {restored}")
+    if marker:
+        source = data_dir if marker.parts[0] == "data" else state_dir
+        marker_path = restored_path(target, source, Path(*marker.parts[1:]))
+        if not marker_path.exists():
+            raise CliError(f"marker not found after restore: {marker_path}")
+    print(f"{app['name']}: restore verified at {target}")
+    return 0
+
+
 def cmd_update_secretspec(app: dict[str, Any], args: argparse.Namespace) -> int:
     require_root()
     if args.source != "-":
@@ -920,6 +983,19 @@ def build_parser() -> argparse.ArgumentParser:
         sub = subparsers.add_parser(command)
         sub.add_argument("app")
 
+    verify_restore = subparsers.add_parser("verify-restore")
+    verify_restore.add_argument("app")
+    verify_restore.add_argument(
+        "--target",
+        type=Path,
+        required=True,
+        help="Empty temporary restore target; must not be under /srv/apps",
+    )
+    verify_restore.add_argument(
+        "--marker",
+        help="Optional marker under data/ or state/ to verify after restore",
+    )
+
     update_secretspec = subparsers.add_parser("update-secretspec")
     update_secretspec.add_argument("app")
     update_secretspec.add_argument(
@@ -964,6 +1040,8 @@ def dispatch(app: dict[str, Any], args: argparse.Namespace) -> int:
         return cmd_contract_check(app, args)
     if args.command == "update-secretspec":
         return cmd_update_secretspec(app, args)
+    if args.command == "verify-restore":
+        return cmd_verify_restore(app, args)
     if args.command == "deploy":
         if args.archive != "-":
             raise CliError("deploy currently reads image archives from stdin; use '-'")

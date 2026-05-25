@@ -43,8 +43,8 @@
       "options": {
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "justifyMode": "start",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -52,16 +52,16 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "targets": [
         {
           "expr": "time() - restic_last_backup_timestamp",
-          "legendFormat": "age",
+          "legendFormat": "{{job}}",
           "refId": "A"
         }
       ],
-      "title": "Restic: Age of Last Backup",
+      "title": "Restic: Backup Age",
       "type": "stat"
     },
     {
@@ -114,8 +114,8 @@
       "options": {
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "justifyMode": "start",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -123,15 +123,16 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "targets": [
         {
           "expr": "restic_last_backup_status",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{job}}"
         }
       ],
-      "title": "Restic: Last Status",
+      "title": "Restic: Last Status by Job",
       "type": "stat"
     },
     {
@@ -155,8 +156,8 @@
       "options": {
         "colorMode": "value",
         "graphMode": "none",
-        "justifyMode": "auto",
-        "orientation": "auto",
+        "justifyMode": "start",
+        "orientation": "horizontal",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
@@ -164,15 +165,16 @@
           "fields": "",
           "values": false
         },
-        "textMode": "auto"
+        "textMode": "value_and_name"
       },
       "targets": [
         {
           "expr": "restic_backup_duration_seconds",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{job}}"
         }
       ],
-      "title": "Restic: Last Duration",
+      "title": "Restic: Last Duration by Job",
       "type": "stat"
     },
     {
@@ -245,7 +247,8 @@
       "targets": [
         {
           "expr": "restic_backup_duration_seconds",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{job}}"
         }
       ],
       "title": "Restic Duration History",
@@ -319,7 +322,8 @@
       "targets": [
         {
           "expr": "restic_last_backup_status",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{job}}"
         }
       ],
       "title": "Restic Status Over Time (0=OK,1=Fail)",
@@ -356,7 +360,8 @@
       "targets": [
         {
           "expr": "time() - restic_last_backup_timestamp",
-          "refId": "A"
+          "refId": "A",
+          "legendFormat": "{{job}}"
         }
       ],
       "title": "Restic Age Over Time",

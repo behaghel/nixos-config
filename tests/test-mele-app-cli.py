@@ -38,6 +38,7 @@ class MeleAppCliTests(unittest.TestCase):
                     "hostPort": 8101,
                     "healthPath": "/health",
                     "serviceName": "mele-app-home.service",
+                    "dataDir": str(tmp / "data"),
                     "stateDir": str(state_dir or (tmp / "state")),
                     "metricsTextfile": str(tmp / "mele_app_home.prom"),
                     "keepReleases": 5,
@@ -150,6 +151,67 @@ class MeleAppCliTests(unittest.TestCase):
                 mele_app_cli.env_file_keys(path),
                 {"API_KEY", "EMPTY", "QUOTED"},
             )
+
+    def test_verify_restore_rejects_live_app_target(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            config = self.write_config(Path(raw_tmp))
+            exit_code = mele_app_cli.main([
+                "--config",
+                str(config),
+                "verify-restore",
+                "home",
+                "--target",
+                "/srv/apps/home/restore-test",
+            ])
+        self.assertEqual(exit_code, 2)
+
+    def test_verify_restore_rejects_unsafe_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            exit_code = mele_app_cli.main([
+                "--config",
+                str(config),
+                "verify-restore",
+                "home",
+                "--target",
+                str(tmp / "restore"),
+                "--marker",
+                "../escape",
+            ])
+        self.assertEqual(exit_code, 2)
+
+    def test_verify_restore_restores_app_paths_and_checks_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            target = tmp / "restore"
+
+            def fake_capture(command, stdin=None):
+                self.assertEqual(command[:3], [mele_app_cli.BKP_APPS, "restore", "latest"])
+                self.assertIn("--include", command)
+                self.assertIn(str(tmp / "data"), command)
+                self.assertIn(str(tmp / "state"), command)
+                self.assertEqual(command[-2:], ["--target", str(target)])
+                restored_data = target / str(tmp / "data").lstrip("/")
+                restored_state = target / str(tmp / "state").lstrip("/")
+                restored_data.mkdir(parents=True, exist_ok=True)
+                restored_state.mkdir(parents=True, exist_ok=True)
+                (restored_data / "marker.txt").write_text("ok")
+                return subprocess_result("")
+
+            with mock.patch.object(mele_app_cli, "capture_command", side_effect=fake_capture):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "verify-restore",
+                    "home",
+                    "--target",
+                    str(target),
+                    "--marker",
+                    "data/marker.txt",
+                ])
+        self.assertEqual(exit_code, 0)
 
     def test_update_secretspec_requires_root(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:

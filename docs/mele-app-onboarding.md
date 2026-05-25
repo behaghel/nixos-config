@@ -382,8 +382,19 @@ sync-space IDs or player-identifying labels.
 - Log concise operational events, not request bodies or private payloads.
 - Prefer structured logs if practical.
 - Keep metrics useful but privacy-preserving.
-- Persist user data under `/data` only.
+- Persist user data under `/data` only. On MeLE this maps to
+  `/srv/apps/<app>/data`, which is included in the MeLE data backup when the
+  app slot has `backup = true`.
+- Platform state under `/srv/apps/<app>/state` is also backed up for slots with
+  `backup = true`; container images are intentionally excluded and should be
+  redeployable from app release artifacts.
+- MeLE app backups use their own Restic repository
+  (`mele-apps-backup/apps-backup`) via `bkp-apps` and
+  `/etc/restic-mele-apps.env`. Syncthing uses `/etc/restic-syncthing.env`.
+  Keeping separate env files, keys, and repository names reduces emergency
+  restore ambiguity.
 - Document backup/restore for any durable state before relying on the app for
-  important data.
+  important data. Use `mele-app verify-restore <app> --target <temp-dir>` for a
+  non-destructive restore check into a temporary location.
 - Design migrations to run safely on container start or provide an explicit
   admin command before deployment.
