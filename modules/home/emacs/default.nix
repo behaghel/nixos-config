@@ -28,55 +28,57 @@ let
     ${emacsBundleId}      cfg                             all
   '';
 
+  atlassianTools = import ./atlassian-tools.nix { inherit pkgs lib; };
+
   # Script to set up Emacs configuration by cloning from GitHub
   emacs-config-setup = pkgs.writeShellApplication {
     name = "emacs-config-setup";
     runtimeInputs = [ pkgs.git ];
     text = ''
-    set -e  # Exit immediately on any error
+      set -e  # Exit immediately on any error
     
-    EMACS_CONFIG_REPO="https://github.com/behaghel/.emacs.d.git"
+      EMACS_CONFIG_REPO="https://github.com/behaghel/.emacs.d.git"
     
-    echo "=== Setting up Emacs configuration ==="
+      echo "=== Setting up Emacs configuration ==="
     
-    # If .emacs.d already exists and is a directory (not symlink), assume it's set up
-    if [ -d "$HOME/.emacs.d" ] && [ ! -L "$HOME/.emacs.d" ]; then
-      echo "✓ Emacs configuration already exists at ~/.emacs.d"
+      # If .emacs.d already exists and is a directory (not symlink), assume it's set up
+      if [ -d "$HOME/.emacs.d" ] && [ ! -L "$HOME/.emacs.d" ]; then
+        echo "✓ Emacs configuration already exists at ~/.emacs.d"
       
-      # Check if it's a git repository and offer to pull updates
-      if [ -d "$HOME/.emacs.d/.git" ]; then
-        echo "Checking for updates..."
-        cd "$HOME/.emacs.d"
-        if git fetch --dry-run 2>/dev/null; then
-          echo "✓ Repository is accessible, you can run 'git pull' to update"
+        # Check if it's a git repository and offer to pull updates
+        if [ -d "$HOME/.emacs.d/.git" ]; then
+          echo "Checking for updates..."
+          cd "$HOME/.emacs.d"
+          if git fetch --dry-run 2>/dev/null; then
+            echo "✓ Repository is accessible, you can run 'git pull' to update"
+          fi
         fi
+        exit 0
       fi
-      exit 0
-    fi
     
-    # Remove old symlink if it exists
-    if [ -L "$HOME/.emacs.d" ]; then
-      echo "Removing existing symlink"
-      rm "$HOME/.emacs.d"
-      echo "✓ Symlink removed"
-    fi
+      # Remove old symlink if it exists
+      if [ -L "$HOME/.emacs.d" ]; then
+        echo "Removing existing symlink"
+        rm "$HOME/.emacs.d"
+        echo "✓ Symlink removed"
+      fi
     
-    # Clone the configuration repository
-    echo "Cloning Emacs configuration from $EMACS_CONFIG_REPO..."
-    if ! git clone "$EMACS_CONFIG_REPO" "$HOME/.emacs.d"; then
-      echo "ERROR: Failed to clone configuration repository!"
-      echo "Make sure you have access to $EMACS_CONFIG_REPO"
-      echo "SETUP FAILED"
-      exit 1
-    fi
-    echo "✓ Configuration cloned"
+      # Clone the configuration repository
+      echo "Cloning Emacs configuration from $EMACS_CONFIG_REPO..."
+      if ! git clone "$EMACS_CONFIG_REPO" "$HOME/.emacs.d"; then
+        echo "ERROR: Failed to clone configuration repository!"
+        echo "Make sure you have access to $EMACS_CONFIG_REPO"
+        echo "SETUP FAILED"
+        exit 1
+      fi
+      echo "✓ Configuration cloned"
     
-    echo ""
-    echo "🎉 SETUP SUCCESSFUL!"
-    echo "Your Emacs configuration is ready at ~/.emacs.d"
-    echo "- Configuration is fully writable and git-managed"
-    echo "- Use 'git pull' in ~/.emacs.d to get updates"
-    echo "- Use 'git push' to save your changes"
+      echo ""
+      echo "🎉 SETUP SUCCESSFUL!"
+      echo "Your Emacs configuration is ready at ~/.emacs.d"
+      echo "- Configuration is fully writable and git-managed"
+      echo "- Use 'git pull' in ~/.emacs.d to get updates"
+      echo "- Use 'git push' to save your changes"
     '';
   };
 in
@@ -98,8 +100,11 @@ in
     defaultEditor = false;
   };
 
-  # Add the setup script to your environment (+ fonts on Darwin)
-  home.packages = [ emacs-config-setup ] ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs.duti ];
+  # Add the setup script and Emacs runtime CLI dependencies to your environment (+ duti on Darwin)
+  home.packages = [
+    atlassianTools.cfl
+    emacs-config-setup
+  ] ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs.duti ];
 
   xdg.configFile."duti/emacs.duti" = lib.mkIf pkgs.stdenv.isDarwin {
     text = emacsDutiConfig;
