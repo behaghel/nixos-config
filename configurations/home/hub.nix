@@ -9,6 +9,7 @@ in
     self.homeModules.default
     self.homeModules.emacs
     self.homeModules.password-store
+    self.homeModules.dev
     self.homeModules.linux-only
   ];
 
