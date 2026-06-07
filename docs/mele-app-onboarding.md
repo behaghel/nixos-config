@@ -274,11 +274,37 @@ The imported module supplies:
 present, builds `.#ociImage` locally, streams it over SSH, and runs
 `sudo mele-app deploy` on the MeLE host.
 
-The default host is `hub@192.168.1.199`. Override it per command with:
+The default host is `hub@mele`. The `mele` host alias should resolve to the
+MeLE host; after Tailscale enrollment, point it at MeLE's Tailscale IPv4 so the
+same deploy commands work both on and away from the LAN. Override per command
+with:
 
 ```sh
 MELE_HOST=hub@other-host mele:deploy
 ```
+
+## Remote deploy over Tailscale
+
+MeLE enables Tailscale for remote admin/deploy access without public SSH. This
+MacBook Pro enables the open-source Homebrew `tailscale` formula via
+`hub.darwin.openSourceTailscale.enable = true`. First time setup on MeLE after
+activation:
+
+```sh
+sudo tailscale up
+tailscale ip -4
+```
+
+Then update this repo's local-network alias so `mele` points to that Tailscale
+IP, activate the workstation config, log the workstation into the same tailnet
+with `sudo tailscale up` if needed, and use the normal app commands:
+
+```sh
+ssh hub@mele hostname
+mele:deploy
+```
+
+The LAN IP remains useful for diagnostics, but app helpers should use `hub@mele`.
 
 ## Create the MeLE app slot
 

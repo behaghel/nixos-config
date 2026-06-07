@@ -11,6 +11,7 @@ in
     ./keyboard
     ./system-defaults.nix
     ./homebrew-apps.nix
+    ./open-source-tailscale.nix
   ];
 
   config = {

@@ -7,12 +7,12 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 ## Context
 
 - MeLE is managed in this repository as the NixOS host `mele-hub`.
-- Current MeLE services include SSH, Syncthing, Prometheus, Grafana, Alertmanager, node/smartctl exporters, restic backup, and persistent journald.
-- MeLE LAN IP is `192.168.1.199`.
+- Current MeLE services include SSH, Tailscale, Syncthing, Prometheus, Grafana, Alertmanager, node/smartctl exporters, restic backup, and persistent journald.
+- MeLE LAN IP is `192.168.1.199`, but app deploys should target the stable `mele` host alias rather than the raw LAN IP.
 - Public DNS is set up with `home.behaghel.org` and wildcard subdomains resolving to `79.116.72.133`.
 - Router port forwarding should route public TCP `80` and `443` to MeLE.
 - NAT loopback was validated using Grafana on port `3000`; LAN and cellular access both worked.
-- Direct public Grafana port forwarding has been removed. Grafana should later move behind Caddy with authentication.
+- Direct public Grafana port forwarding has been removed. Grafana is served through Caddy with authentication.
 - App development environments use `devenv`; the first app should use hardcoded `devenv` tasks, with a future `devenv` extension deferred to v2.
 - Secrets are described with SecretSpec in app repositories. Normal deploys must not require resolving `pass`/YubiKey secrets.
 
@@ -22,6 +22,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 |---|---|---|
 | Release artifact | OCI image produced by app `devenv` tasks | Works across language stacks and avoids full host rebuilds. |
 | Image transport | Direct SSH stream to MeLE | Avoids operating a registry initially. |
+| Remote deploy access | Enable Tailscale on MeLE and target `hub@mele` | Keeps deploys working away from the LAN without public SSH; the `mele` alias can point to the MeLE Tailscale IP once enrolled. |
 | App isolation | One Unix user per app | Limits blast radius and keeps data ownership clear. |
 | App slots | Host-controlled, declared in MeLE Nix config | Stable infra boundaries remain declarative; releases remain independent. |
 | New app onboarding | Requires MeLE switch | Slot creation is rare; app deploys are frequent and must not switch MeLE. |
@@ -84,6 +85,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - [ ] AC-17: Given direct public Grafana port forwarding has been removed, when Grafana is later exposed, then it is reachable behind Caddy with authentication rather than directly on public port `3000`.
 - [ ] AC-18: Given the blueprint app repo exists, when `devenv tasks run mele:deploy` is run there, then it builds the app OCI image with `devenv`, updates SecretSpec metadata, streams the image to MeLE over SSH, and completes without requiring a MeLE switch.
 - [ ] AC-19: Given a developer runs `mele:create-app notes` from the devenv shell, when the command completes, then it creates a dedicated declarative app slot file under `configurations/nixos/mele-hub/apps/`, chooses the next available host port by convention, defaults the public domain to `notes.home.behaghel.org`, and Nix evaluation includes `notes` in `/etc/mele-apps/config.json`.
+- [ ] AC-20: Given MeLE has joined Tailscale and the workstation `mele` host alias points to MeLE's Tailscale IPv4, when app helpers target `hub@mele`, then deploy/status/health/log commands work away from the LAN without exposing public SSH.
 
 ## Invariants
 
@@ -94,6 +96,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - Normal deploys must not resolve pass/SecretSpec values or require YubiKey interaction.
 - Nix activation must not overwrite `/etc/mele-apps/<app>.env` secret contents.
 - Existing Syncthing, restic, Prometheus, Grafana, SSH, and firewall behavior must not regress except where explicitly changed by this spec.
+- Remote deploy access should use Tailscale or an equivalent private network, not public SSH exposure.
 - Grafana must not be exposed directly via router/public port `3000`.
 - Actual secret values must not be committed to this repository or app repositories.
 - Backup restore validation must not overwrite live app data unless explicitly running a documented disaster-recovery procedure.
@@ -145,6 +148,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | AC-17 | Confirm router has no `3000` forward; later verify Grafana Caddy route/auth | No |
 | AC-18 | From blueprint repo, run `devenv tasks run mele:deploy`; verify MeLE generation unchanged and only app service restarted | No |
 | AC-19 | Run `mele:create-app notes` from the devenv shell; inspect new app slot file and evaluate generated config JSON for `notes` | Partial |
+| AC-20 | After `sudo tailscale up`, point `mele` at `tailscale ip -4`; verify `ssh hub@mele hostname` and app helper commands from outside the LAN | No |
 
 ## Implementation Slices
 

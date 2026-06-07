@@ -86,8 +86,8 @@ in
       switch \
       --fast \
       --flake .#mele-hub \
-      --build-host hub@192.168.1.199 \
-      --target-host hub@192.168.1.199 \
+      --build-host hub@mele \
+      --target-host hub@mele \
       --use-remote-sudo \
       "$@"
   '';

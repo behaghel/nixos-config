@@ -25,9 +25,9 @@
 ## Activation and updates
 - From the repo root, activate the configured MeLE host with:
   - `devenv -q shell -- mele:activate`
-- This wraps the remote `nixos-rebuild switch --fast --flake .#mele-hub` invocation using `hub@192.168.1.199` as both build and target host.
+- This wraps the remote `nixos-rebuild switch --fast --flake .#mele-hub` invocation using `hub@mele` as both build and target host. Keep the `mele` host alias pointed at MeLE; after Tailscale setup it should point to MeLE's Tailscale IPv4.
 - If Home Manager needs the password store on first setup, pre-clone it interactively with SSH agent forwarding so your local YubiKey can authorize GitLab access:
-  - `ssh -A hub@192.168.1.199 'git clone git@gitlab.com:behaghel/pass.git ~/.password-store'`
+  - `ssh -A hub@mele 'git clone git@gitlab.com:behaghel/pass.git ~/.password-store'`
 
 ## Troubleshooting
 - If the ISO build fails on remote builders, rerun with `KEYS_DIR=/path/to/keys` if keys are stored elsewhere.

@@ -26,7 +26,10 @@ in
     pkgs.qemu
   ];
 
-  hub.localNetwork.entries."192.168.1.199" = [ "mele" ];
+  # MeLE's Tailscale IPv4 so `hub@mele` works both at home and away from the LAN.
+  hub.localNetwork.entries."100.115.20.65" = [ "mele" ];
+
+  hub.darwin.openSourceTailscale.enable = true;
 
   hub.darwin.apps = {
     casks = [

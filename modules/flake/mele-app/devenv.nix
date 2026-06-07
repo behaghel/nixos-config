@@ -23,7 +23,7 @@ in
 
     host = lib.mkOption {
       type = lib.types.str;
-      default = "hub@192.168.1.199";
+      default = "hub@mele";
       description = "Default SSH target for the MeLE host.";
     };
 

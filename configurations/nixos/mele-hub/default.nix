@@ -200,6 +200,7 @@ in
       enable = true;
       allowedTCPPorts = [ 22 22000 ];
       allowedUDPPorts = [ 22000 21027 ];
+      trustedInterfaces = [ "tailscale0" ];
       logRefusedConnections = true;
     };
   };
@@ -220,6 +221,7 @@ in
     tlp.enable = true;
     timesyncd.enable = true;
     pcscd.enable = true;
+    tailscale.enable = true;
     openssh = {
       enable = true;
       settings = {

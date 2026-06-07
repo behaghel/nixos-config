@@ -43,6 +43,7 @@ explicit user approval before execution.
 | Restore validation | `mele-app verify-restore <app> --target <temp-dir> [--marker data/...|state/...]` restores app data/state non-destructively from the apps repo. |
 | Backup/restore runbook | `docs/mele-backup-restore.md` documents repositories, helpers, credential files, checks, app restore, and Syncthing restore. |
 | Grafana access | Grafana is bound to `127.0.0.1:3000` and proxied at `grafana.home.behaghel.org` through Caddy basic auth; direct port `3000` is not exposed. |
+| Remote deploy access | MeLE enables Tailscale; app and activation helpers target `hub@mele` so the alias can resolve to the Tailscale IP when remote. |
 
 ### Deferred / optional
 
@@ -88,7 +89,7 @@ explicit user approval before execution.
 - Add app slots declaratively under `configurations/nixos/mele-hub/apps/`, then
   manually activate MeLE.
 - Build and deploy app releases from each app repo using the shared `mele.app`
-  devenv module and `mele:deploy`.
+  devenv module and `mele:deploy`; helpers target `hub@mele` by default.
 - Use `mele-app status|health|logs|releases|contract-check|verify-restore` for
   day-to-day operations.
 - Observe apps in Grafana through:
