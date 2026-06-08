@@ -1,11 +1,11 @@
 # Domain Manifest Schema
 
-The domain manifest lives at `spec/domains.yaml` and is the structural contract between specs and code. It encodes the domain tree, subdomain classifications, and the context map.
+The domain manifest lives at `domains.yaml` and is the structural contract between specs and code. It encodes the domain tree, subdomain classifications, and the context map.
 
 ## Structure
 
 ```yaml
-# spec/domains.yaml
+# domains.yaml
 
 # Optional project-level metadata
 project:
@@ -23,9 +23,10 @@ domains:
       - term: Cachet
         meaning: A privacy-preserving trust badge issued after credential verification
 
-    # Code and spec paths (leaf domain)
+    # Code paths (leaf domain). Specs live in the first code path by default.
     code: [path/to/code/, another/path/]
-    spec: spec/<domain-name>/
+    # Optional override when specs cannot live in the first code path:
+    spec: path/to/code/
 
     # OR subdomains (branch domain)
     subdomains:
@@ -33,7 +34,7 @@ domains:
         description: ...
         type: core | supporting | generic    # inherits from parent if omitted
         code: [path/to/code/]
-        spec: spec/<domain-name>/<subdomain-name>/
+        # Optional override; otherwise specs live in path/to/code/.
         # subdomains can nest further
 
 # Cross-context relationships
@@ -89,8 +90,9 @@ The `context-map` section declares how domains communicate. Each entry is a dire
 ## Path rules
 
 - `code` paths are relative to project root, always end with `/`
-- `spec` paths mirror the domain tree: `spec/{domain}/{subdomain}/`
-- A domain is either a **leaf** (has `code` + `spec`) or a **branch** (has `subdomains`)
+- Specs live next to code. The first `code` path is the default spec directory; `README.md` is the main domain spec.
+- `spec` is optional and only overrides the inferred spec directory when specs cannot live in the first `code` path.
+- A domain is either a **leaf** (has `code`) or a **branch** (has `subdomains`)
 - Branch domains may also have `code` + `spec` for domain-level concerns (shared types, domain events)
 
 ## Domain types
@@ -141,29 +143,24 @@ domains:
       presentation:
         description: Verify credential presentations against policies
         code: [services/verifier/presentation/]
-        spec: spec/verification/presentation/
       packs:
         description: Cach'pack list management and definitions
         code: [services/verifier/packs/]
-        spec: spec/verification/packs/
 
   issuance:
     description: OpenID4VCI credential issuance via Veriff
     type: core
     code: [services/issuance-gateway/]
-    spec: spec/issuance/
 
   registry:
     description: Policy and pack registry with DID-signed manifests
     type: supporting
     code: [services/registry/]
-    spec: spec/registry/
 
   receipts:
     description: Consent receipts and transparency logging
     type: supporting
     code: [services/receipts-log/]
-    spec: spec/receipts/
 
   wallet:
     description: Mobile wallet application
@@ -172,45 +169,37 @@ domains:
       onboarding:
         description: First-run experience and identity verification
         code: [mobile/shared/.../onboarding/, mobile/androidApp/.../onboarding/]
-        spec: spec/wallet/onboarding/
       credentials:
         description: Credential storage, display, and management
         code: [mobile/shared/.../credentials/, mobile/androidApp/.../credentials/]
-        spec: spec/wallet/credentials/
       verification-flow:
         description: QR scan, consent, presentation flow
         code: [mobile/shared/.../verification/, mobile/androidApp/.../verification/]
-        spec: spec/wallet/verification-flow/
 
   common:
     description: Shared types, value objects, and contracts across services
     type: shared-kernel
     code: [services/common/]
-    spec: spec/common/
 
   security:
     description: Cryptographic operations, key management, threat model
     type: core
     code: [services/common/crypto/]
-    spec: spec/security/
 
   ux:
     description: Design system, theming, shared UI components
     type: supporting
     code: [mobile/androidApp/.../ui/theme/, mobile/androidApp/.../ui/components/]
-    spec: spec/ux/
 
   infra:
     description: Deployment, Cloud Run, networking, service mesh
     type: generic
     code: [deploy/, terraform/]
-    spec: spec/infra/
 
   cicd:
     description: CI/CD pipelines, pre-commit hooks, release automation
     type: generic
     code: [.github/workflows/, scripts/]
-    spec: spec/cicd/
 
 context-map:
   - from: issuance

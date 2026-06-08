@@ -11,7 +11,7 @@ Shows the current state of the domain tree — what's specced, what's tested, wh
 
 ### Step 1: Load the manifest
 
-1. Read `spec/domains.yaml`.
+1. Read `domains.yaml`.
 2. If it doesn't exist: "No domain tree found. Run `/domain-tree:init` to create one."
 
 ### Step 2: Check each domain
@@ -76,7 +76,7 @@ Based on the map, suggest priorities weighted by domain type:
 
 1. **Core domains without specs** — highest priority. These are the competitive advantage and must be specced.
 2. **Shared kernel without specs** — high priority. Changes ripple everywhere.
-3. **Stale specs in core domains** — "Review `spec/issuance/` — core domain code changed since last review."
+3. **Stale specs in core domains** — "Review `src/issuance/README.md` — core domain code changed since last review."
 4. **Active supporting domains without specs** — medium priority if recently active.
 5. **Undeclared context-map relationships** — if cross-domain imports exist without a declared relationship, flag them.
 6. **Generic/dormant domains** — low priority for catchup.

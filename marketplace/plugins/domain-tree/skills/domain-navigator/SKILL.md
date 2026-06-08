@@ -6,9 +6,9 @@ description: |
 
 # Domain Navigator
 
-Provides domain-aware navigation and enforcement for codebases structured around `spec/domains.yaml`.
+Provides domain-aware navigation and enforcement for codebases structured around `domains.yaml`.
 
-Load `references/manifest-schema.md` when working with `spec/domains.yaml`.
+Load `references/manifest-schema.md` when working with `domains.yaml`.
 Load `references/conventions.md` when making decisions about file placement or domain boundaries.
 
 ## When to activate
@@ -23,7 +23,7 @@ Load `references/conventions.md` when making decisions about file placement or d
 
 ### 1. Load the domain tree
 
-1. Read `spec/domains.yaml` at the project root.
+1. Read `domains.yaml` at the project root.
 2. If it doesn't exist, tell the user: "No domain tree found. Run `/domain-tree:init` to create one."
 3. Parse the tree into a mental model of domains, subdomains, code paths, and spec paths.
 
@@ -33,11 +33,11 @@ When the user describes work or you're about to modify code:
 
 1. Match the target file(s) against `code` paths in the manifest.
 2. Identify the governing domain, subdomain, and **domain type** (core/supporting/generic/shared-kernel).
-3. Locate the corresponding `spec` path.
-4. Report: "This is in the **[domain] > [subdomain]** namespace (type: **[type]**). Spec at `spec/[path]/`. Code at `[code paths]`."
+3. Locate the corresponding colocated spec path (by default, the first `code` path; `spec` may override it).
+4. Report: "This is in the **[domain] > [subdomain]** namespace (type: **[type]**). Spec at `[code path]/README.md`. Code at `[code paths]`."
 
 If a file doesn't match any domain:
-- Flag it: "This file isn't covered by any domain in `spec/domains.yaml`. Should we add it to an existing domain or create a new one?"
+- Flag it: "This file isn't covered by any domain in `domains.yaml`. Should we add it to an existing domain or create a new one?"
 
 ### 3. Enforce placement on new files
 
@@ -46,14 +46,14 @@ When creating new files:
 1. Determine which domain the file belongs to based on its purpose.
 2. Check that the target path is within that domain's `code` paths.
 3. If it isn't, suggest the correct location: "This looks like it belongs in **[domain]**. The convention is `[correct path]`."
-4. If a new subdomain is needed, propose updating `spec/domains.yaml` first.
+4. If a new subdomain is needed, propose updating `domains.yaml` first.
 
 ### 4. Spec-on-touch (classification-aware)
 
 When editing production code:
 
 1. Resolve the governing domain and its `type`.
-2. Check if a spec exists at the domain's `spec` path.
+2. Check if a spec exists in the domain's colocated spec path (`README.md` or any sibling `.md` file).
 3. Apply rigor based on domain type:
    - **core** — Hard block. "No spec exists for **[domain]** (core). This domain requires a spec before any code change."
    - **supporting** — Warning. "No spec exists for **[domain]** yet. Consider writing one before this change."
@@ -69,7 +69,7 @@ When editing production code:
 When work spans multiple domains:
 
 1. Identify all affected domains.
-2. Consult the `context-map` in `spec/domains.yaml` for the declared relationship.
+2. Consult the `context-map` in `domains.yaml` for the declared relationship.
 3. If a relationship exists:
    - Report the pattern: "This crosses **[domain A]** → **[domain B]** (pattern: **[pattern]**)."
    - Guide based on pattern:
@@ -94,7 +94,7 @@ When editing code in a `shared-kernel` domain:
 
 - Do NOT create files outside the domain tree without flagging it.
 - Do NOT let domain boundaries drift silently — every new code path should map to a domain.
-- Do NOT treat `spec/domains.yaml` as documentation — it is a structural contract.
+- Do NOT treat `domains.yaml` as documentation — it is a structural contract.
 - Do NOT enforce domains on non-production files (tests, scripts, CI) unless they have their own technical domain.
 - Do NOT allow cross-domain changes without consulting the context map.
 - Do NOT allow shared-kernel changes without notifying all consumers.

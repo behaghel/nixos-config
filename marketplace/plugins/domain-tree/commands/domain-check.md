@@ -5,14 +5,24 @@ allowed-tools: [Read, Glob, Grep, Bash]
 
 # Check Domain Tree
 
-Validates the structural contract between `spec/domains.yaml` and the actual codebase.
+Validates the structural contract between `domains.yaml` and the actual codebase.
 
 ## Instructions
 
 ### Step 1: Load manifest
 
-1. Read `spec/domains.yaml`.
+1. Read `domains.yaml`.
 2. If it doesn't exist: "No domain tree found. Run `/domain-tree:init` to create one."
+
+### Step 1b: Legacy migration prompt
+
+If `domains.yaml` is missing but `spec/domains.yaml` exists, report the legacy layout and include this migration section before the health check:
+
+1. Move `spec/domains.yaml` to project-root `domains.yaml`.
+2. For each domain, move `spec/<domain>/index.md` to the domain's code directory as `README.md`.
+3. Move other domain `*.md` files into that same colocated directory.
+4. Remove old `spec:` fields or update them to explicit colocated paths.
+5. Delete the old `spec/` tree once empty.
 
 ### Step 2: Check manifest → code (do declared paths exist?)
 
@@ -21,7 +31,7 @@ For each domain's `code` paths:
 1. Verify the directory exists.
 2. If it doesn't: report as **broken mapping** — "Domain **[name]** declares `[path]` but it doesn't exist. Was it renamed or removed?"
 
-For each domain's `spec` path:
+For each domain's colocated spec path (the first `code` path by default, or explicit `spec:` override):
 
 1. Verify the directory exists.
 2. If it doesn't: report as **missing spec directory** — "Domain **[name]** has no spec directory at `[path]`."
@@ -48,12 +58,12 @@ For each domain's `code-paths`:
 
 Also check for stale `governs:` frontmatter in spec files — if found, report as **deprecated** — "`governs:` in `[file]` is deprecated. Code ownership is declared via `code-paths` in `domains.yaml`."
 
-Also check for **spec files outside the domain tree** — scan `docs/` for files matching `SPEC_*.md` or `*_PROTOCOL.md` patterns. Report as **misplaced spec** — "`[file]` looks like a behavioral spec but lives outside `spec/`. Move it to `spec/{domain}/`."
+Also check for **spec files outside the domain tree** — scan `docs/` for files matching `SPEC_*.md` or `*_PROTOCOL.md` patterns. Report as **misplaced spec** — "`[file]` looks like a behavioral spec but lives outside the domain code tree. Move it next to the owning domain's code."
 
 ### Step 5: Check naming alignment
 
-1. Verify domain names in `spec/domains.yaml` match their directory names under `spec/`.
-2. Verify subdomain nesting in the filesystem matches the YAML hierarchy.
+1. Verify domain names in `domains.yaml` match or clearly map to their code directory names.
+2. Verify subdomain nesting in the filesystem matches the YAML hierarchy where the code layout allows it.
 3. Report **naming drift** if they've diverged.
 
 ### Step 6: Check context map health
@@ -75,32 +85,32 @@ Also check for **spec files outside the domain tree** — scan `docs/` for files
 2. Flag core domains without specs as **high-risk gaps**.
 3. Flag shared-kernel domains without consumer contract tests.
 
-### Step 7b: Check index.md quality
+### Step 7b: Check README.md quality
 
-For each `index.md` file under `spec/`:
+For each domain `README.md` file in a colocated spec directory:
 
 1. Check frontmatter does NOT contain `type:` (classification lives in domains.yaml).
 2. Check frontmatter does NOT contain `consumers:` (consumer lists live in domains.yaml).
 3. Check body does NOT contain a "Context Map Relationships" section (context map lives in domains.yaml).
 4. Check body does NOT repeat the domain description from domains.yaml verbatim.
-5. Report **index.md duplication** for any violations — "**[domain]** index.md duplicates information from domains.yaml: [field/section]."
-6. Check if the index.md has substantive content beyond the title and reference line (ubiquitous language, invariants, domain events). If it only contains a heading and a reference line, report as **empty index.md** — "**[domain]** index.md adds no content beyond the reference line. Consider deleting it."
+5. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
+6. Check if the README.md has substantive content beyond the title and reference line (ubiquitous language, invariants, domain events). If it only contains a heading and a reference line, report as **empty README.md** — "**[domain]** README.md adds no content beyond the reference line. Consider deleting it."
 
-`index.md` is optional. Do NOT flag domains that lack one — only flag ones that exist but add nothing.
+`README.md` is optional. Do NOT flag domains that lack one — only flag ones that exist but add nothing.
 
 ### Step 8: Check OpenAPI completeness (backend domains only)
 
-For each backend domain (language: `go`) that has a `spec.md`:
+For each backend domain (language: `go`) that has a `README.md`:
 
-1. Scan the spec.md for HTTP endpoint references (patterns like `POST /path`, `GET /path`, or endpoint descriptions).
-2. For each endpoint found in spec.md, check whether `schemas/openapi.yaml` declares a matching path+method.
-3. Report **undeclared endpoints** — "spec.md for **[domain]** describes `[METHOD] [path]` but it is not in `schemas/openapi.yaml`."
+1. Scan the README.md for HTTP endpoint references (patterns like `POST /path`, `GET /path`, or endpoint descriptions).
+2. For each endpoint found in README.md, check whether `schemas/openapi.yaml` declares a matching path+method.
+3. Report **undeclared endpoints** — "README.md for **[domain]** describes `[METHOD] [path]` but it is not in `schemas/openapi.yaml`."
 
 For each path in `schemas/openapi.yaml`:
 
 1. Identify which domain owns it (via the `tags` field).
-2. If the owning domain is `type: core` and has a `spec.md`, check whether the spec.md mentions the endpoint.
-3. Report **unspecced endpoints** — "`[METHOD] [path]` is in OpenAPI (tag: [tag]) but has no behavioral spec in `spec/[domain]/spec.md`."
+2. If the owning domain is `type: core` and has a `README.md`, check whether the README.md mentions the endpoint.
+3. Report **unspecced endpoints** — "`[METHOD] [path]` is in OpenAPI (tag: [tag]) but has no behavioral spec in `[domain code path]/README.md`."
 
 Also check:
 
@@ -125,7 +135,7 @@ Domain Tree Health Check
   - scripts/benchmarks/     ← consider adding to cicd domain
 
 ⚠ Missing spec directories:
-  - spec/ux/                ← domain declared but directory not created
+  - src/ux/                 ← domain declared but directory not created
 
 ⚠ Code-paths quality:
   - wallet/credentials lists 4 individual .kt files in ui/ — refactor into ui/credentials/
@@ -133,15 +143,15 @@ Domain Tree Health Check
   - wallet lists 4 subdirectories under .../android/ — consider using the parent
 
 ⚠ Deprecated governs:
-  - spec/issuance/spec.md still uses governs: — remove, code ownership is in domains.yaml
+  - src/issuance/README.md still uses governs: — remove, code ownership is in domains.yaml
 
 ⚠ Misplaced specs:
-  - docs/VERIFICATION_PROTOCOL.md — move to spec/security/
-  - docs/SPEC_REVOKED_CACHET_UX.md — move to spec/wallet/credentials/ or delete
+  - docs/VERIFICATION_PROTOCOL.md — move next to security code
+  - docs/SPEC_REVOKED_CACHET_UX.md — move next to wallet credentials code or delete
 
-⚠ Empty index.md:
-  - spec/wallet/onboarding/index.md — adds nothing beyond reference line
-  - spec/registry/index.md — adds nothing beyond reference line
+⚠ Empty README.md:
+  - src/wallet/onboarding/README.md — adds nothing beyond reference line
+  - src/registry/README.md — adds nothing beyond reference line
 
 ⚠ Context map issues:
   - issuance → wallet (ACL): via path mobile/shared/.../acl/ does not exist
@@ -152,13 +162,13 @@ Domain Tree Health Check
   - common (shared-kernel): no contract tests from consumers
 
 ⚠ OpenAPI gaps:
-  - spec/verification/spec.md describes POST /sessions — not in schemas/openapi.yaml
-  - spec/issuance/spec.md describes GET /status/{listId} — not in schemas/openapi.yaml
+  - src/verification/README.md describes POST /sessions — not in schemas/openapi.yaml
+  - src/issuance/README.md describes GET /status/{listId} — not in schemas/openapi.yaml
   - POST /presentations/verify (tag: verifier) — no behavioral spec coverage (only generic Error)
 
 Recommendations:
 1. Update domains.yaml: issuance code path → services/issuance-gateway/
-2. Create directory: spec/ux/
+2. Create directory/spec: src/ux/README.md
 3. Add domain for: services/relay/
 4. Add context-map entry: verification → common (shared-kernel)
 5. PRIORITY: spec core domain verification — it has no approved specs

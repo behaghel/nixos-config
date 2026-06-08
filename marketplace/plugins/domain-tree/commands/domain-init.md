@@ -1,5 +1,5 @@
 ---
-description: Bootstrap the domain tree for an existing codebase — analyzes project structure and creates spec/domains.yaml
+description: Bootstrap the domain tree for an existing codebase — analyzes project structure and creates domains.yaml
 argument-hint: [optional: focus-area]
 allowed-tools: [Read, Glob, Grep, Bash]
 ---
@@ -21,7 +21,7 @@ Analyzes an existing codebase and proposes a domain tree with 1:1 spec-code mirr
 3. Read existing documentation:
    - Architecture docs (`docs/ARCHITECTURE.md`, `docs/*.md`)
    - API specs (`api/*.yaml`, `api/*.json`)
-   - Existing specs (`spec/` if it exists)
+   - Existing specs (`spec/` if a legacy layout exists, plus colocated `*.md` files)
    - README files in subdirectories
 4. Read recent git history to understand which areas are actively changing.
 
@@ -45,7 +45,7 @@ Analyzes an existing codebase and proposes a domain tree with 1:1 spec-code mirr
 5. For each proposed domain, define:
    - Name and description
    - Code paths it governs
-   - Spec path (mirroring the domain name under `spec/`)
+   - Spec path (normally the first `code` path, with `README.md` as the main spec)
    - Whether it needs subdomains
 
 ### Step 2b: Classify domains
@@ -91,24 +91,24 @@ Analyze how domains interact:
 
 ### Step 4: Scaffold
 
-1. Create `spec/domains.yaml` with the approved tree (including `type`, `language`, and `context-map`).
-2. Create the `spec/` directory structure (empty domain directories).
-3. For each domain, create a skeleton `index.md` tailored to its type.
+1. Create `domains.yaml` with the approved tree (including `type`, `language`, and `context-map`).
+2. For each domain, identify the colocated spec directory (normally the first `code` path; use explicit `spec:` only when necessary).
+3. In each colocated spec directory, create a skeleton `README.md` tailored to its type.
 
-**CRITICAL: index.md must NOT duplicate domains.yaml.** The `domains.yaml` is the single source of truth for:
+**CRITICAL: README.md must NOT duplicate domains.yaml.** The `domains.yaml` is the single source of truth for:
 - Domain descriptions
 - Domain type/classification
 - Code paths
 - Context map relationships
 - Consumer lists
 
-The `index.md` exists ONLY for information that `domains.yaml` cannot express:
+The `README.md` exists ONLY for information that `domains.yaml` cannot express:
 - Ubiquitous language (term definitions)
 - Key concepts and aggregates
 - Invariants (business rules that must never break)
 - Domain events
 
-**Do NOT copy the description from domains.yaml into index.md.** Instead, use a reference.
+**Do NOT copy the description from domains.yaml into README.md.** Instead, use a reference.
 
 For **core** domains:
 ```markdown
@@ -120,7 +120,7 @@ last-reviewed: <today>
 
 # <Domain Name>
 
-> See `spec/domains.yaml` for description, classification, code paths, and context map.
+> See `domains.yaml` for description, classification, code paths, and context map.
 
 ## Ubiquitous Language
 
@@ -153,7 +153,7 @@ last-reviewed: <today>
 
 # <Domain Name>
 
-> See `spec/domains.yaml` for description, classification, code paths, and context map.
+> See `domains.yaml` for description, classification, code paths, and context map.
 ```
 
 For **shared-kernel** domains:
@@ -166,7 +166,7 @@ last-reviewed: <today>
 
 # <Domain Name>
 
-> See `spec/domains.yaml` for description, consumers, and context map.
+> See `domains.yaml` for description, consumers, and context map.
 
 ## Shared Types
 
@@ -184,7 +184,7 @@ last-reviewed: <today>
 For domains that already have documentation or specs:
 
 1. **OpenAPI files** → Extract endpoint descriptions into the domain's spec as behavioral requirements.
-2. **Architecture docs** → Extract relevant sections into domain `index.md` files.
+2. **Architecture docs** → Extract relevant sections into domain `README.md` files.
 3. **Test suites** → Note which domains have test coverage (for the coverage map).
 4. **CLAUDE.md / AGENTS.md** → Extract domain-relevant guidelines.
 

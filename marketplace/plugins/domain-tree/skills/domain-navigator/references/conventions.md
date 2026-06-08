@@ -1,31 +1,36 @@
 # Domain Tree Conventions
 
-Rules for maintaining the 1:1 mirror between `spec/` and code namespaces, informed by Domain-Driven Design.
+Rules for maintaining the 1:1 mirror between colocated domain specs and code namespaces, informed by Domain-Driven Design.
 
-## The mirroring principle
+## The colocation principle
 
-The directory structure under `spec/` MUST mirror the domain tree. The domain tree SHOULD mirror the code's module/package structure. When they diverge, the domain tree is the authority — refactor code to match, not the other way around.
+`domains.yaml` lives at the project root. Domain specs live beside the code they govern: the first `code` path is the default spec directory, `README.md` is the main domain spec, and additional behavior specs are sibling `*.md` files. If specs cannot live in the first `code` path, an explicit `spec:` override may point to the colocated spec directory.
+
+For a project that uses `src/`, the common shape is:
 
 ```
-spec/                          code (various roots)
+.
 ├── domains.yaml               (the manifest)
-├── verification/              services/verifier/
-│   ├── presentation/          services/verifier/presentation/
-│   └── packs/                 services/verifier/packs/
-├── issuance/                  services/issuance-gateway/
-├── wallet/                    mobile/shared/ + mobile/androidApp/
-│   ├── onboarding/              .../onboarding/
-│   └── credentials/             .../credentials/
-├── common/                    services/common/          ← shared kernel
-├── security/                  services/common/crypto/
-└── cicd/                      .github/workflows/ + scripts/
+└── src/
+    ├── verification/
+    │   ├── README.md          (main domain spec)
+    │   ├── presentation.md    (specific behavior spec)
+    │   └── ...code...
+    ├── issuance/
+    │   ├── README.md
+    │   └── ...code...
+    └── shared-kernel/
+        ├── README.md
+        └── ...code...
 ```
+
+The domain tree SHOULD mirror the code's module/package structure. When they diverge, make the drift visible in `/domain-tree:check` and decide whether to refactor code or update `domains.yaml`.
 
 ## Ubiquitous language
 
 Each domain has its own vocabulary. The same word can mean different things in different domains — that's expected and healthy. What matters is consistency WITHIN a domain.
 
-- Define key terms in the domain's `language` field in `domains.yaml` or in `spec/{domain}/index.md`
+- Define key terms in the domain's `language` field in `domains.yaml` or in `<domain code path>/README.md`
 - Code names (types, functions, variables) MUST use the domain's vocabulary
 - Spec text MUST use the domain's vocabulary
 - When two domains need to communicate, the context map defines how terms translate
@@ -84,12 +89,12 @@ The context map in `domains.yaml` declares cross-domain relationships. These rel
 
 | Pattern | Spec location | What the spec covers |
 |---------|--------------|---------------------|
-| shared-kernel | `spec/common/` (the kernel domain) | The shared types, their invariants, and which domains consume them |
+| shared-kernel | The kernel domain's colocated spec directory | The shared types, their invariants, and which domains consume them |
 | customer-supplier | Upstream domain's spec | The contract — what the upstream promises and what can change |
 | conformist | Downstream domain's spec | How the downstream maps upstream concepts to its own model |
 | anti-corruption-layer | Downstream domain's spec | The ACL: what comes in, what comes out, where it lives in code |
 | open-host-service | Upstream domain's spec | The protocol or API definition (often a published standard) |
-| published-language | `spec/{domain}/` of the publisher | The schema or interchange format |
+| published-language | `<domain code path>/` of the publisher | The schema or interchange format |
 
 ### Cross-domain changes with context map awareness
 
@@ -106,9 +111,9 @@ If a cross-domain change doesn't fit any declared relationship, the context map 
 
 ### Naming
 
-- One spec per bounded concern: `spec/issuance/credential-flow.md`
+- One spec per bounded concern: `src/issuance/credential-flow.md`
 - Use the behavior name, not the implementation name: `verification-request.md` not `verify-handler.md`
-- Plans live next to their spec: `spec/issuance/credential-flow.plan.md`
+- Plans live next to their spec: `src/issuance/credential-flow.plan.md`
 
 ### Frontmatter
 
@@ -122,7 +127,7 @@ last-reviewed: 2026-04-12
 ---
 ```
 
-- `domain` — must match a domain in `spec/domains.yaml`
+- `domain` — must match a domain in `domains.yaml`
 - `status` — lifecycle state (`draft` → `approved` → `stale` when code outpaces spec)
 - `last-reviewed` — when a human last verified accuracy
 
@@ -130,24 +135,25 @@ Do NOT use `governs:` in spec frontmatter. Code ownership is already declared vi
 
 ### Domain-level spec
 
-A domain MAY have an `index.md` at its root:
+A domain MAY have a `README.md` at its code root:
 
 ```
-spec/issuance/
-├── index.md              ← OPTIONAL: ubiquitous language, invariants, domain events
+src/issuance/
+├── README.md             ← main domain spec: ubiquitous language, invariants, domain events
 ├── credential-flow.md    ← specific behavior spec
 ├── credential-flow.plan.md
-└── webhook-handling.md
+├── webhook-handling.md
+└── ...code...
 ```
 
-`index.md` is **optional**. Only create one when the domain has content worth capturing:
+`README.md` is **optional**. Only create one when the domain has content worth capturing:
 - Ubiquitous language (key terms and their meanings in this domain)
 - Cross-cutting invariants and key concepts
 - Domain events
 
-Do NOT create an `index.md` that is just a title and a reference line — that adds nothing. Domains without ubiquitous language, invariants, or events do not need one.
+Do NOT create an `README.md` that is just a title and a reference line — that adds nothing. Domains without ubiquitous language, invariants, or events do not need one.
 
-`index.md` does NOT duplicate information already in `domains.yaml`:
+`README.md` does NOT duplicate information already in `domains.yaml`:
 - Description
 - Domain type/classification
 - Code paths
@@ -166,9 +172,9 @@ Do NOT create an `index.md` that is just a title and a reference line — that a
 
 When `/domain-tree:check` detects these patterns, it should recommend the refactoring rather than silently accepting the file-level mappings.
 
-### Spec files live in spec/, not docs/
+### Spec files live next to code, not in docs/
 
-All behavioral specifications must live under `spec/{domain}/`. If a spec-like document exists in `docs/` (e.g., `docs/VERIFICATION_PROTOCOL.md`), it should be moved into the appropriate domain's spec directory. `docs/` is for guides, plans, and non-normative documentation — not for specs that govern code.
+All behavioral specifications must live under the domain's colocated spec directory (normally the first `code` path). If a spec-like document exists in `docs/` (e.g., `docs/VERIFICATION_PROTOCOL.md`), it should be moved next to the appropriate domain's code. `docs/` is for guides, plans, and non-normative documentation — not for specs that govern code.
 
 ## When to create a new domain
 

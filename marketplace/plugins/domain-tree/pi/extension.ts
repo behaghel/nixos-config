@@ -6,7 +6,7 @@
  * mapping, and shared kernel management.
  *
  * What this extension provides:
- *   • Auto-detects domain-tree projects (spec/domains.yaml)
+ *   • Auto-detects domain-tree projects (domains.yaml)
  *   • Injects domain-navigator expertise into the system prompt
  *   • Registers custom tools: domain_tree_resolve, domain_tree_check, domain_tree_map
  *   • Registers commands: /domain-tree:init, /domain-tree:check, /domain-tree:map
@@ -34,11 +34,14 @@ function pathExists(p: string): boolean {
 	}
 }
 
-/** Find the project root by looking for spec/domains.yaml from cwd upward. */
+const DOMAIN_MANIFEST = "domains.yaml";
+const LEGACY_DOMAIN_MANIFEST = join("spec", "domains.yaml");
+
+/** Find the project root by looking for domains.yaml from cwd upward. */
 function findDomainRoot(cwd: string): string | null {
 	let dir = resolve(cwd);
 	for (let i = 0; i < 20; i++) {
-		if (pathExists(join(dir, "spec", "domains.yaml"))) {
+		if (pathExists(join(dir, DOMAIN_MANIFEST)) || pathExists(join(dir, LEGACY_DOMAIN_MANIFEST))) {
 			return dir;
 		}
 		const parent = dirname(dir);
@@ -50,7 +53,33 @@ function findDomainRoot(cwd: string): string | null {
 
 /** Quick check if a directory is a domain-tree project. */
 function isDomainTreeProject(dir: string): boolean {
-	return pathExists(join(dir, "spec", "domains.yaml"));
+	return pathExists(join(dir, DOMAIN_MANIFEST)) || pathExists(join(dir, LEGACY_DOMAIN_MANIFEST));
+}
+
+function manifestRelPath(root: string): string {
+	return pathExists(join(root, DOMAIN_MANIFEST)) ? DOMAIN_MANIFEST : LEGACY_DOMAIN_MANIFEST;
+}
+
+function isLegacyManifest(root: string): boolean {
+	return !pathExists(join(root, DOMAIN_MANIFEST)) && pathExists(join(root, LEGACY_DOMAIN_MANIFEST));
+}
+
+function normalizeDomainDir(pathValue: string): string {
+	return pathValue.replace(/\/\*$/, "").replace(/\/+$/, "");
+}
+
+function specDirForEntry(root: string, entry: any): string | null {
+	if (entry.spec) return join(root, normalizeDomainDir(entry.spec));
+	const codePaths = entry.code || [];
+	if (codePaths.length === 0) return null;
+	return join(root, normalizeDomainDir(codePaths[0]));
+}
+
+function specLabelForEntry(entry: any): string | null {
+	if (entry.spec) return `${normalizeDomainDir(entry.spec)}/`;
+	const codePaths = entry.code || [];
+	if (codePaths.length === 0) return null;
+	return `${normalizeDomainDir(codePaths[0])}/`;
 }
 
 /** Strip YAML frontmatter (--- ... ---) from markdown content. */
@@ -77,7 +106,7 @@ function stripFrontmatter(content: string): string {
 /** Try to parse domains.yaml and return domains object. */
 async function tryLoadDomains(root: string): Promise<Record<string, any> | null> {
 	try {
-		const content = await readFile(join(root, "spec", "domains.yaml"), "utf-8");
+		const content = await readFile(join(root, manifestRelPath(root)), "utf-8");
 		// Simple YAML-like parse for the domains section (no full YAML parser dependency).
 		// Keep this parser intentionally conservative: only keys under an explicit
 		// `subdomains:` block are subdomains. Domain metadata keys such as
@@ -123,6 +152,13 @@ async function tryLoadDomains(root: string): Promise<Record<string, any> | null>
 				domains[target.domain].subdomains[target.subdomain].type = type;
 			} else {
 				domains[target.domain].type = type;
+			}
+		};
+		const setSpec = (target: { domain: string; subdomain: string | null }, specPath: string) => {
+			if (target.subdomain) {
+				domains[target.domain].subdomains[target.subdomain].spec = specPath;
+			} else {
+				domains[target.domain].spec = specPath;
 			}
 		};
 
@@ -193,6 +229,14 @@ async function tryLoadDomains(root: string): Promise<Record<string, any> | null>
 				if (typeMatch) {
 					const target = codeTarget(indent);
 					if (target) setType(target, typeMatch[1]);
+					continue;
+				}
+
+				// spec field (optional override; otherwise inferred from the first code path)
+				const specMatch = trimmed.match(/^spec:\s*(.+)$/);
+				if (specMatch) {
+					const target = codeTarget(indent);
+					if (target) setSpec(target, unquote(specMatch[1]));
 					continue;
 				}
 
@@ -277,13 +321,13 @@ async function resolveDomainForFile(filePath: string, root: string, domains: Rec
 }
 
 /** Check if a spec exists for a given domain. */
-async function specExistsForDomain(root: string, domainName: string, subdomain: string | null): Promise<boolean> {
-	const specDir = subdomain
-		? join(root, "spec", domainName, subdomain)
-		: join(root, "spec", domainName);
+async function specExistsForDomain(root: string, domains: Record<string, any>, domainName: string, subdomain: string | null): Promise<boolean> {
+	const entry = subdomain ? domains[domainName]?.subdomains?.[subdomain] : domains[domainName];
+	const specDir = entry ? specDirForEntry(root, entry) : null;
+	if (!specDir) return false;
 	try {
 		await access(specDir);
-		// Check if there are .md files in the directory
+		// Check if there are .md files in the colocated spec directory.
 		const { readdir } = await import("fs/promises");
 		const files = await readdir(specDir);
 		return files.some((f: string) => f.endsWith(".md"));
@@ -339,6 +383,19 @@ export default function domainTreeExtension(pi: ExtensionAPI) {
 		}
 	}
 
+	/** Lazily rediscover the domain root for tools/commands after init in the same session. */
+	async function ensureDomainRoot(ctx?: any) {
+		if (!domainRoot && ctx?.cwd) {
+			domainRoot = findDomainRoot(ctx.cwd);
+			isActive = domainRoot !== null && isDomainTreeProject(domainRoot);
+		}
+		if (domainRoot) {
+			await refreshDomainCache();
+		}
+		if (ctx?.ui) updateStatus(ctx);
+		return domainRoot !== null && domainsCache !== null;
+	}
+
 	// ─── Session start: detect domain-tree project ─────────────
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -371,15 +428,15 @@ export default function domainTreeExtension(pi: ExtensionAPI) {
 		const domainExpertise = `
 ## Domain Tree Environment
 
-This project uses a domain-driven codebase structure defined in \`spec/domains.yaml\`.
+This project uses a domain-driven codebase structure defined in \`domains.yaml\`.
 The domain tree encodes three things:
 
-1. **Where things live** — the 1:1 namespace mirror between \`spec/\` and code
+1. **Where things live** — domain specs are colocated with the code they govern
 2. **How much rigor each domain deserves** — core vs supporting vs generic classification
 3. **How domains communicate** — the context map declaring integration patterns
 
 ### Core rules
-- **1:1 mirroring** — \`spec/\` directory structure MUST mirror domain tree. Code SHOULD mirror the tree too.
+- **Colocated specs** — domain specs live next to code. The first \`code\` path is the default spec directory; \`README.md\` is the main domain spec.
 - **Spec-on-touch** — The first time you modify a domain, write its spec. Rigor scales with classification:
   - **core**: spec required before any code change (hard block)
   - **shared-kernel**: spec required, all consumers notified (hard block)
@@ -406,8 +463,8 @@ The domain tree encodes three things:
 ### Configuration files
 | File | Role |
 |------|------|
-| \`spec/domains.yaml\` | Domain tree manifest (source of truth) |
-| \`spec/<domain>/**/*.md\` | Domain specs |
+| \`domains.yaml\` | Domain tree manifest (source of truth) |
+| \`<domain code path>/*.md (README.md is the main domain spec)\` | Domain specs |
 | \`doc/ARCHITECTURE.md\` | Architecture coordination index |
 
 For detailed reference, load the \`domain-navigator\` skill.
@@ -421,9 +478,8 @@ For detailed reference, load the \`domain-navigator\` skill.
 	// ─── Tool monitoring: spec-on-touch & cross-domain enforcement ──
 
 	pi.on("tool_call", async (event, ctx) => {
-		if (!isActive || !domainRoot) return;
-		await refreshDomainCache();
-		if (!domainsCache) return;
+		const hasDomainTree = await ensureDomainRoot(ctx);
+		if (!hasDomainTree || !domainRoot || !domainsCache) return;
 
 		if (event.toolName === "write" || event.toolName === "edit") {
 			const input = event.input as { path?: string; command?: string };
@@ -436,7 +492,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 			// Check spec-on-touch for core domains
 			const domainType = resolved.type;
 			if (domainType === "core" || domainType === "shared-kernel") {
-				const hasSpec = await specExistsForDomain(domainRoot, resolved.domain, resolved.subdomain);
+				const hasSpec = await specExistsForDomain(domainRoot, domainsCache, resolved.domain, resolved.subdomain);
 				if (!hasSpec) {
 					const domainLabel = resolved.subdomain
 						? `${resolved.domain} > ${resolved.subdomain}`
@@ -460,7 +516,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 								`⚠️ **Domain boundary violation: ${domainLabel}** (type: **shared-kernel**)\n\n` +
 								`This is **shared kernel** — changes affect ALL consuming domains. ` +
 								`No spec exists yet. **Spec required and all consumers must be notified.**\n\n` +
-								`Check the context map in \`spec/domains.yaml\` for which domains depend on this.`,
+								`Check the context map in \`domains.yaml\` for which domains depend on this.`,
 						};
 					}
 				}
@@ -475,7 +531,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 		name: "domain_tree_resolve",
 		label: "Domain Tree Resolve",
 		description:
-			"Resolve which domain and subdomain own a given file path, based on spec/domains.yaml. " +
+			"Resolve which domain and subdomain own a given file path, based on domains.yaml. " +
 			"Returns the domain name, subdomain (if any), and domain type (core/supporting/generic/shared-kernel). " +
 			"Use this before creating new files to ensure they land in the correct domain namespace.",
 		promptSnippet: "Resolve domain ownership for a file path",
@@ -488,14 +544,14 @@ For detailed reference, load the \`domain-navigator\` skill.
 				description: "File path to resolve (relative to project root)",
 			}),
 		}),
-		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			if (domainRoot) await refreshDomainCache();
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			await ensureDomainRoot(ctx);
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [
 						{
 							type: "text",
-							text: "No domain tree found. Run `/domain-tree:init` to create one, or check that `spec/domains.yaml` exists.",
+							text: "No domain tree found. Run `/domain-tree:init` to create one, or check that `domains.yaml` exists.",
 						},
 					],
 				};
@@ -507,7 +563,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 					content: [
 						{
 							type: "text",
-							text: `**${params.path}** is not covered by any domain in \`spec/domains.yaml\`. ` +
+							text: `**${params.path}** is not covered by any domain in \`domains.yaml\`. ` +
 								"Should we add it to an existing domain or create a new one?",
 						},
 					],
@@ -526,9 +582,10 @@ For detailed reference, load the \`domain-navigator\` skill.
 				"shared-kernel": "🔵",
 			};
 
-			const specDir = resolved.subdomain
-				? `spec/${resolved.domain}/${resolved.subdomain}/`
-				: `spec/${resolved.domain}/`;
+			const specEntry = resolved.subdomain
+				? domainsCache[resolved.domain]?.subdomains?.[resolved.subdomain]
+				: domainsCache[resolved.domain];
+			const specDir = specEntry ? specLabelForEntry(specEntry) || "(no spec path; add a code path or spec override)" : "(unknown)";
 
 			return {
 				content: [
@@ -554,7 +611,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 		name: "domain_tree_check",
 		label: "Domain Tree Check",
 		description:
-			"Validate that the domain tree in spec/domains.yaml matches the actual codebase. " +
+			"Validate that the domain tree in domains.yaml matches the actual codebase. " +
 			"Reports broken mappings, orphaned code, missing spec directories, code-paths quality issues, " +
 			"context map health, and classification consistency. Use this for periodic structural health checks.",
 		promptSnippet: "Validate domain tree structure against codebase",
@@ -570,7 +627,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 			),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-			if (domainRoot) await refreshDomainCache();
+			await ensureDomainRoot(ctx);
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
@@ -583,7 +640,23 @@ For detailed reference, load the \`domain-navigator\` skill.
 			let passed = 0;
 
 			results.push("## Domain Tree Health Check");
+			results.push(`*Manifest: \`${manifestRelPath(domainRoot)}\`*`);
 			results.push("");
+
+			if (isLegacyManifest(domainRoot)) {
+				results.push("### 🔁 Migration needed");
+				results.push("This project still uses the legacy `spec/domains.yaml` layout.");
+				results.push("Move `spec/domains.yaml` to `domains.yaml`, then move each domain's markdown files next to the code it governs.");
+				results.push("Use `README.md` as the main domain spec instead of `index.md`.");
+				results.push("");
+				results.push("Suggested migration:");
+				results.push("1. `mv spec/domains.yaml domains.yaml`");
+				results.push("2. For each domain, choose the first `code:` directory (for example `src/payments/`) as the spec directory.");
+				results.push("3. Move `spec/<domain>/index.md` to `<code path>/README.md`; move other `*.md` files into the same colocated directory.");
+				results.push("4. Update any explicit `spec:` fields in `domains.yaml` to the new colocated path, or remove them to infer from `code:`.");
+				results.push("5. Delete the old `spec/` tree once empty.");
+				results.push("");
+			}
 
 			// Step 1: Check declared paths exist
 			results.push("### 📁 Mappings: manifest → codebase");
@@ -605,27 +678,33 @@ For detailed reference, load the \`domain-navigator\` skill.
 				};
 
 				await checkPaths(domain.code || [], "");
-				// Check spec dir
-				const specDir = join(domainRoot, "spec", domainName);
-				try {
-					await stat(specDir);
-					passed++;
-				} catch {
-					results.push(`  ⚠ Domain **${domainName}** has no spec directory at \`spec/${domainName}/\``);
-					issues++;
+				// Check colocated spec dir
+				const specDir = specDirForEntry(domainRoot, domain);
+				const specLabel = specLabelForEntry(domain);
+				if (specDir && specLabel) {
+					try {
+						await stat(specDir);
+						passed++;
+					} catch {
+						results.push(`  ⚠ Domain **${domainName}** has no spec directory at \`${specLabel}\``);
+						issues++;
+					}
 				}
 
 				// Check subdomains
 				if (domain.subdomains) {
 					for (const [subName, sub] of Object.entries(domain.subdomains) as [string, any][]) {
 						await checkPaths(sub.code || [], ` > ${subName}`);
-						const subSpecDir = join(domainRoot, "spec", domainName, subName);
-						try {
-							await stat(subSpecDir);
-							passed++;
-						} catch {
-							results.push(`  ⚠ Domain **${domainName} > ${subName}** has no spec directory`);
-							issues++;
+						const subSpecDir = specDirForEntry(domainRoot, sub);
+						const subSpecLabel = specLabelForEntry(sub);
+						if (subSpecDir && subSpecLabel) {
+							try {
+								await stat(subSpecDir);
+								passed++;
+							} catch {
+								results.push(`  ⚠ Domain **${domainName} > ${subName}** has no spec directory at \`${subSpecLabel}\``);
+								issues++;
+							}
 						}
 					}
 				}
@@ -686,8 +765,8 @@ For detailed reference, load the \`domain-navigator\` skill.
 			"Check the map to understand which domains are core (most rigorous) vs generic (least).",
 		],
 		parameters: Type.Object({}),
-		async execute(_toolCallId, _params, _signal, _onUpdate, _ctx) {
-			if (domainRoot) await refreshDomainCache();
+		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
+			await ensureDomainRoot(ctx);
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
@@ -704,7 +783,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 
 			const rows: string[] = [];
 			rows.push("## Domain Tree");
-			rows.push(`*Generated from \`spec/domains.yaml\` at ${basename(domainRoot)}*`);
+			rows.push(`*Generated from \`${manifestRelPath(domainRoot)}\` at ${basename(domainRoot)}*`);
 			rows.push("");
 			rows.push(`| Domain | Type | Specs | Status |`);
 			rows.push(`|--------|------|-------|--------|`);
@@ -724,9 +803,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 					// Check subdomains
 					const subRows: string[] = [];
 					for (const [subName, sub] of Object.entries(domain.subdomains) as [string, any][]) {
-						const subSpecDir = join(domainRoot, "spec", domainName, subName);
+						const subSpecDir = specDirForEntry(domainRoot, sub);
 						try {
-							const files = await readdir(subSpecDir);
+							const files = subSpecDir ? await readdir(subSpecDir) : [];
 							const mdFiles = files.filter((f: string) => f.endsWith(".md"));
 							const subSpecCount = mdFiles.length;
 							specCount += subSpecCount;
@@ -740,9 +819,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 					rows.push(`| **${domainName}** | ${typeLabel} | ${specStatus} | |`);
 					rows.push(...subRows);
 				} else {
-					const specDir = join(domainRoot, "spec", domainName);
+					const specDir = specDirForEntry(domainRoot, domain);
 					try {
-						const files = await readdir(specDir);
+						const files = specDir ? await readdir(specDir) : [];
 						const mdFiles = files.filter((f: string) => f.endsWith(".md"));
 						specCount = mdFiles.length;
 						specStatus = specCount > 0 ? `✅ ${specCount}` : "❌ none";
@@ -781,10 +860,11 @@ For detailed reference, load the \`domain-navigator\` skill.
 	pi.registerCommand("domain-tree:init", {
 		description: "Bootstrap domain tree from existing codebase analysis",
 		handler: async (_args, ctx) => {
+			await ensureDomainRoot(ctx);
 			if (isActive) {
 				const overwrite = await ctx.ui.confirm(
 					"Domain tree exists",
-					"spec/domains.yaml already exists. Overwrite?",
+					"A domain manifest already exists. Overwrite?",
 				);
 				if (!overwrite) return;
 			}
@@ -802,15 +882,15 @@ Please:
 1. Read the project structure — top-level directories, build files, module definitions
 2. Read existing architecture docs and README files
 3. Propose a domain tree with DDD subdomain classification (core/supporting/generic/shared-kernel)
-4. Create spec/domains.yaml with the approved tree
-5. Create empty spec/ directories for each domain
+4. Create domains.yaml with the approved tree
+5. Create README.md domain specs next to each domain's code
 6. Report the coverage with a summary table
 
 Remember:
 - Every domain must have at least one code path
 - Prefer fewer domains (5-10) — split later when pain emerges
-- Use the domain-navigator skill conventions for index.md structure
-- Do NOT duplicate domains.yaml info in index.md files`;
+- Use the domain-navigator skill conventions for README.md structure
+- Do NOT duplicate domains.yaml info in README.md files`;
 			pi.sendUserMessage(msg);
 		},
 	});
@@ -821,6 +901,7 @@ Remember:
 	pi.registerCommand("domain-tree:check", {
 		description: "Validate domain tree structure against codebase",
 		handler: async (args, ctx) => {
+			await ensureDomainRoot(ctx);
 			if (!isActive) {
 				ctx.ui.notify("No domain tree found. Use /domain-tree:init first.", "warning");
 				return;
@@ -831,11 +912,11 @@ Remember:
 			const msg = `I need to validate the domain tree against the codebase.
 
 Please:
-1. Read spec/domains.yaml
+1. Read domains.yaml
 2. For each domain, verify declared code paths exist
 3. Check for orphaned production code (not covered by any domain)
 4. Check classification consistency (every domain has a type)
-5. Check index.md quality (no duplication of domains.yaml info)
+5. Check README.md quality (no duplication of domains.yaml info)
 ${detailed ? "6. Check context map health (verify via paths exist, shared-kernel consumers)" : ""}
 
 Use domain_tree_check to help with the validation.
@@ -851,6 +932,7 @@ Report a summary with pass/fail and actionable recommendations.`;
 	pi.registerCommand("domain-tree:map", {
 		description: "Show domain tree with spec and test coverage",
 		handler: async (_args, ctx) => {
+			await ensureDomainRoot(ctx);
 			if (!isActive) {
 				ctx.ui.notify("No domain tree found. Use /domain-tree:init first.", "warning");
 				return;
@@ -859,8 +941,8 @@ Report a summary with pass/fail and actionable recommendations.`;
 			const msg = `I need to visualize the domain tree coverage.
 
 Please:
-1. Read spec/domains.yaml
-2. For each domain, check the spec directory and count spec files
+1. Read domains.yaml
+2. For each domain, check the colocated spec directory and count markdown spec files
 3. Present a markdown table with:
    - Domain name (bold for parent, indented for subdomains)
    - Type with emoji (🔴 core, 🟡 supporting, 🟢 generic, 🔵 shared-kernel)

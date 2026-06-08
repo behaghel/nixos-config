@@ -1,16 +1,16 @@
 # domain-tree
 
-Domain-driven codebase structure — enforce 1:1 mirroring between `spec/` and code namespaces, with DDD-informed subdomain classification, context mapping, and shared kernel management.
+Domain-driven codebase structure — enforce 1:1 mirroring between colocated domain specs and code namespaces, with DDD-informed subdomain classification, context mapping, and shared kernel management.
 
 ## Philosophy
 
 The domain tree is a structural contract informed by Domain-Driven Design. It encodes three things:
 
-1. **Where things live** — the 1:1 namespace mirror between `spec/` and code
+1. **Where things live** — the 1:1 namespace mirror between domain specs and code
 2. **How much rigor each domain deserves** — core vs supporting vs generic classification
 3. **How domains communicate** — the context map declaring integration patterns
 
-`spec/domains.yaml` is the source of truth for that contract. The `spec/` tree and code namespaces should align to it, not compete with it.
+`domains.yaml` at the project root is the source of truth for that contract. Domain markdown files live beside the code they govern; `README.md` is the main domain spec, and additional behavior specs can be sibling `*.md` files.
 
 Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructure are domains too — anything with behavior worth specifying. A technical domain like security can be `core` if it's central to the product's value.
 
@@ -23,7 +23,7 @@ Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructur
 | **Context map** | `context-map:` section declaring cross-domain relationships and integration patterns |
 | **Shared kernel** | `type: shared-kernel` for jointly-owned types — strictest change rules |
 | **Anti-corruption layer** | Declared in context map — enforced by boundary-enforcer agent |
-| **Ubiquitous language** | `language:` field in domains, with optional `spec/{domain}/index.md` support — terms that code and specs must use consistently |
+| **Ubiquitous language** | `language:` field in domains, with optional `<domain code path>/README.md` support — terms that code and specs must use consistently |
 
 Ubiquitous language should be enriched on demand. Add new terms only when the domain needs sharper language, and get explicit developer approval before extending the glossary so the language stays intentional rather than drifting.
 
@@ -62,7 +62,7 @@ Every domain has a `type` that determines investment level:
 
 ## Context map
 
-The `context-map` in `spec/domains.yaml` declares how domains communicate:
+The `context-map` in `domains.yaml` declares how domains communicate:
 
 ```yaml
 context-map:
@@ -88,7 +88,7 @@ The boundary-enforcer uses the context map to guide cross-domain changes — it 
 /domain-tree:init
 ```
 
-Scans your codebase, proposes domains with classifications, detects cross-domain relationships, and scaffolds `spec/` directories. Works with what exists — coverage grows organically via spec-on-touch.
+Scans your codebase, proposes domains with classifications, detects cross-domain relationships, and scaffolds colocated `README.md` specs in each domain's code directory. Works with what exists — coverage grows organically via spec-on-touch.
 
 ### Day-to-day
 
@@ -97,6 +97,16 @@ Scans your codebase, proposes domains with classifications, detects cross-domain
 - **When work must cross domains:** Favor domain-focused subagents and finish the domain-local tasks first. The last step should be the explicit cross-domain integration and end-to-end testing pass.
 - **For complex multi-domain work:** Start with a plan that the developer can challenge and approve before implementation begins.
 - **Periodic health check:** `/domain-tree:check` validates structure, context map, and classification gaps. `/domain-tree:map` shows coverage weighted by domain importance.
+
+## Migrating from the legacy `spec/` layout
+
+The first `/domain-tree:check` on a legacy tree reports a migration section. The short version:
+
+1. Move `spec/domains.yaml` to `domains.yaml` at the project root.
+2. For each domain, move `spec/<domain>/index.md` to the domain's code directory as `README.md`.
+3. Move other domain `*.md` specs into that same code directory.
+4. Remove old `spec:` fields or update them to explicit colocated paths.
+5. Delete the old `spec/` tree once empty.
 
 ## The spec-on-touch convention
 

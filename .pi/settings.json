@@ -1,0 +1,5 @@
+{
+  "packages": [
+    "../marketplace/plugins/domain-tree"
+  ]
+}
