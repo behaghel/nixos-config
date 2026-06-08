@@ -1,4 +1,12 @@
-{ lib, pkgs, ... }:
+{ config, lib, pkgs, ... }:
+let
+  guiPath = lib.concatStringsSep ":" (config.home.sessionPath ++ [
+    "/usr/bin"
+    "/bin"
+    "/usr/sbin"
+    "/sbin"
+  ]);
+in
 {
   imports = [
     ./darwin/apps.nix
@@ -74,7 +82,9 @@
       /bin/launchctl setenv GIT_ASKPASS /usr/bin/true
       /bin/launchctl setenv SSH_ASKPASS_REQUIRE never
       # Provide a predictable PATH and UTF-8 locale to GUI apps (Emacs, etc.).
-      PATH_VAL="${lib.makeBinPath [ pkgs.git pkgs.ripgrep pkgs.gnugrep pkgs.findutils pkgs.coreutils ]}:/usr/bin:/bin:/usr/sbin:/sbin"
+      # Keep this explicit so GUI Emacs does not need to invoke an interactive
+      # shell via exec-path-from-shell just to discover Nix/Home Manager tools.
+      PATH_VAL="${guiPath}"
       /bin/launchctl setenv PATH "$PATH_VAL"
       /bin/launchctl setenv LANG en_US.UTF-8
       /bin/launchctl setenv LC_ALL en_US.UTF-8

@@ -2,6 +2,21 @@
 
 # TODO: it's not really bash, it's shell, a precursor to any shell env
 # currently if I enable my zsh module without this, it breaks it
+let
+  emacsExecPath = [
+    "${config.home.profileDirectory}/bin"
+    "/etc/profiles/per-user/$USER/bin"
+    "/nix/var/nix/profiles/default/bin"
+  ] ++ (map (pkg: "${pkg}/bin") [
+    pkgs.git
+    pkgs.ripgrep
+    pkgs.fd
+    pkgs.pass
+    pkgs.gnugrep
+    pkgs.findutils
+    pkgs.coreutils
+  ]);
+in
 {
   # TODO: DRY
   # technically that should look like
@@ -15,30 +30,36 @@
   xdg.configFile."profile.d/zz_path.profile".source = ./.config/profile.d/zz_path.profile;
   xdg.configFile."profile.d/dark_theme.profile".source = ./.config/profile.d/dark_theme.profile;
 
-  programs.bash.profileExtra = let
-    hmBin = "${config.home.profileDirectory}/bin";
-    sysBin = "/nix/var/nix/profiles/default/bin";
-    usrBin = "/etc/profiles/per-user/$USER/bin";
-  in ''
-        # Ensure system and per-user profiles are present
-        case :$PATH: in
-          *:${sysBin}:*)  ;;  # do nothing
-          *) PATH=${sysBin}:$PATH ;;
-        esac
-        case :$PATH: in
-          *:${usrBin}:*)  ;;  # do nothing
-          *) PATH=${usrBin}:$PATH ;;
-        esac
-        case :$PATH: in
-          *:${hmBin}:*)  ;;  # do nothing
-          *) PATH=${hmBin}:$PATH ;;
-        esac
-        export PATH
-      '';
+  programs.bash.profileExtra =
+    let
+      hmBin = "${config.home.profileDirectory}/bin";
+      sysBin = "/nix/var/nix/profiles/default/bin";
+      usrBin = "/etc/profiles/per-user/$USER/bin";
+    in
+    ''
+      # Ensure system and per-user profiles are present
+      case :$PATH: in
+        *:${sysBin}:*)  ;;  # do nothing
+        *) PATH=${sysBin}:$PATH ;;
+      esac
+      case :$PATH: in
+        *:${usrBin}:*)  ;;  # do nothing
+        *) PATH=${usrBin}:$PATH ;;
+      esac
+      case :$PATH: in
+        *:${hmBin}:*)  ;;  # do nothing
+        *) PATH=${hmBin}:$PATH ;;
+      esac
+      export PATH
+    '';
 
   # Editor defaults
   # NOTE: We set session vars and ship profile.d/editor.profile so shells pick up
   # the emacsclient preferences even if hm-session-vars was already sourced.
+  # Keep Emacs' tool discovery path cross-platform. On macOS, darwin-only.nix
+  # exports the same path to launchd so GUI Emacs sees it too.
+  home.sessionPath = emacsExecPath;
+
   home.sessionVariables = {
     # Prefer the daemon-backed client in terminals; fall back to a new frame elsewhere
     EDITOR = "emacsclient -t";
@@ -51,11 +72,11 @@
 
   # Platform-independent terminal setup
   home.packages = with pkgs;
-    let my-aspell = aspellWithDicts (ds: with ds; [en fr es]);
+    let my-aspell = aspellWithDicts (ds: with ds; [ en fr es ]);
     in [
       ripgrep
-      fd        # find++
-      sd        # sed++
+      fd # find++
+      sd # sed++
       # ncdu      # du++
       moreutils # ts, etc.
       tree
