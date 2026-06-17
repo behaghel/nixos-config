@@ -274,8 +274,9 @@ in
     };
 
     missionControl = {
-      moveLeftSpace  = mkShortcut 79 "Move left a space" true [control] "left";
-      moveRightSpace = mkShortcut 80 "Move right a space" true [control] "right";
+      # Disabled so Ctrl+Left/Right are available to editors (notably Emacs).
+      moveLeftSpace  = mkShortcut 79 "Move left a space" false [control] "left";
+      moveRightSpace = mkShortcut 80 "Move right a space" false [control] "right";
       # Direct desktop switching (Ctrl+1..9) using physical digit keycodes.
       # macOS uses IDs 118..126 for Desktop 1..9.
       desktop1 = mkShortcut 118 "Switch to Desktop 1" true [control] "1";

@@ -267,10 +267,12 @@ in
               enabled = sks.spotlight.search.enable;
               value = { type = "standard"; parameters = [ 32 49 1048576 ]; };
             };
-            "79" = { enabled = true; value = { type = "standard"; parameters = [ 65535 123 262144 ]; }; };
-            "80" = { enabled = true; value = { type = "standard"; parameters = [ 65535 124 262144 ]; }; };
-            "81" = { enabled = true; value = { type = "standard"; parameters = [ 65535 123 262144 ]; }; };
-            "82" = { enabled = true; value = { type = "standard"; parameters = [ 65535 124 262144 ]; }; };
+            # Disable Ctrl+Left/Right Mission Control space switching so Emacs
+            # can receive those keybindings.
+            "79" = { enabled = false; value = { type = "standard"; parameters = [ 65535 123 262144 ]; }; };
+            "80" = { enabled = false; value = { type = "standard"; parameters = [ 65535 124 262144 ]; }; };
+            "81" = { enabled = false; value = { type = "standard"; parameters = [ 65535 123 262144 ]; }; };
+            "82" = { enabled = false; value = { type = "standard"; parameters = [ 65535 124 262144 ]; }; };
           }
           // (lib.optionalAttrs (cfg.spaces.directDesktopShortcuts.enable or false) desktopsAttrs);
       };
