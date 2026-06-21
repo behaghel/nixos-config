@@ -5,7 +5,9 @@ function M.setup()
   local bindings = {
     t = { name = "Ghostty" },
     -- Emacs can appear as "Emacs" or lower-case "emacs" depending on the build.
-    e = { name = "Emacs", bundleID = "org.gnu.Emacs", altNames = { "emacs" } },
+    -- Launch it via /usr/bin/open instead of Hammerspoon's launchOrFocus helper:
+    -- the latter can add noticeable synchronous latency before Emacs appears.
+    e = { name = "Emacs", bundleID = "org.gnu.Emacs", altNames = { "emacs" }, asyncOpen = true },
     f = { name = "Firefox" },
     v = { name = "VLC" },
     s = { name = "Slack" },
@@ -27,11 +29,26 @@ function M.setup()
       return hs.application.find(entry.name)
     end
 
-    local app = findRunning()
-    if app then
+    local function focus(app)
+      if not app then return false end
       app:activate(true)
       local win = app:mainWindow()
       if win then win:focus() end
+      return true
+    end
+
+    local function focusWhenReady(attempt)
+      local app = findRunning()
+      if focus(app) or attempt >= 8 then return end
+      hs.timer.doAfter(0.25, function() focusWhenReady(attempt + 1) end)
+    end
+
+    local app = findRunning()
+    if focus(app) then return end
+
+    if entry.asyncOpen and entry.bundleID then
+      hs.task.new("/usr/bin/open", nil, { "-b", entry.bundleID }):start()
+      hs.timer.doAfter(0.1, function() focusWhenReady(1) end)
       return
     end
 
@@ -41,12 +58,7 @@ function M.setup()
       hs.application.launchOrFocus(entry.name)
     end
 
-    app = findRunning()
-    if app then
-      app:activate(true)
-      local win = app:mainWindow()
-      if win then win:focus() end
-    end
+    focusWhenReady(1)
   end
 
   for key, entry in pairs(bindings) do
