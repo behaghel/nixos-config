@@ -577,6 +577,27 @@ class MeleAppCliTests(unittest.TestCase):
             self.assertIn('mele_app_last_health_status{app="home"} 1', metrics)
             self.assertIn('mele_app_last_health_timestamp_seconds{app="home"}', metrics)
 
+    def test_health_does_not_fail_when_metrics_state_is_not_writable(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            config = self.write_config(tmp)
+            with mock.patch.object(
+                mele_app_cli,
+                "health_status_once",
+                return_value=(True, 200, None),
+            ), mock.patch.object(
+                mele_app_cli,
+                "remember_health_success",
+                side_effect=PermissionError("no permission"),
+            ):
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "health",
+                    "home",
+                ])
+            self.assertEqual(exit_code, 0)
+
     def test_deploy_writes_current_release_and_deploy_metrics(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)

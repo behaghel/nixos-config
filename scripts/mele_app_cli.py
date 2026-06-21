@@ -434,11 +434,11 @@ def render_metrics(app: dict[str, Any], updates: dict[str, Any]) -> str:
 
 def write_metrics(app: dict[str, Any], updates: dict[str, Any]) -> None:
     health = updates.get("health")
-    if health is not None and health.get("healthy"):
-        remember_health_success(app, int(health["timestamp"]))
     path = metrics_textfile_path(app)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
+        if health is not None and health.get("healthy"):
+            remember_health_success(app, int(health["timestamp"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_text(render_metrics(app, updates))
         tmp_path.replace(path)
