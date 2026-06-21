@@ -6,14 +6,40 @@ let
     "ssh-ng://root@${cfg.hostName} x86_64-linux ${cfg.keyFile} ${toString cfg.cpus} 1 benchmark,big-parallel";
   buildersString = lib.concatStringsSep ";" ([ builderSpec ] ++ cfg.additionalBuilders);
 
+  qemuRunner = pkgs.writeShellScript "utm-builder-qemu" ''
+    set -eu
+
+    log() { printf '[utm-builder-qemu] %s\n' "$*" >&2; }
+
+    if [ ! -f ${cfg.imagePath} ]; then
+      log "missing disk image: ${cfg.imagePath}"
+      exit 78
+    fi
+
+    if [ ! -f ${cfg.ovmfVars} ]; then
+      log "missing writable OVMF vars file: ${cfg.ovmfVars}"
+      exit 78
+    fi
+
+    chmod u+rw ${cfg.ovmfVars} ${cfg.imagePath} 2>/dev/null || true
+    log "starting qemu for ${cfg.hostName} on localhost:${toString cfg.port}"
+    exec ${pkgs.qemu}/bin/qemu-system-x86_64 "$@"
+  '';
+
   sshHostConfig = ''
-Host ${cfg.hostName}
-  Hostname 127.0.0.1
-  Port ${toString cfg.port}
-  IdentityFile ${cfg.keyFile}
-  IdentitiesOnly yes
-${cfg.sshConfigExtra}
-'';
+    Host ${cfg.hostName}
+      Hostname 127.0.0.1
+      Port ${toString cfg.port}
+      IdentityFile ${cfg.keyFile}
+      IdentitiesOnly yes
+      ConnectTimeout 5
+      ConnectionAttempts 3
+      ServerAliveInterval 10
+      StrictHostKeyChecking no
+      UserKnownHostsFile /dev/null
+      LogLevel ERROR
+    ${cfg.sshConfigExtra}
+  '';
 in
 {
   options.hub.darwin.utmBuilder = {
@@ -132,6 +158,10 @@ in
       if [ ! -f ${cfg.ovmfVars} ]; then
         cp ${pkgs.qemu}/share/qemu/edk2-i386-vars.fd ${cfg.ovmfVars}
       fi
+      chmod u+rw ${cfg.ovmfVars} 2>/dev/null || true
+      if [ -f ${cfg.imagePath} ]; then
+        chmod u+rw ${cfg.imagePath} 2>/dev/null || true
+      fi
     '';
 
     environment.etc."ssh/ssh_config.d/110-utm-builder.conf".text = sshHostConfig;
@@ -141,22 +171,33 @@ in
         Label = cfg.label;
         ProgramArguments =
           [
-            "${pkgs.qemu}/bin/qemu-system-x86_64"
-            "-machine" "q35"
-            "-cpu" "qemu64"
-            "-smp" (toString cfg.cpus)
-            "-m" (toString cfg.memoryMB)
-            "-accel" "tcg"
+            "${qemuRunner}"
+            "-machine"
+            "q35"
+            "-cpu"
+            "qemu64"
+            "-smp"
+            (toString cfg.cpus)
+            "-m"
+            (toString cfg.memoryMB)
+            "-accel"
+            "tcg"
             "-nographic"
-            "-drive" "if=pflash,format=raw,readonly=on,unit=0,file=${cfg.ovmfCode}"
-            "-drive" "if=pflash,format=raw,unit=1,file=${cfg.ovmfVars}"
-            "-drive" "file=${cfg.imagePath},if=virtio,format=qcow2"
-            "-netdev" "user,id=net0,hostfwd=tcp::${toString cfg.port}-:22"
-            "-device" "virtio-net-pci,netdev=net0"
+            "-drive"
+            "if=pflash,format=raw,readonly=on,unit=0,file=${cfg.ovmfCode}"
+            "-drive"
+            "if=pflash,format=raw,unit=1,file=${cfg.ovmfVars}"
+            "-drive"
+            "file=${cfg.imagePath},if=virtio,format=qcow2"
+            "-netdev"
+            "user,id=net0,hostfwd=tcp::${toString cfg.port}-:22"
+            "-device"
+            "virtio-net-pci,netdev=net0"
           ]
           ++ cfg.extraQemuArgs;
         RunAtLoad = true;
         KeepAlive = true;
+        ThrottleInterval = 10;
         StandardOutPath = "/var/log/utm-builder.log";
         StandardErrorPath = "/var/log/utm-builder.err.log";
         WorkingDirectory = cfg.stateDir;

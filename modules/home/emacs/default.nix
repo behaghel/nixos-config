@@ -1,31 +1,39 @@
 { pkgs, lib, config, ... }:
 let
   emacsBundleId = "org.gnu.Emacs";
+  emacsFileUTIs = [
+    "public.plain-text"
+    "public.text"
+    "net.daringfireball.markdown"
+    "public.comma-separated-values-text"
+    "public.tab-separated-values-text"
+    "public.json"
+    "public.yaml"
+    "com.apple.log"
+  ];
+  emacsFileExtensions = [
+    "txt"
+    "text"
+    "md"
+    "markdown"
+    "org"
+    "rst"
+    "tex"
+    "log"
+    "csv"
+    "tsv"
+    "json"
+    "jsonl"
+    "yaml"
+    "yml"
+    "toml"
+    "ini"
+    "conf"
+    "cfg"
+  ];
   emacsDutiConfig = ''
-    # Bundle ID           UTI/Extension                   Role
-    ${emacsBundleId}      public.plain-text               all
-    ${emacsBundleId}      public.text                     all
-    ${emacsBundleId}      net.daringfireball.markdown     all
-    ${emacsBundleId}      public.comma-separated-values-text all
-    ${emacsBundleId}      public.tab-separated-values-text all
-    ${emacsBundleId}      txt                             all
-    ${emacsBundleId}      text                            all
-    ${emacsBundleId}      md                              all
-    ${emacsBundleId}      markdown                        all
-    ${emacsBundleId}      org                             all
-    ${emacsBundleId}      rst                             all
-    ${emacsBundleId}      tex                             all
-    ${emacsBundleId}      log                             all
-    ${emacsBundleId}      csv                             all
-    ${emacsBundleId}      tsv                             all
-    ${emacsBundleId}      json                            all
-    ${emacsBundleId}      jsonl                           all
-    ${emacsBundleId}      yaml                            all
-    ${emacsBundleId}      yml                             all
-    ${emacsBundleId}      toml                            all
-    ${emacsBundleId}      ini                             all
-    ${emacsBundleId}      conf                            all
-    ${emacsBundleId}      cfg                             all
+    # Bundle ID           UTI                             Role
+    ${lib.concatMapStringsSep "\n" (uti: "${emacsBundleId}      ${uti}      all") emacsFileUTIs}
   '';
 
   atlassianTools = import ./atlassian-tools.nix { inherit pkgs lib; };
@@ -168,13 +176,55 @@ in
 
     emacs_app="${config.home.homeDirectory}/Applications/Home Manager Apps/Emacs.app"
     duti_file="${config.xdg.configHome}/duti/emacs.duti"
+    launch_services_plist="$HOME/Library/Preferences/com.apple.LaunchServices/com.apple.launchservices.secure.plist"
     lsregister="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
 
     if [ -d "$emacs_app" ] && [ -f "$duti_file" ]; then
       if [ -x "$lsregister" ]; then
         run "$lsregister" -f "$emacs_app"
       fi
+
+      # `duti` is reliable for real UTIs. For extension-only types that macOS
+      # represents as ephemeral dyn.* UTIs, duti may call LaunchServices with an
+      # invalid dynamic UTI and print error -50. Write extension handlers via
+      # LSHandlerContentTag instead, which is the stable LaunchServices form.
       run ${pkgs.duti}/bin/duti "$duti_file"
+      verboseEcho "Setting Emacs LaunchServices handlers for filename extensions"
+      run mkdir -p "$(dirname "$launch_services_plist")"
+      run ${pkgs.python3}/bin/python3 - "${emacsBundleId}" "$launch_services_plist" ${lib.concatMapStringsSep " " lib.escapeShellArg emacsFileExtensions} <<'PY'
+import os
+import plistlib
+import sys
+
+bundle_id = sys.argv[1]
+plist_path = os.path.expanduser(sys.argv[2])
+extensions = sys.argv[3:]
+
+try:
+    with open(plist_path, "rb") as f:
+        data = plistlib.load(f)
+except FileNotFoundError:
+    data = {}
+
+handlers = data.get("LSHandlers", [])
+for ext in extensions:
+    handlers = [
+        handler for handler in handlers
+        if not (
+            handler.get("LSHandlerContentTagClass") == "public.filename-extension"
+            and handler.get("LSHandlerContentTag") == ext
+        )
+    ]
+    handlers.append({
+        "LSHandlerContentTag": ext,
+        "LSHandlerContentTagClass": "public.filename-extension",
+        "LSHandlerRoleAll": bundle_id,
+    })
+
+data["LSHandlers"] = handlers
+with open(plist_path, "wb") as f:
+    plistlib.dump(data, f, sort_keys=True)
+PY
     fi
   '');
 }

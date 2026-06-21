@@ -16,9 +16,9 @@ function M.setup()
   local function focusOrLaunch(entry)
     -- Try multiple identifiers before launching to avoid spawning another instance.
     local function findRunning()
-      if entry.bundleID then
-        local app = hs.application.get(entry.bundleID)
-        if app then return app end
+      if entry.bundleID and hs.application.applicationsForBundleID then
+        local apps = hs.application.applicationsForBundleID(entry.bundleID)
+        if apps and #apps > 0 then return apps[1] end
       end
       if entry.altNames then
         for _, n in ipairs(entry.altNames) do
@@ -30,7 +30,7 @@ function M.setup()
     end
 
     local function focus(app)
-      if not app then return false end
+      if not app or type(app.activate) ~= "function" then return false end
       app:activate(true)
       local win = app:mainWindow()
       if win then win:focus() end
