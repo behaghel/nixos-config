@@ -71,7 +71,7 @@ in
 
               const inTmux = Boolean(process.env.TMUX)
               if (!inTmux) {
-                let delivered = trySpawn("terminal-notifier", ["-title", title, "-message", body])
+                let delivered = trySpawn("hub-notify", [title, body])
                 if (!delivered) delivered = trySpawn("notify-send", [title, body])
                 if (!delivered) {
                   const escTitle = escapeAppleScript(title)

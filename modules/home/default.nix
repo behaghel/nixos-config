@@ -3,6 +3,7 @@
   imports = [
     ./me.nix
     ./shell
+    ./notify
     ./pass-launchers.nix
     ./zsh
     ./direnv

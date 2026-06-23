@@ -260,10 +260,8 @@ SyncState "*"
             ("${mailSyncScript}/bin/mail-sync-run" || true) &
             if [ "$notify" -eq 1 ]; then
               msg="Last run: $(date_str "$last")"
-              if command -v terminal-notifier >/dev/null 2>&1; then
-                terminal-notifier -title "📭 Mail sync stale" -message "$msg" || true
-              else
-                /usr/bin/osascript -e "display notification \"$msg\" with title \"Mail sync stale\"" 2>/dev/null || true
+              if command -v hub-notify >/dev/null 2>&1; then
+                hub-notify "📭 Mail sync stale" "$msg" || true
               fi
               printf '%s\n' "$now" >"$alert_stamp.tmp" && mv "$alert_stamp.tmp" "$alert_stamp"
             fi

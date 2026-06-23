@@ -5,8 +5,7 @@ let
   isDarwin = pkgs.stdenv.isDarwin;
   runtimeInputs =
     [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.gawk config.programs.gpg.package ]
-    ++ lib.optionals (!isDarwin) [ pkgs.util-linux ]
-    ++ lib.optionals isDarwin [ pkgs.terminal-notifier ];
+    ++ lib.optionals (!isDarwin) [ pkgs.util-linux ];
   smartcardGuard = lib.optionalString expectSmartcard ''
     if [ "''${MAIL_SYNC_SKIP_SMARTCARD:-0}" != 1 ]; then
       if ! ${gpgBin}/gpg-connect-agent 'scd serialno' /bye 2>/dev/null | grep -q '^S SERIALNO'; then
@@ -228,13 +227,11 @@ EOF
         fi
       fi
       printf '%s\n' "$sync_log" >&2
-      # Notify on failure: Linux via notify-send; macOS via terminal-notifier or osascript
-      if command -v notify-send >/dev/null 2>&1; then
+      # Notify on failure: Linux via notify-send; macOS via hub-notify.
+      if command -v hub-notify >/dev/null 2>&1; then
+        hub-notify "Mail sync failed" "$(printf '%s' "$sync_log" | tail -n 5)" || true
+      elif command -v notify-send >/dev/null 2>&1; then
         notify-send "📭 Mail sync failed" "$(printf '%s\n' "$sync_log" | tail -n 20)" -i dialog-error || true
-      elif command -v terminal-notifier >/dev/null 2>&1; then
-        terminal-notifier -title "Mail sync failed" -message "$(printf '%s' "$sync_log" | tail -n 5)" || true
-      else
-        /usr/bin/osascript -e 'display notification "Mail sync failed" with title "Mail"' 2>/dev/null || true
       fi
       write_status "failed" "sync failed" "$last_success" "$last_attempt"
       exit 1

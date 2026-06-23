@@ -46,10 +46,9 @@ in
         yknotifyScript = pkgs.writeShellScript "yknotify-wrapper.sh" ''
             export PATH=${lib.makeBinPath [
               yknotify
-              pkgs.terminal-notifier
               pkgs.jq
               pkgs.coreutils
-            ]}:/usr/bin:/bin
+            ]}:${config.home.profileDirectory}/bin:/usr/bin:/bin
 
             set -eu
 
@@ -74,13 +73,7 @@ in
               msg="$(printf '%s' "$line" | jq -r '.type // "touch"')" || msg="touch"
               echo "$(date '+%Y-%m-%d %H:%M:%S') notify: $msg"
 
-              if ! terminal-notifier \
-                -title "YubiKey" \
-                -message "Tap your key ($msg)" \
-                -sound "${cfg.sound}"
-              then
-                echo "$(date '+%Y-%m-%d %H:%M:%S') terminal-notifier failed"
-              fi
+              hub-notify --sound "${cfg.sound}" "YubiKey" "Tap your key ($msg)" || true
             done
           '';
 

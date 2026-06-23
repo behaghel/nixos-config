@@ -129,14 +129,10 @@
       title="''${1:-Agent done}"
       message="''${2:-Task finished}"
 
-      if command -v terminal-notifier >/dev/null 2>&1; then
-        terminal-notifier -title "$title" -message "$message" >/dev/null 2>&1 || true
+      if command -v hub-notify >/dev/null 2>&1; then
+        hub-notify "$title" "$message" >/dev/null 2>&1 || true
       elif command -v notify-send >/dev/null 2>&1; then
         notify-send "$title" "$message" >/dev/null 2>&1 || true
-      elif [ -x /usr/bin/osascript ]; then
-        esc_title="$(printf '%s' "$title" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-        esc_message="$(printf '%s' "$message" | sed 's/\\/\\\\/g; s/"/\\"/g')"
-        /usr/bin/osascript -e "display notification \"$esc_message\" with title \"$esc_title\"" >/dev/null 2>&1 || true
       fi
 
       if [ "$ring_bell" = "1" ]; then
