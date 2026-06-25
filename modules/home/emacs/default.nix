@@ -37,6 +37,7 @@ let
   '';
 
   atlassianTools = import ./atlassian-tools.nix { inherit pkgs lib; };
+  emacsTexlive = import ./texlive.nix { inherit pkgs; };
 
   # Script to set up Emacs configuration by cloning from GitHub
   emacs-config-setup = pkgs.writeShellApplication {
@@ -112,6 +113,7 @@ in
   home.packages = [
     atlassianTools.cfl
     emacs-config-setup
+    emacsTexlive
   ] ++ lib.optionals pkgs.stdenv.isDarwin [ pkgs.duti ];
 
   xdg.configFile."duti/emacs.duti" = lib.mkIf pkgs.stdenv.isDarwin {
