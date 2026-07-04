@@ -118,6 +118,101 @@ EOF
     echo "warning: bkp is deprecated; use bkp-syncthing or bkp-apps" >&2
     exec ${resticSyncthingHelper}/bin/bkp-syncthing "$@"
   '';
+  gandiLiveDnsUpdater = pkgs.writeShellScript "gandi-livedns-update-home.sh" ''
+    set -euo pipefail
+    exec ${pkgs.python3}/bin/python3 - <<'PY'
+    import ipaddress
+    import json
+    import os
+    import sys
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+
+    DOMAIN = "behaghel.org"
+    RECORDS = ["home", "*.home"]
+    TTL = 300
+    API_BASE = "https://api.gandi.net/v5/livedns"
+    IP_ENDPOINTS = [
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+    ]
+
+
+    def fail(message: str) -> None:
+        print(f"gandi-livedns: {message}", file=sys.stderr)
+        raise SystemExit(1)
+
+
+    def current_public_ipv4() -> str:
+        errors = []
+        for endpoint in IP_ENDPOINTS:
+            try:
+                with urllib.request.urlopen(endpoint, timeout=15) as response:
+                    candidate = response.read().decode("utf-8").strip()
+                ip = ipaddress.ip_address(candidate)
+                if ip.version != 4:
+                    raise ValueError(f"not IPv4: {candidate}")
+                return candidate
+            except Exception as exc:  # logged and retried.
+                errors.append(f"{endpoint}: {exc}")
+        fail("could not determine public IPv4; " + "; ".join(errors))
+
+
+    def gandi_request(
+        token: str,
+        method: str,
+        url: str,
+        payload: dict | None = None,
+        allow_not_found: bool = False,
+    ) -> dict:
+        data = None
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/json",
+        }
+        if payload is not None:
+            data = json.dumps(payload).encode("utf-8")
+            headers["Content-Type"] = "application/json"
+        request = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                body = response.read().decode("utf-8").strip()
+        except urllib.error.HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace").strip()
+            if allow_not_found and exc.code == 404:
+                return {}
+            fail(f"Gandi {method} {url} failed with HTTP {exc.code}: {body}")
+        return json.loads(body) if body else {}
+
+
+    token = os.environ.get("GANDI_LIVEDNS_TOKEN", "").strip()
+    if not token:
+        fail("missing GANDI_LIVEDNS_TOKEN in /etc/gandi-livedns.env")
+
+    public_ip = current_public_ipv4()
+    changed = False
+    for record in RECORDS:
+        encoded_domain = urllib.parse.quote(DOMAIN, safe="")
+        encoded_record = urllib.parse.quote(record, safe="")
+        url = f"{API_BASE}/domains/{encoded_domain}/records/{encoded_record}/A"
+        current = gandi_request(token, "GET", url, allow_not_found=True)
+        values = current.get("rrset_values", [])
+        ttl = current.get("rrset_ttl")
+        if values == [public_ip] and ttl == TTL:
+            print(f"gandi-livedns: {record}.{DOMAIN} unchanged at {public_ip}")
+            continue
+        gandi_request(token, "PUT", url, {"rrset_values": [public_ip], "rrset_ttl": TTL})
+        print(
+            f"gandi-livedns: updated {record}.{DOMAIN} "
+            f"from {values or '<missing>'} ttl={ttl or '<missing>'} to {public_ip} ttl={TTL}"
+        )
+        changed = True
+
+    if not changed:
+        print("gandi-livedns: all records already current")
+    PY
+  '';
   alertsFile = pkgs.writeText "prometheus-alerts.yml" ''
     groups:
       - name: mele-hub
@@ -438,6 +533,26 @@ in
     resticSyncthingHelper
     resticMeleAppsHelper
   ];
+
+  systemd.services.gandi-livedns-update-home = {
+    description = "Update Gandi LiveDNS records for home.behaghel.org";
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    serviceConfig = {
+      Type = "oneshot";
+      EnvironmentFile = "-/etc/gandi-livedns.env";
+      ExecStart = [ gandiLiveDnsUpdater ];
+    };
+  };
+
+  systemd.timers.gandi-livedns-update-home = {
+    wantedBy = [ "timers.target" ];
+    timerConfig = {
+      OnBootSec = "2min";
+      OnUnitActiveSec = "5min";
+      Persistent = true;
+    };
+  };
 
   systemd.services.restic-backup-syncthing = {
     description = "Restic backup of Syncthing data";
