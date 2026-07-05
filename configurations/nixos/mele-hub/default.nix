@@ -15,6 +15,7 @@ let
   grafanaDashboardsPath = pkgs.linkFarm "grafana-dashboards" {
     "mele-apps.json" = ./grafana/apps.json;
     "mele-hub-health.json" = ./grafana/health.json;
+    "hedonis-push.json" = ./grafana/hedonis-push.json;
     "syncthing-restic.json" = ./grafana/syncthing-restic.json;
   };
   appBackupPaths = lib.flatten (lib.mapAttrsToList
@@ -272,6 +273,46 @@ EOF
             annotations:
               summary: "SMART reports failing drive"
               description: "Device {{ $labels.name }} SMART health failing"
+
+          - alert: HedonisAppUnhealthy
+            expr: mele_app_health_status{app="hedonis"} == 0
+            for: 5m
+            labels: { severity: critical }
+            annotations:
+              summary: "Hédonis health check failing"
+              description: "MeLE app health probe reports Hédonis unhealthy."
+
+          - alert: HedonisStatic404s
+            expr: increase(http_requests_total{app="hedonis",route="/static/*",status="404"}[15m]) > 0
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "Hédonis static asset 404s"
+              description: "Hédonis has served missing static assets recently; installed PWAs may be stale or a deploy may be incomplete."
+
+          - alert: HedonisPushNoSubscriptions
+            expr: hedonis_push_subscriptions_total{app="hedonis"} < 1
+            for: 30m
+            labels: { severity: warning }
+            annotations:
+              summary: "Hédonis has no push subscriptions"
+              description: "No Web Push subscriptions are registered for Hédonis; system notifications cannot be delivered."
+
+          - alert: HedonisPushSendFailures
+            expr: increase(hedonis_push_send_total{app="hedonis",status="failed"}[15m]) > 0
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "Hédonis push sends failing"
+              description: "At least one Hédonis Web Push send failed recently. Check app logs and push subscription state."
+
+          - alert: HedonisPushSubscriptionExpired
+            expr: increase(hedonis_push_subscriptions_removed_total{app="hedonis",reason="expired"}[1h]) > 0
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "Hédonis push subscription expired"
+              description: "A stale Hédonis Web Push subscription was removed; reopen and unlock the PWA on affected devices if notifications stop."
   '';
 in
 {
