@@ -66,12 +66,38 @@ For each approved iteration:
 
 4. **Feedback checkpoint** — Present the increment to the user.
    - Show what was built and how to exercise it.
+   - Surface succinct plan status with a checklist: done/current/left.
+   - Recommend the next iteration, either confirming the plan or proposing a learned refinement/detour.
+   - Provide concrete acceptance-test guidance when this slice is a useful acceptance checkpoint.
    - Collect feedback before planning the next iteration.
    - If feedback changes the plan, update the iteration table.
 
 5. **Spec sync** — If implementation discoveries reveal spec gaps:
    - Update `spec/` before proceeding.
    - Flag the change to the user: "I found [X] wasn't covered in the spec. I've added it."
+
+### End-of-slice checkpoint format
+
+At the end of every completed iteration, the final response MUST include:
+
+1. **Plan status** — a compact checklist showing what is done, where we are, and what remains:
+   - `[x] Iteration 1 — [done slice goal]`
+   - `[x] Iteration N — [current slice goal completed]`
+   - `[ ] Iteration N+1 — [next planned slice goal]`
+   - `[ ] Iteration ... — [remaining slice goals]`
+2. **Where we are** — three concise bullets:
+   - **Done:** the capability now green and refactored.
+   - **Current position:** the acceptance criteria or user path now covered.
+   - **Left:** the next unresolved risks/behaviors.
+3. **Recommended next iteration**:
+   - Confirm the original plan if it still looks right, naming the next iteration.
+   - Or recommend a refinement/detour/reordering learned from the current slice, with a one-sentence rationale.
+4. **Acceptance-test guidance** when useful:
+   - What to run or click.
+   - What data/setup is needed.
+   - What observable result confirms acceptance.
+   - Whether this is a smoke check, targeted acceptance test, or broader end-to-end validation.
+5. **Feedback request** — ask whether the behavior is acceptable and whether to proceed with the recommended next iteration.
 
 ### Phase 3: Continuous test hygiene
 

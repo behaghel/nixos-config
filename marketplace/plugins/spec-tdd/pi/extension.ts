@@ -62,8 +62,10 @@ Each iteration starts with the smallest viable end-to-end slice (happy path) and
 			}
 			pi.sendUserMessage(
 				`Execute the TDD iteration: ${args.trim()}. ` +
-				"Follow strict red-green-refactor. Start with the test, make it pass with minimal code, " +
-				"then refactor. Ask for human checkpoint before proceeding."
+				"Use the tdd-planner skill as the canonical workflow. Follow strict red-green-refactor: " +
+				"start with the test, make it pass with minimal code, then refactor. " +
+				"At the end of the slice, surface checklist plan status, recommend the next iteration " +
+				"or learned refinement, provide acceptance-test guidance when useful, and ask for human feedback before proceeding."
 			);
 		},
 	});

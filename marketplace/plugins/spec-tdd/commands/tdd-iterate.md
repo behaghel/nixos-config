@@ -14,6 +14,7 @@ When this command is invoked:
 
 ### Step 1: Load context
 
+0. Use the `tdd-planner` skill as the canonical workflow. This command is a thin execution wrapper; if this file and the skill differ, follow the skill.
 1. Find the iteration plan — check `spec/*.plan.md` or ask the user for the path.
 2. Identify which iteration to execute:
    - If the user specified a number, use that.
@@ -82,10 +83,28 @@ When this command is invoked:
 2. Check if any existing tests were made redundant by the new ones.
 3. If you find low-value tests, flag them to the user with a recommendation (keep/refactor/prune).
 
-### Step 8: Mark complete
+### Step 8: Mark complete and surface plan status
 
 1. Log the iteration using the execution log template from `references/templates.md`.
-2. Tell the user: "Iteration [N] complete. [M] iterations remaining. Ready for the next one?"
+2. Update the iteration plan so the completed slice is visibly marked complete (for example, by adding `[x]` to the iteration row/heading or by updating a status section).
+3. Present a succinct plan status summary in the final response. Prefer a compact checklist:
+   - `[x] Iteration 1 — [done slice goal]`
+   - `[x] Iteration N — [current slice goal completed]`
+   - `[ ] Iteration N+1 — [next planned slice goal]`
+   - `[ ] Iteration ... — [remaining slice goals]`
+4. Explicitly state where we are in the plan:
+   - **Done:** what capability is now green and refactored.
+   - **Current position:** which acceptance criteria or user path is now covered.
+   - **Left:** the next unresolved risks/behaviors from the plan.
+5. Recommend the next iteration:
+   - If the original plan still looks right, say so and name the next iteration to run.
+   - If this iteration revealed a useful refinement, worthwhile detour, or reordered risk, recommend the adjustment and explain why in one sentence.
+6. If the completed iteration is a good opportunity for acceptance testing, give the developer concrete guidance:
+   - What to run or click.
+   - What data/setup is needed.
+   - What observable result confirms acceptance.
+   - Whether this is a quick smoke check, a targeted acceptance test, or a broader end-to-end validation.
+7. Ask the user for feedback and permission to proceed: "Does this behave as expected? Shall we continue with [recommended next iteration]?"
 
 ## Rules
 
