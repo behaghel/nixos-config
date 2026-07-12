@@ -36,7 +36,7 @@ in
 
   programs.browserpass = lib.mkIf guiTarget {
     enable = true;
-    browsers = [ "firefox" "chromium" ];
+    browsers = [ "firefox" "chrome" "chromium" ];
   };
 
   home.packages = lib.optionals guiTarget [ pkgs.browserpass ];
