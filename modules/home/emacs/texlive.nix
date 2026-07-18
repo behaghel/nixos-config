@@ -13,7 +13,9 @@ pkgs.texliveSmall.withPackages (ps: [
   ps.wrapfig
   ps."capt-of"
   ps.tcolorbox
+  ps.pdfcol
   ps.minted
   ps.fvextra
   ps.lettrine
+  ps.enumitem
 ])
