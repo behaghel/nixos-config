@@ -23,7 +23,9 @@ let
       "/srv/apps/${name}/data"
       "/srv/apps/${name}/state"
     ])
-    config.services.meleApps.apps);
+    config.services.meleApps.apps) ++ lib.optionals config.hub.mele.audiobookshelf.enable [
+    "/var/lib/${config.services.audiobookshelf.dataDir}"
+  ];
   syncthingResticExcludes = pkgs.writeText "restic-syncthing-excludes.txt" ''
     **/.stversions/**
   '';
@@ -320,6 +322,7 @@ in
     self.nixosModules.default
     ./hardware-configuration.nix
     ./apps.nix
+    ./audiobookshelf.nix
   ];
 
   nixpkgs = {
@@ -340,6 +343,8 @@ in
       logRefusedConnections = true;
     };
   };
+
+  hub.mele.audiobookshelf.enable = true;
 
   time.timeZone = "UTC";
   console.keyMap = "fr-bepo";
@@ -539,6 +544,7 @@ in
 
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"
+    "z ${syncthingDataDir} 0770 syncthing syncthing -"
     "d ${syncthingConfigDir} 0700 syncthing syncthing -"
     # Allow trusted wheel operators to refresh app textfile metrics via
     # read-only commands such as `mele-app health` without sudo.
