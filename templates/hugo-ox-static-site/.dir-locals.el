@@ -1,0 +1,5 @@
+((nil . ((denote-directory . "content-org")
+         (denote-prompts . (subdirectory title keywords))
+         (org-hugo-base-dir . ".")))
+ ("content-org/" . ((org-mode . ((eval . (when (fboundp 'hb-static-site-mode)
+                                           (hb-static-site-mode))))))))

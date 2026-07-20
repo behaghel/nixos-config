@@ -8,6 +8,7 @@ pkgs.stdenv.mkDerivation {
   nativeBuildInputs = with pkgs; [
     nix
     git
+    hugo
   ];
 
   buildPhase = ''
@@ -222,6 +223,165 @@ pkgs.stdenv.mkDerivation {
       exit 1
     fi
     echo "✓ Project configuration is correct"
+
+    # Test hugo-ox-static-site template
+    cd ..
+    echo "Testing hugo-ox-static-site template..."
+
+    nix flake new test-hugo-ox-site --template ${./..}#hugo-ox-static-site
+    cd test-hugo-ox-site
+
+    hugo_required_files=(
+      "hugo.toml"
+      "devenv.nix"
+      "devenv.yaml"
+      ".envrc"
+      ".editorconfig"
+      ".gitignore"
+      ".dir-locals.el"
+      "README.md"
+      "content-org/pages/_index.org"
+      "content-org/pages/about.org"
+      "content-org/posts/.keep"
+      "content/_index.md"
+      "content/about.md"
+      "layouts/_default/baseof.html"
+      "layouts/_default/list.html"
+      "layouts/_default/single.html"
+      "layouts/index.html"
+      "layouts/partials/head.html"
+      "layouts/partials/footer.html"
+      "layouts/partials/analytics.html"
+      "assets/css/main.css"
+      "static/.keep"
+      "scripts/site.py"
+      ".github/workflows/pages.yml"
+    )
+
+    for file in "''${hugo_required_files[@]}"; do
+      if [[ ! -f "$file" ]]; then
+        echo "ERROR: Required file $file is missing"
+        exit 1
+      fi
+    done
+    echo "✓ All required files present"
+
+    if ! grep -q "devenv direnvrc" .envrc; then
+      echo "ERROR: .envrc does not use devenv direnvrc"
+      exit 1
+    fi
+
+    if ! grep -q "/.devenv/" .gitignore; then
+      echo "ERROR: .gitignore does not ignore .devenv/"
+      exit 1
+    fi
+
+    if ! grep -q "params.mele" hugo.toml; then
+      echo "ERROR: hugo.toml does not contain MeLE deployment params"
+      exit 1
+    fi
+
+    if ! grep -q "locale" hugo.toml; then
+      echo "ERROR: hugo.toml does not use modern locale config"
+      exit 1
+    fi
+
+    if ! grep -q "denote-directory . \"content-org\"" .dir-locals.el; then
+      echo "ERROR: .dir-locals.el does not set denote-directory to content-org"
+      exit 1
+    fi
+
+    if ! grep -q "org-hugo-base-dir . \".\"" .dir-locals.el; then
+      echo "ERROR: .dir-locals.el does not set org-hugo-base-dir to project root"
+      exit 1
+    fi
+
+    if ! grep -q "fboundp 'hb-static-site-mode" .dir-locals.el; then
+      echo "ERROR: .dir-locals.el does not gracefully guard hb-static-site-mode"
+      exit 1
+    fi
+
+    if ! grep -q "Welcome to this static site" content-org/pages/_index.org; then
+      echo "ERROR: starter home Org source is missing expected content"
+      exit 1
+    fi
+
+    if ! grep -q "Welcome to this static site" content/_index.md; then
+      echo "ERROR: starter home Markdown output is missing expected content"
+      exit 1
+    fi
+
+    if grep -q "site:export-org" devenv.nix; then
+      echo "ERROR: devenv.nix exposes misleading site:export-org placeholder"
+      exit 1
+    fi
+
+    if ! grep -q "Hugo ox-hugo static site" devenv.nix; then
+      echo "ERROR: devenv.nix does not include the welcome lifecycle message"
+      exit 1
+    fi
+    echo "✓ Hugo ox-hugo/Emacs contract is structurally correct"
+
+    if ! grep -q "MELE_SKIP_SSH_CHECK" devenv.nix; then
+      echo "ERROR: devenv.nix site:doctor does not support skipping SSH checks"
+      exit 1
+    fi
+
+    if ! grep -q 'scripts\."site:build"' devenv.nix; then
+      echo "ERROR: devenv.nix does not expose site:build as a shell command"
+      exit 1
+    fi
+
+    if ! grep -q 'scripts\."site:deploy:mele"' devenv.nix; then
+      echo "ERROR: devenv.nix does not expose site:deploy:mele as a shell command"
+      exit 1
+    fi
+
+    if ! grep -q 'scripts\."github:setup"' devenv.nix; then
+      echo "ERROR: devenv.nix does not expose github:setup as a shell command"
+      exit 1
+    fi
+
+    if ! grep -q "gh" devenv.nix; then
+      echo "ERROR: devenv.nix does not include GitHub CLI"
+      exit 1
+    fi
+
+    if ! grep -q "github-setup" scripts/site.py; then
+      echo "ERROR: scripts/site.py does not implement github-setup"
+      exit 1
+    fi
+
+    if ! grep -q "--baseURL" .github/workflows/pages.yml; then
+      echo "ERROR: GitHub Pages workflow does not override baseURL"
+      exit 1
+    fi
+
+    if ! grep -q "nix run nixpkgs#devenv" .github/workflows/pages.yml; then
+      echo "ERROR: GitHub Pages workflow does not build through devenv"
+      exit 1
+    fi
+
+    if ! grep -q "actions/deploy-pages" .github/workflows/pages.yml; then
+      echo "ERROR: GitHub Pages workflow does not deploy with deploy-pages"
+      exit 1
+    fi
+
+    if ! grep -q "pages: write" .github/workflows/pages.yml; then
+      echo "ERROR: GitHub Pages workflow lacks pages write permission"
+      exit 1
+    fi
+
+    hugo --gc --minify
+    if [[ ! -f "public/index.html" ]]; then
+      echo "ERROR: Hugo build did not create public/index.html"
+      exit 1
+    fi
+    if [[ ! -f "public/about/index.html" ]]; then
+      echo "ERROR: Hugo build did not create public/about/index.html"
+      exit 1
+    fi
+    echo "✓ Hugo ox-hugo template builds"
 
     echo "All template tests passed!"
   '';

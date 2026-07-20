@@ -1,0 +1,21 @@
+baseURL = "https://example.home.behaghel.org/"
+title = "example"
+locale = "en"
+
+enableRobotsTXT = true
+
+[params]
+description = "A personal static site."
+
+[params.mele]
+site = "example"
+host = "hub@mele"
+root = "/srv/static/example"
+
+[params.analytics]
+enable = false
+
+[markup]
+[markup.goldmark]
+[markup.goldmark.renderer]
+unsafe = true

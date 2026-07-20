@@ -1,0 +1,6 @@
+/public/
+/.hugo_build.lock
+/.devenv/
+/.direnv/
+/devenv.local.nix
+/devenv.local.yaml

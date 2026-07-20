@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="{{ site.Language.Locale | default "en" }}">
+  {{ partial "head.html" . }}
+  <body>
+    <header>
+      <a href="{{ site.Home.RelPermalink }}">{{ site.Title }}</a>
+    </header>
+    <main>
+      {{ block "main" . }}{{ end }}
+    </main>
+    {{ partial "footer.html" . }}
+    {{ partial "analytics.html" . }}
+  </body>
+</html>

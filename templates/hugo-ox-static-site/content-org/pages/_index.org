@@ -1,0 +1,7 @@
+#+title: Home
+#+hugo_base_dir: ../..
+#+hugo_section: /
+#+hugo_bundle: /
+#+hugo_custom_front_matter: :type home
+
+Welcome to this static site.

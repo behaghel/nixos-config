@@ -206,6 +206,8 @@ For apps like Hédonis that have both a PWA and a backend:
 - bind to `0.0.0.0:${PORT:-8080}`;
 - store SQLite or other durable files under `/data`.
 
+For simple static sites, do not use the dynamic MeLE app platform. Use the static-site hosting flow instead; see [MeLE static sites](./mele-static-sites.md).
+
 Same-origin deployment is preferred. For example:
 
 ```text

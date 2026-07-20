@@ -315,6 +315,22 @@ EOF
             annotations:
               summary: "Hédonis push subscription expired"
               description: "A stale Hédonis Web Push subscription was removed; reopen and unlock the PWA on affected devices if notifications stop."
+
+          - alert: HedonisSchedulerSoloDevLane
+            expr: hedonis_scheduler_lanes_total{app="hedonis",state="solo_dev"} > 0
+            for: 24h
+            labels: { severity: warning }
+            annotations:
+              summary: "Hédonis scheduler is using a solo dev lane"
+              description: "A dev-only one-recipient scheduler lane has been present for 24h; remove it or register both recipient subscriptions before relying on production scheduler fairness."
+
+          - alert: HedonisSchedulerUnconsumedTicks
+            expr: hedonis_scheduler_unconsumed_ticks_total{app="hedonis"} > 0
+            for: 6h
+            labels: { severity: warning }
+            annotations:
+              summary: "Hédonis scheduler ticks are unconsumed"
+              description: "At least one Hédonis scheduler tick has remained unconsumed for 6h; notifications may not be opened or client tick consumption may be failing."
   '';
 in
 {
@@ -323,6 +339,7 @@ in
     ./hardware-configuration.nix
     ./apps.nix
     ./audiobookshelf.nix
+    ./static-sites.nix
   ];
 
   nixpkgs = {
@@ -345,6 +362,7 @@ in
   };
 
   hub.mele.audiobookshelf.enable = true;
+  hub.mele.staticSites.enable = true;
 
   time.timeZone = "UTC";
   console.keyMap = "fr-bepo";
