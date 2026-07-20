@@ -3,7 +3,6 @@ let
   inherit (flake) inputs;
   inherit (inputs) self;
   isLinux = pkgs.stdenv.isLinux;
-  claudeCodePkg = inputs.claude-code.packages.${pkgs.stdenv.hostPlatform.system}.claude-code;
 in
 {
   imports =
@@ -29,8 +28,6 @@ in
     gemini-cli
   ] ++ lib.optionals isLinux [
     codex
-  ] ++ [
-    claudeCodePkg
   ];
 
   hub.mail = {
