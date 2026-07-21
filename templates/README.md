@@ -33,6 +33,7 @@ After creating a project from a template:
 | `guile-basic-devenv` | Modern Guile (GNU Scheme) development environment | • Guile 3.0 with module system support<br>• Guild compiler and linter for code quality<br>• SRFI-64 testing framework<br>• Interactive REPL development<br>• Complete lifecycle commands (`build`, `test`, `compile`, etc.) |
 | `guile-hall-devenv` | Professional Guile development with guile-hall | • Guile 3.0 with guile-hall project management<br>• Autotools integration for professional builds<br>• Project scaffolding and metadata management<br>• Integrated testing and distribution<br>• Complete lifecycle commands (`build`, `test`, `dist`, etc.) |
 | `pharo-basic-devenv` | Modern Pharo Smalltalk development environment | • Pharo Smalltalk with automatic image management<br>• Tonel format for git-friendly source code<br>• SUnit testing framework with headless execution<br>• Code critics and quality analysis tools<br>• Complete lifecycle commands (`test`, `run`, `lint`, etc.) |
+| `mele-vite-app` | Dynamic MeLE app template | • Vite + React + TypeScript<br>• Native Node server with `/health`, `/metrics`, and `/api/message`<br>• Nix `.#ociImage` for MeLE deploys<br>• `mele:deploy` integration via devenv |
 
 ## Template Standards
 

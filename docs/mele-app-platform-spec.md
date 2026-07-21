@@ -52,7 +52,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | Unknown subdomains | Caddy returns 404 | Avoids routing arbitrary hostnames into apps. |
 | TLS | Start with Caddy HTTP-01 per-host certificates | Avoids DNS API credentials on MeLE. |
 | Initial app slot | Only `home` | Keeps first rollout focused and exercises full platform path. |
-| Blueprint app | Separate tiny Go HTTP app repo | Proves external app deployment and provides reference implementation. |
+| Blueprint app | `mele-vite-app` TypeScript/Vite template | Proves external app deployment with the same Node/Vite pattern used by Hédonis. |
 | Blueprint metrics | Expose `/metrics` from day one | Observability is a core requirement. |
 | Downtime | Accept short per-app restart blip initially | Simpler than blue/green; only deployed app is interrupted. |
 | Image GC | Keep last 5 releases per app by default | Preserves rollback while bounding storage growth. |
@@ -62,7 +62,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | Module location | Start local at `configurations/nixos/mele-hub/apps.nix`, with app slot files under `configurations/nixos/mele-hub/apps/` | Keeps experimental MeLE-specific platform out of generic modules initially while making app onboarding easy to automate. |
 | App onboarding | Provide a `devenv` script `mele:create-app` that creates a per-app slot file using convention over configuration | New app slots should be guided, consistent, and low ceremony while remaining declarative. |
 | App slot convention | Minimal per-app files should usually declare only name-derived/defaultable differences: domain override if needed, host port, exposure, health/metrics toggles | Avoids heavy repetitive wiring for every app. |
-| Devenv extension | Defer to v2, keep task/env conventions extension-ready | Avoids expanding v1 while preserving future native workflow. |
+| Devenv extension | Shared `modules/flake/mele-app` devenv module | App projects import one module for `mele:image`, `mele:deploy`, status, health, and logs. |
 
 ## Acceptance Criteria
 
@@ -77,13 +77,13 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - [ ] AC-9: Given all required secrets are present, when `mele-app deploy home --release <sha>` receives a valid image archive, then it loads the image, tags it as `localhost/home:<sha>`, retags `localhost/home:current`, restarts only `mele-app-home.service`, records release metadata, and writes deploy metrics.
 - [ ] AC-10: Given `healthPath = "/health"`, when a newly deployed release fails health checks after restart, then `mele-app` retags the previous release as `current`, restarts `mele-app-home.service`, records rollback metadata/metrics, and exits nonzero.
 - [ ] AC-11: Given more than five successful releases exist for `home`, when a successful deploy completes, then old non-current images beyond the retention window are pruned while the current and recent rollback candidates remain.
-- [ ] AC-12: Given the blueprint Go `home` app is deployed, when `GET /health` is requested through Caddy, then it returns a success response.
-- [ ] AC-13: Given the blueprint Go `home` app is deployed and metrics are enabled for the slot, when Prometheus scrapes the configured app metrics endpoint, then app metrics are collected under labels that identify `app="home"`.
+- [ ] AC-12: Given a reference MeLE app is deployed, when `GET /health` is requested through Caddy, then it returns a success response.
+- [ ] AC-13: Given a reference MeLE app is deployed and metrics are enabled for the slot, when Prometheus scrapes the configured app metrics endpoint, then app metrics are collected under labels that identify `app="home"`.
 - [ ] AC-14: Given a deploy or rollback occurs, when Grafana displays the generic MeLE Apps dashboard, then the `home` app shows current release, last deploy status/time, rollout/rollback events, service availability, request rate/error/latency where app metrics expose them, and separate observability scrape health.
 - [ ] AC-15: Given `backup = true` for the `home` slot, when the MeLE restic backup runs, then `/srv/apps/home/data` and `/srv/apps/home/state` are included and container images are not included.
 - [ ] AC-16: Given a backup has completed, when the non-destructive restore verification is run for `home`, then it restores app data/state to a temporary location and verifies a known marker without overwriting live app data.
 - [ ] AC-17: Given direct public Grafana port forwarding has been removed, when Grafana is later exposed, then it is reachable behind Caddy with authentication rather than directly on public port `3000`.
-- [ ] AC-18: Given the blueprint app repo exists, when `devenv tasks run mele:deploy` is run there, then it builds the app OCI image with `devenv`, updates SecretSpec metadata, streams the image to MeLE over SSH, and completes without requiring a MeLE switch.
+- [ ] AC-18: Given a project generated from `mele-vite-app`, when `mele:deploy` is run there, then it builds the app OCI image, updates SecretSpec metadata, streams the image to MeLE over SSH, and completes without requiring a MeLE switch.
 - [ ] AC-19: Given a developer runs `mele:create-app notes` from the devenv shell, when the command completes, then it creates a dedicated declarative app slot file under `configurations/nixos/mele-hub/apps/`, chooses the next available host port by convention, defaults the public domain to `notes.home.behaghel.org`, and Nix evaluation includes `notes` in `/etc/mele-apps/config.json`.
 - [ ] AC-20: Given MeLE has joined Tailscale and the workstation `mele` host alias points to MeLE's Tailscale IPv4, when app helpers target `hub@mele`, then deploy/status/health/log commands work away from the LAN without exposing public SSH.
 
@@ -112,8 +112,8 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - Restic backup configuration for app data/state includes
 - Firewall/Caddy/Podman/systemd configuration needed for the app substrate
 - Documentation/runbooks under `docs/`
-- A new external blueprint Go app repository to be created and worked on after the host substrate exists
-- `devenv.nix` for a local `mele:create-app` onboarding script
+- `templates/mele-vite-app/` as the current reference app project template
+- `devenv.nix` for local `mele:create-app` and MeLE app template validation scripts
 
 **Must not modify without separate approval:**
 
@@ -123,7 +123,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 - Router configuration beyond documented manual steps
 - Generated agent configs unrelated to this work
 - A reusable generic NixOS module under `modules/nixos/` until the local MeLE module has stabilized
-- A full devenv extension until v2
+- A broader generic PaaS/devenv extension beyond the current MeLE app module
 
 ## Verification Plan
 
@@ -135,7 +135,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | AC-4 | `id app-home`; `stat /srv/apps/home/data /srv/apps/home/state` | No |
 | AC-5 | Before first deploy, `systemctl cat mele-app-home.service` shows the unit exists and activation succeeds; after deploy, `systemctl status` and `ss -ltnp` confirm localhost-only bind | No |
 | AC-6 | Run `mele-app` subcommands for `home` and an unknown app | Partial |
-| AC-7 | Run blueprint deploy task and verify `/srv/apps/home/state/secretspec.toml` updates | No |
+| AC-7 | Run `mele:deploy` from a generated app project and verify `/srv/apps/<app>/state/secretspec.toml` updates | No |
 | AC-8 | Temporarily remove a required key from `/etc/mele-apps/home.env`; deploy; verify service release unchanged | No |
 | AC-9 | Deploy valid image; inspect Podman tags, systemd status, state JSONL, textfile metrics | No |
 | AC-10 | Deploy intentionally unhealthy image; verify automatic rollback and metrics | No |
@@ -146,7 +146,7 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 | AC-15 | Run restic backup; inspect backup contents or restore listing for app data/state only | No |
 | AC-16 | Run restore verification helper/runbook and verify temporary restore marker | Partial |
 | AC-17 | Confirm router has no `3000` forward; later verify Grafana Caddy route/auth | No |
-| AC-18 | From blueprint repo, run `devenv tasks run mele:deploy`; verify MeLE generation unchanged and only app service restarted | No |
+| AC-18 | From a generated `mele-vite-app` repo, run `mele:deploy`; verify MeLE generation unchanged and only app service restarted | No |
 | AC-19 | Run `mele:create-app notes` from the devenv shell; inspect new app slot file and evaluate generated config JSON for `notes` | Partial |
 | AC-20 | After `sudo tailscale up`, point `mele` at `tailscale ip -4`; verify `ssh hub@mele hostname` and app helper commands from outside the LAN | No |
 
@@ -157,13 +157,13 @@ MeLE (`configurations/nixos/mele-hub`) should act as a small personal app server
 3. **Caddy edge**: enable Caddy, open `80/443`, route `home.behaghel.org`, unknown-host 404, HTTP-01 TLS.
 4. **Systemd app runner**: generate `mele-app-home.service` using `localhost/home:current`, localhost-only port binding, data mount, env file.
 5. **`mele-app` CLI v1**: Python CLI with config loading, app validation, status/logs/health/releases, `update-secretspec`, deploy happy path.
-6. **Blueprint Go app repo**: tiny Go service with `/`, `/health`, `/metrics`, `devenv` container build, hardcoded MeLE deploy/status/log tasks.
+6. **MeLE Vite app template**: TypeScript/Vite/React app with native Node server, `/`, `/health`, `/metrics`, `.#ociImage`, and shared `mele:*` deploy/status/log tasks.
 7. **Secrets validation**: parse copied SecretSpec, validate `/etc/mele-apps/<app>.env`, fail before retag/restart.
 8. **Health rollback and release retention**: automatic rollback, release metadata JSONL, textfile metrics, keep last 5 releases.
 9. **Observability**: Prometheus scrape config for app metrics, deploy/health textfile metrics, periodic health probes, bounded rollout event metrics, generic Grafana MeLE Apps dashboard.
 10. **Backup/restore validation**: include app data/state in restic, add non-destructive restore verification helper and manual runbook.
 11. **Grafana behind Caddy**: move Grafana route behind Caddy with authentication; keep direct public `3000` closed.
-12. **V2 deferred**: extract reusable devenv extension for native `mele` tasks/options after the blueprint path stabilizes.
+12. **V2 deferred**: generalize beyond the current MeLE-specific app module after the template path stabilizes.
 
 ## References
 

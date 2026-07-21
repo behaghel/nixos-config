@@ -35,7 +35,9 @@ Recommended `/health` response:
 {"status":"ok"}
 ```
 
-Required generic `/metrics` series:
+Minimum `/metrics` requirement: return valid Prometheus text format with at least one useful app-owned series. The `mele-vite-app` template starts with simple uptime and request-count metrics.
+
+Recommended mature HTTP metrics:
 
 ```text
 http_requests_total{method,route,status}
@@ -191,17 +193,37 @@ Expected:
 {"architecture":"amd64","os":"linux"}
 ```
 
+## New MeLE app projects
+
+For a new TypeScript web app, prefer the `mele-vite-app` template:
+
+```sh
+om init --non-interactive --params '{"app-name":"notes"}' \
+  -o ~/ws/notes /Users/hubertbehaghel/nixos-config#mele-vite-app
+```
+
+The single `app-name` value derives the npm package name, MeLE app name, OCI image name, HTML title, and starter API message. The generated project includes:
+
+- Vite + React + TypeScript;
+- native Node production server, not Vite preview;
+- `/health`, `/metrics`, and `/api/message`;
+- persistent state under `${APP_DATA_DIR:-./data}` locally and `/data` on MeLE;
+- `.#ociImage` built by Nix;
+- `app:check`, `app:build`, `app:serve`, `app:doctor`, and imported `mele:*` commands.
+
+The template intentionally does not include PWA support, Playwright, GitHub Actions, domain-tree scaffolding, or auto-commits. Add those per project when needed.
+
 ## Node/TypeScript and PWA guidance
 
 Do not deploy Vite's development server. Do not rely on `npm run preview` as the
 production server unless it has the required health, metrics, persistence, and
 routing behavior.
 
-For apps like Hédonis that have both a PWA and a backend:
+For TypeScript apps, including PWA apps like Hédonis:
 
 - build the static frontend (`dist/`) during the image build;
 - run a small production Node server in the container;
-- serve the static PWA and API/SSE backend from the same origin;
+- serve the static frontend and API/SSE backend from the same origin;
 - expose `/health` and `/metrics` from that production server;
 - bind to `0.0.0.0:${PORT:-8080}`;
 - store SQLite or other durable files under `/data`.
@@ -315,6 +337,10 @@ Before the first deploy, create an app slot in `nixos-config`:
 ```sh
 devenv -q shell -- mele:create-app hedonis
 ```
+
+The command creates only the host slot and prints project initialization guidance. It does not create or modify `~/ws/<app>`.
+
+For new apps, use the printed `om init` command. For existing projects, use `mele:onboard-app` as described above.
 
 For apps that implement `/metrics` as required, keep metrics enabled. If an app
 is temporarily missing metrics during early development, create the slot with

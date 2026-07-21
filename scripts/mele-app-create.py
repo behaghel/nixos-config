@@ -178,6 +178,21 @@ def main() -> int:
     print("  git commit -m 'mele: add " + args.name + " app slot'")
     print("  devenv -q shell -- mele:activate")
     print()
+    print("Recommended project initialization:")
+    params = json.dumps({"app-name": args.name}, separators=(",", ":"))
+    print(
+        f"  om init --non-interactive --params '{params}' "
+        f"-o ~/ws/{args.name} {ROOT}#mele-vite-app"
+    )
+    print()
+    print("This single value derives package name, MeLE app name, image name, title,")
+    print("and default API message:")
+    print(f"  app-name: {args.name}")
+    print()
+    print("Fallback without Omnix:")
+    print(f"  nix flake new ~/ws/{args.name} --template {ROOT}#mele-vite-app")
+    print(f"  # then replace example -> {args.name}")
+    print()
     print("Activation is required for this new app slot. Normal app releases after")
     print("this onboarding step should use mele:deploy from the app project instead.")
     return 0

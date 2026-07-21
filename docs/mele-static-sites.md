@@ -32,11 +32,22 @@ Default domain:
 lleons-18.home.behaghel.org
 ```
 
+The command also prints the recommended project initialization command:
+
+```bash
+om init --non-interactive --params '{"site-name":"lleons-18"}' \
+  -o ~/ws/lleons-18 /Users/hubertbehaghel/nixos-config#hugo-ox-static-site
+```
+
+The single `site-name` value derives `baseURL`, `[params.mele].site`, and the MeLE deploy root in the generated Hugo project.
+
 Use a custom domain when needed:
 
 ```bash
 mele-app static create notes --domain notes.behaghel.org
 ```
+
+Custom domains affect the host slot. The `hugo-ox-static-site` template currently assumes the standard `<site-name>.home.behaghel.org` convention, so edit `hugo.toml` manually after initialization when using a custom domain.
 
 The command validates the MeLE NixOS config by default. Use `--no-validate` only when iterating quickly.
 
@@ -65,7 +76,17 @@ The intended shape is:
 /srv/static/<name>/current -> /srv/static/<name>/releases/<release-id>
 ```
 
-A future website project template will provide convenient `devenv.nix` tasks for build, deploy, rollback, and GitHub Pages backup deployment.
+The `hugo-ox-static-site` template provides direct shell commands for the common Org/ox-hugo/Hugo workflow:
+
+```bash
+site:doctor
+site:build
+site:deploy:mele
+site:rollback:mele --release <release-id>
+github:setup
+```
+
+`site:deploy:mele` builds locally, copies `public/` to a release directory, and repoints `current` atomically. Generated Markdown under `content/` is committed; `public/` is not.
 
 ## Rollback model
 
@@ -73,8 +94,10 @@ Rollback is a symlink move: repoint `/srv/static/<name>/current` to an older rel
 
 ## Backup host
 
-For public static sites, use GitHub Pages as the backup serving target. Prefer GitHub Actions building from source rather than committing generated files.
+For public static sites, use GitHub Pages as the backup serving target. The `hugo-ox-static-site` template includes a GitHub Pages workflow and `github:setup` helper. Private GitHub Pages repositories may require a paid GitHub plan; public backup repositories work on the free plan.
+
+The Hugo template commits Org sources under `content-org/` and generated Hugo Markdown under `content/`, while GitHub Actions builds `public/` from those committed files.
 
 ## Analytics
 
-Host-side per-site monitoring is intentionally out of scope. A future static website project template may include Analyzati (`analyzati.com`) or another analytics integration.
+Host-side per-site monitoring is intentionally out of scope. The Hugo template includes an analytics partial placeholder, but enabling a concrete analytics provider remains project-specific.

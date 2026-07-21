@@ -62,18 +62,31 @@
         { }
         templateConfigs;
 
-      omTemplates = lib.optionalAttrs (allTemplates ? hugo-ox-static-site) {
-        hugo-ox-static-site = {
-          template = allTemplates.hugo-ox-static-site;
-          params = [
-            {
-              name = "site-name";
-              description = "MeLE static site name/subdomain";
-              placeholder = "example";
-            }
-          ];
-        };
-      };
+      omTemplates =
+        (lib.optionalAttrs (allTemplates ? hugo-ox-static-site) {
+          hugo-ox-static-site = {
+            template = allTemplates.hugo-ox-static-site;
+            params = [
+              {
+                name = "site-name";
+                description = "MeLE static site name/subdomain";
+                placeholder = "example";
+              }
+            ];
+          };
+        })
+        // (lib.optionalAttrs (allTemplates ? mele-vite-app) {
+          mele-vite-app = {
+            template = allTemplates.mele-vite-app;
+            params = [
+              {
+                name = "app-name";
+                description = "MeLE app name/subdomain";
+                placeholder = "example";
+              }
+            ];
+          };
+        });
     in
     {
       templates = allTemplates;

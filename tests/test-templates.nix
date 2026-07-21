@@ -384,6 +384,126 @@ pkgs.stdenv.mkDerivation {
     echo "✓ Hugo ox-hugo template builds"
 
     echo "All template tests passed!"
+
+    # Test mele-vite-app template
+    cd ..
+    echo "Testing mele-vite-app template..."
+
+    nix flake new test-mele-vite-app --template ${./..}#mele-vite-app
+    cd test-mele-vite-app
+
+    mele_vite_required_files=(
+      "flake.nix"
+      "flake.lock"
+      "devenv.nix"
+      "devenv.yaml"
+      "package.json"
+      "package-lock.json"
+      "secretspec.toml"
+      "index.html"
+      "vite.config.ts"
+      "tsconfig.json"
+      ".envrc"
+      ".editorconfig"
+      ".gitignore"
+      "README.md"
+      "src/client/App.tsx"
+      "src/client/main.tsx"
+      "src/client/styles.css"
+      "src/client/vite-env.d.ts"
+      "src/server/main.ts"
+      "src/server/server.ts"
+      "src/server/server.test.ts"
+      "src/shared/message.ts"
+    )
+
+    for file in "''${mele_vite_required_files[@]}"; do
+      if [[ ! -f "$file" ]]; then
+        echo "ERROR: Required file $file is missing"
+        exit 1
+      fi
+    done
+    echo "✓ All required files present"
+
+    if ! grep -q "devenv direnvrc" .envrc; then
+      echo "ERROR: .envrc does not use devenv direnvrc"
+      exit 1
+    fi
+
+    if ! grep -q "/.devenv/" .gitignore; then
+      echo "ERROR: .gitignore does not ignore .devenv/"
+      exit 1
+    fi
+
+    if ! grep -q 'mele.app' devenv.nix; then
+      echo "ERROR: devenv.nix does not enable mele.app"
+      exit 1
+    fi
+
+    for command in 'app:dev' 'app:build' 'app:check' 'app:serve' 'app:doctor'; do
+      if ! grep -q "scripts\.\"$command\"" devenv.nix; then
+        echo "ERROR: devenv.nix does not expose $command"
+        exit 1
+      fi
+    done
+
+    if ! grep -q 'buildNpmPackage' flake.nix; then
+      echo "ERROR: flake.nix does not use buildNpmPackage"
+      exit 1
+    fi
+
+    if ! grep -q 'importNpmLock' flake.nix; then
+      echo "ERROR: flake.nix does not use importNpmLock"
+      exit 1
+    fi
+
+    if ! grep -q 'buildLayeredImage' flake.nix; then
+      echo "ERROR: flake.nix does not build an OCI image"
+      exit 1
+    fi
+
+    if ! grep -q 'ociImage' flake.nix; then
+      echo "ERROR: flake.nix does not expose ociImage"
+      exit 1
+    fi
+
+    if ! grep -q '\[profiles\.prod\]' secretspec.toml; then
+      echo "ERROR: secretspec.toml does not contain an empty prod profile"
+      exit 1
+    fi
+
+    if grep -q 'required = \[\]' secretspec.toml; then
+      echo "ERROR: secretspec.toml uses unsupported required-list syntax"
+      exit 1
+    fi
+
+    if ! grep -q '/api/message' src/server/server.ts; then
+      echo "ERROR: server does not implement /api/message"
+      exit 1
+    fi
+
+    if ! grep -q '/health' src/server/server.ts; then
+      echo "ERROR: server does not implement /health"
+      exit 1
+    fi
+
+    if ! grep -q '/metrics' src/server/server.ts; then
+      echo "ERROR: server does not implement /metrics"
+      exit 1
+    fi
+
+    if ! grep -q 'Hello from example' src/shared/message.ts; then
+      echo "ERROR: shared message placeholder is missing"
+      exit 1
+    fi
+
+    if grep -R "vite-plugin-pwa\|playwright" . >/dev/null; then
+      echo "ERROR: mele-vite-app should not include PWA or Playwright defaults"
+      exit 1
+    fi
+
+    echo "✓ MeLE Vite app template is structurally correct"
+    echo "All template tests passed!"
   '';
 
   installPhase = ''

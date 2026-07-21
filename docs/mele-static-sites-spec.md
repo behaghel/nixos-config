@@ -1,19 +1,20 @@
 # Spec: MeLE Static Sites
 
 ## Problem
-MeLE should make public static website hosting easy to repeat without treating simple static files as containerized dynamic apps. Adding a new static site should be a small declarative host change, backed by a clear operator command and documented deployment model, while keeping project-specific build/deploy templates out of the host platform for now.
+MeLE should make public static website hosting easy to repeat without treating simple static files as containerized dynamic apps. Adding a new static site should be a small declarative host change, backed by a clear operator command, an optional project template, and a documented deployment model.
 
 ## Context
 - Dynamic MeLE apps are managed by `services.meleApps`, `/etc/mele-apps/config.json`, and the `mele-app` CLI.
 - Static sites need no container, app service, health endpoint, SecretSpec contract, or Prometheus app metrics.
 - Static hosting is provided by `configurations/nixos/mele-hub/static-sites.nix` through Caddy `file_server` vhosts.
 - Static site source/build workflows live in external project repositories, typically Org → ox-hugo → Hugo for this use case.
+- `templates/hugo-ox-static-site` provides the standard project-side workflow for personal static sites.
 
 ## Decisions
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | CLI surface | Extend `mele-app` with `static` subcommands | Keeps MeLE operations discoverable through one command. |
-| Creation scope | `mele-app static create <name>` creates host-side per-site Nix files only | Host CLI owns host declarations; project deploy templates come later. |
+| Creation scope | `mele-app static create <name>` creates host-side per-site Nix files only and prints project template guidance | Host CLI owns host declarations; project creation remains explicit and separate. |
 | Site declaration shape | `configurations/nixos/mele-hub/static-sites/<name>.nix` with raw site attrs | Filename is the site key; files stay tiny and reviewable. |
 | Site discovery | Auto-import `static-sites/*.nix` | Creating a site requires one new file and no import-list edits. |
 | Names | Require lowercase alphanumeric + hyphens | Keeps paths, domains, and deploy scripts predictable. |
@@ -22,12 +23,13 @@ MeLE should make public static website hosting easy to repeat without treating s
 | Filesystem changes | Declarative tmpfiles only | Avoids imperative drift; activation creates host directories. |
 | Pre-deploy validation | Serve a generated “Soon here…” placeholder until first deploy | Lets users verify DNS, Caddy, and activation before project deployment exists. |
 | Deploy artifacts backup | Not backed up by Restic by default | Static releases are redeployable from project source and GitHub Pages backup. |
-| Monitoring | No host-side per-site monitoring in v1 | Static hosting is covered by Caddy/system health; analytics belongs to future project templates. |
+| Monitoring | No host-side per-site monitoring in v1 | Static hosting is covered by Caddy/system health; analytics remains project-specific. |
+| Project template | Prefer `om init --params '{"site-name":"<name>"}' ...#hugo-ox-static-site` | One site-name parameter derives MeLE defaults without making host creation mutate `~/ws`. |
 
 ## Acceptance Criteria
 - [ ] AC-1: Given `static-sites.nix` is enabled, when MeLE config evaluates, then every `configurations/nixos/mele-hub/static-sites/*.nix` file is exposed as a Caddy static file vhost keyed by filename.
 - [ ] AC-2: Given a site file `lleons-18.nix` with `domain = "lleons-18.home.behaghel.org"`, when MeLE config evaluates, then Caddy serves that domain from `/srv/static/lleons-18/current`.
-- [ ] AC-3: Given a valid site name, when `mele-app static create <name> --no-validate` runs inside `nixos-config`, then it creates `configurations/nixos/mele-hub/static-sites/<name>.nix` with a generated header and default domain.
+- [ ] AC-3: Given a valid site name, when `mele-app static create <name> --no-validate` runs inside `nixos-config`, then it creates `configurations/nixos/mele-hub/static-sites/<name>.nix` with a generated header and default domain, and prints the `om init` command for `hugo-ox-static-site`.
 - [ ] AC-4: Given `--domain <domain>`, when `mele-app static create <name> --domain <domain> --no-validate` runs, then the generated file uses the supplied domain.
 - [ ] AC-5: Given an invalid name, when `mele-app static create` runs, then it exits nonzero and does not create a file.
 - [ ] AC-6: Given the site file already exists, when `mele-app static create <name>` runs without `--force`, then it exits nonzero and preserves the file.
@@ -35,7 +37,8 @@ MeLE should make public static website hosting easy to repeat without treating s
 - [ ] AC-8: Given validation is enabled, when `mele-app static create <name>` succeeds in writing the file, then it runs a full MeLE NixOS eval and reports success or failure.
 - [ ] AC-9: Given the command is run outside `nixos-config`, when `mele-app static create` runs, then it exits nonzero with a helpful repo-root error.
 - [ ] AC-10: Given a static site is created and MeLE is activated before first deploy, when the domain is loaded, then Caddy serves a temporary `Soon here…` placeholder.
-- [ ] AC-11: Given the static-site docs are read, when a user wants to create and deploy a site, then the guide explains host creation, manual activation, placeholder validation, release-directory deployment, rollback model, and GitHub Pages backup direction.
+- [ ] AC-11: Given the static-site docs are read, when a user wants to create and deploy a site, then the guide explains host creation, `hugo-ox-static-site` initialization, manual activation, placeholder validation, release-directory deployment, rollback model, and GitHub Pages backup direction.
+- [ ] AC-12: Given `om init --non-interactive --params '{"site-name":"lleons-18"}' ...#hugo-ox-static-site`, when a project is generated, then the single `site-name` value derives `baseURL`, `[params.mele].site`, and the deploy root.
 
 ## Invariants
 - Static sites must not be added to `services.meleApps.apps`.
@@ -58,7 +61,7 @@ MeLE should make public static website hosting easy to repeat without treating s
 **Must not modify:**
 - Dynamic app slot schema except where needed to keep CLI tests passing
 - Restic backup jobs for `/srv/static`
-- Project-side website templates/devenv modules beyond documenting future direction
+- Dynamic app templates/devenv modules
 
 ## Verification Plan
 | Criterion | Method | Automated? |
@@ -70,9 +73,11 @@ MeLE should make public static website hosting easy to repeat without treating s
 | AC-9 | Unit test from temp dir without expected repo markers | Yes |
 | AC-10 | Evaluate generated Caddy config and tmpfiles placeholder symlink | Partial |
 | AC-11 | Manual doc review | No |
+| AC-12 | Omnix initialization smoke test and generated `hugo.toml` inspection | Yes |
 
 ## References
 - `docs/mele-app-platform-spec.md`
 - `docs/mele-app-onboarding.md`
 - `configurations/nixos/mele-hub/apps.nix`
 - `configurations/nixos/mele-hub/static-sites.nix`
+- `templates/hugo-ox-static-site/`
