@@ -25,9 +25,14 @@ LOADED_IMAGE_RE = re.compile(r"Loaded image(?:s)?:\s*(?P<image>\S+)")
 ENV_KEY_RE = re.compile(r"(?:export\s+)?(?P<key>[A-Za-z_][A-Za-z0-9_]*)\s*=")
 APP_IMAGE_RE = re.compile(r"^localhost/(?P<app>[A-Za-z0-9_.-]+):(?P<tag>[^:]+)$")
 STATIC_SITE_NAME_RE = re.compile(r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$")
+APP_SLOT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*[a-z0-9]$|^[a-z]$")
+PORT_RE = re.compile(r"\bhostPort\s*=\s*(\d+)\s*;")
 MELE_HUB_DIR = Path("configurations/nixos/mele-hub")
+APP_SLOT_DIR = MELE_HUB_DIR / "apps"
 STATIC_SITE_DIR = MELE_HUB_DIR / "static-sites"
 STATIC_SITE_GUIDE = Path("docs/mele-static-sites.md")
+BASE_DOMAIN = "home.behaghel.org"
+FIRST_APP_PORT = 8101
 
 
 class CliError(Exception):
@@ -444,13 +449,25 @@ def write_metrics(app: dict[str, Any], updates: dict[str, Any]) -> None:
     path = metrics_textfile_path(app)
     tmp_path = path.with_suffix(path.suffix + ".tmp")
     try:
-        if health is not None and health.get("healthy"):
-            remember_health_success(app, int(health["timestamp"]))
         path.parent.mkdir(parents=True, exist_ok=True)
         tmp_path.write_text(render_metrics(app, updates))
         tmp_path.replace(path)
     except OSError as exc:
         print(f"{app['name']}: warning: metrics update failed: {exc}", file=sys.stderr)
+        return
+    if health is not None and health.get("healthy"):
+        try:
+            remember_health_success(app, int(health["timestamp"]))
+        except PermissionError:
+            # Interactive `mele-app health` is often run as a wheel user: it may
+            # update the node-exporter textfile while root-owned app state stays
+            # read-only. The root health timer will refresh this marker.
+            pass
+        except OSError as exc:
+            print(
+                f"{app['name']}: warning: health marker update failed: {exc}",
+                file=sys.stderr,
+            )
 
 
 def health_metrics(healthy: bool) -> dict[str, Any]:
@@ -639,15 +656,60 @@ def cmd_contract_check(app: dict[str, Any], _args: argparse.Namespace) -> int:
     return 0
 
 
-def cmd_releases(app: dict[str, Any], _args: argparse.Namespace) -> int:
-    releases = Path(app["stateDir"]) / "releases.jsonl"
+def release_records_for_app(app: dict[str, Any]) -> list[dict[str, Any]]:
+    path = release_log_path(app)
+    records: list[dict[str, Any]] = []
     try:
-        if not releases.exists():
-            print(f"{app['name']}: no releases recorded")
-            return 0
-        sys.stdout.write(releases.read_text())
+        if not path.exists():
+            return records
+        for line in path.read_text().splitlines():
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
     except PermissionError as exc:
         raise CliError(f"cannot read releases for {app['name']}: {exc}") from exc
+    return records
+
+
+def print_table(headers: list[str], rows: list[list[str]]) -> None:
+    widths = [len(header) for header in headers]
+    for row in rows:
+        for index, cell in enumerate(row):
+            widths[index] = max(widths[index], len(cell))
+    print("  ".join(header.ljust(widths[index]) for index, header in enumerate(headers)))
+    print("  ".join("-" * width for width in widths))
+    for row in rows:
+        print("  ".join(cell.ljust(widths[index]) for index, cell in enumerate(row)))
+
+
+def cmd_releases(app: dict[str, Any], args: argparse.Namespace) -> int:
+    records = release_records_for_app(app)
+    if args.jsonl:
+        for record in records:
+            print(json.dumps(record, separators=(",", ":")))
+        return 0
+    if args.json:
+        print(json.dumps(records, indent=2))
+        return 0
+    if not records:
+        print(f"{app['name']}: no releases recorded")
+        return 0
+    rows: list[list[str]] = []
+    for record in reversed(records):
+        rows.append([
+            str(record.get("release") or ""),
+            str(record.get("status") or ""),
+            str(record.get("deployed_at") or ""),
+            str(record.get("branch") or ""),
+            str(record.get("dirty") or ""),
+            str(record.get("rollback_status") or ""),
+        ])
+    print_table(["release", "status", "deployed_at", "branch", "dirty", "rollback"], rows)
     return 0
 
 
@@ -674,43 +736,120 @@ def restored_path(target: Path, source: Path, relative: Path | None = None) -> P
     return destination
 
 
-def cmd_verify_restore(app: dict[str, Any], args: argparse.Namespace) -> int:
-    target = args.target
+def restore_sources(app: dict[str, Any], scope: str) -> list[Path]:
+    if scope == "data":
+        return [Path(app["dataDir"])]
+    if scope == "state":
+        return [Path(app["stateDir"])]
+    return [Path(app["dataDir"]), Path(app["stateDir"])]
+
+
+def restore_command(app: dict[str, Any], snapshot: str, scope: str, target: Path) -> list[str]:
+    command = [BKP_APPS, "restore", snapshot]
+    for source in restore_sources(app, scope):
+        command.extend(["--include", str(source)])
+    command.extend(["--target", str(target)])
+    return command
+
+
+def run_restore(app: dict[str, Any], snapshot: str, scope: str, target: Path) -> None:
     validate_restore_target(target)
-    marker = safe_relative_path(args.marker, "marker") if args.marker else None
-    if marker and marker.parts[0] not in ("data", "state"):
-        raise CliError("marker must start with data/ or state/")
-    data_dir = Path(app["dataDir"])
-    state_dir = Path(app["stateDir"])
     target.mkdir(mode=0o700, parents=True, exist_ok=True)
-    command = [
-        BKP_APPS,
-        "restore",
-        "latest",
-        "--include",
-        str(data_dir),
-        "--include",
-        str(state_dir),
-        "--target",
-        str(target),
-    ]
-    result = capture_command(command)
+    result = capture_command(restore_command(app, snapshot, scope, target))
     if result.returncode != 0:
         raise CliError(
             f"restic restore failed for {app['name']}: "
             f"{(result.stdout + result.stderr).strip()}"
         )
-    for source in (data_dir, state_dir):
+    for source in restore_sources(app, scope):
         restored = restored_path(target, source)
         if not restored.exists():
             raise CliError(f"restore did not produce expected path: {restored}")
+
+
+def cmd_verify_restore(app: dict[str, Any], args: argparse.Namespace) -> int:
+    marker = safe_relative_path(args.marker, "marker") if args.marker else None
+    if marker and marker.parts[0] not in ("data", "state"):
+        raise CliError("marker must start with data/ or state/")
+    run_restore(app, "latest", "all", args.target)
     if marker:
-        source = data_dir if marker.parts[0] == "data" else state_dir
-        marker_path = restored_path(target, source, Path(*marker.parts[1:]))
+        source = Path(app["dataDir"]) if marker.parts[0] == "data" else Path(app["stateDir"])
+        marker_path = restored_path(args.target, source, Path(*marker.parts[1:]))
         if not marker_path.exists():
             raise CliError(f"marker not found after restore: {marker_path}")
-    print(f"{app['name']}: restore verified at {target}")
+    print(f"{app['name']}: restore verified at {args.target}")
     return 0
+
+
+def default_restore_target(app: dict[str, Any], snapshot: str) -> Path:
+    stamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d-%H%M%S")
+    safe_snapshot = re.sub(r"[^A-Za-z0-9_.-]+", "-", snapshot)
+    return Path("/srv/restore/mele-apps") / app["name"] / f"{safe_snapshot}-{stamp}"
+
+
+def cmd_restore(app: dict[str, Any], args: argparse.Namespace) -> int:
+    target = args.target or default_restore_target(app, args.snapshot)
+    run_restore(app, args.snapshot, args.scope, target)
+    print(f"{app['name']}: restored {args.scope} from {args.snapshot} to {target}")
+    print("staged restore only; inspect it before any manual live cutover")
+    return 0
+
+
+def restic_snapshots(limit: int = 5) -> list[dict[str, Any]]:
+    result = capture_command([BKP_APPS, "snapshots", "--tag", "mele-apps", "--json"])
+    if result.returncode != 0:
+        raise CliError(f"restic snapshots failed: {(result.stdout + result.stderr).strip()}")
+    try:
+        data = json.loads(result.stdout or "[]")
+    except json.JSONDecodeError as exc:
+        raise CliError(f"invalid restic snapshots JSON: {exc}") from exc
+    snapshots = [item for item in data if isinstance(item, dict)]
+    snapshots.sort(key=lambda item: str(item.get("time") or ""), reverse=True)
+    return snapshots[:limit]
+
+
+def snapshot_contains_path(snapshot_id: str, path: Path) -> bool:
+    result = capture_command([BKP_APPS, "ls", snapshot_id, str(path)])
+    return result.returncode == 0
+
+
+def cmd_backup_status(app: dict[str, Any], args: argparse.Namespace) -> int:
+    print(f"{app['name']}: backup {'enabled' if app.get('backup', True) else 'disabled'}")
+    print(f"data: {app['dataDir']}")
+    print(f"state: {app['stateDir']}")
+    run_command(["systemctl", "list-timers", "restic-backup-mele-apps.timer", "--no-pager"])
+    run_command(["systemctl", "status", "restic-backup-mele-apps.service", "--no-pager", "-l"])
+    snapshots = restic_snapshots(5)
+    if not snapshots:
+        print(f"{app['name']}: no app backup snapshots found")
+        return 0
+    rows: list[list[str]] = []
+    for snapshot in snapshots:
+        snapshot_id = str(snapshot.get("short_id") or snapshot.get("id") or "")
+        verified = ""
+        if args.verify and snapshot_id:
+            data_ok = snapshot_contains_path(snapshot_id, Path(app["dataDir"]))
+            state_ok = snapshot_contains_path(snapshot_id, Path(app["stateDir"]))
+            verified = f"data={'yes' if data_ok else 'no'},state={'yes' if state_ok else 'no'}"
+        rows.append([
+            snapshot_id,
+            str(snapshot.get("time") or ""),
+            ",".join(str(tag) for tag in snapshot.get("tags", []) if tag),
+            verified,
+        ])
+    print_table(["snapshot", "time", "tags", "verified"], rows)
+    return 0
+
+
+def cmd_backup_now(app: dict[str, Any], args: argparse.Namespace) -> int:
+    if not app.get("backup", True) and not args.force:
+        raise CliError(f"{app['name']} has backup = false; use --force to run the global apps backup anyway")
+    print("starting restic-backup-mele-apps.service (backs up all apps with backup = true)")
+    result = capture_command(["systemctl", "start", "restic-backup-mele-apps.service"])
+    if result.returncode != 0:
+        raise CliError(f"backup failed: {(result.stdout + result.stderr).strip()}")
+    print(f"{app['name']}: backup job completed")
+    return cmd_backup_status(app, argparse.Namespace(verify=False))
 
 
 def cmd_update_secretspec(app: dict[str, Any], args: argparse.Namespace) -> int:
@@ -879,6 +1018,64 @@ def cleanup_release_images(app: dict[str, Any], extra_protected: set[str] | None
         print(f"{app['name']}: pruned {len(removed)} old release image(s)")
 
 
+def rollback_record(app: dict[str, Any], release: str, previous_release: str | None, status: str) -> dict[str, Any]:
+    record: dict[str, Any] = {
+        "app": app["name"],
+        "release": release,
+        "image": f"localhost/{app['name']}:{release}",
+        "repo": None,
+        "branch": None,
+        "dirty": None,
+        "deployer": os.environ.get("SUDO_USER") or os.environ.get("USER"),
+        "deployed_at": dt.datetime.now(dt.UTC).isoformat(),
+        "status": "rollback",
+        "rollback_status": status,
+    }
+    if previous_release is not None:
+        record["previous_release"] = previous_release
+    return record
+
+
+def latest_previous_successful_release(app: dict[str, Any]) -> str | None:
+    current = read_current_release(app)
+    for release in reversed(successful_release_ids(app)):
+        if release != current:
+            return release
+    return None
+
+
+def cmd_rollback(app: dict[str, Any], args: argparse.Namespace) -> int:
+    require_root()
+    release = args.release or latest_previous_successful_release(app)
+    if not release:
+        raise CliError(f"no previous successful release recorded for {app['name']}")
+    previous_release = read_current_release(app)
+    image = f"localhost/{app['name']}:{release}"
+    current_image = f"localhost/{app['name']}:current"
+    if not app_image_exists(app, image):
+        raise CliError(f"release image is not retained locally: {image}")
+    tag_image(app, image, current_image)
+    restart_service(app)
+    healthy = True if args.no_health_check else poll_health(app)
+    status = "succeeded" if healthy else "failed_health"
+    if healthy:
+        current_release_path(app).write_text(release + "\n")
+    append_jsonl(release_log_path(app), rollback_record(app, release, previous_release, status))
+    write_metrics(app, {
+        "current_release": read_current_release(app),
+        "health": health_metrics(healthy),
+        "rollback": {
+            "status": status,
+            "previous_release": previous_release or "",
+        },
+    })
+    if not healthy:
+        print(f"{app['name']}: rollback to {release} failed health check")
+        return 2
+    print(f"{app['name']}: rolled back to {release}")
+    return 0
+
+
 def deploy_metrics(release: str, status: str) -> dict[str, Any]:
     return {
         "release": release,
@@ -955,9 +1152,74 @@ def validate_static_site_name(name: str) -> None:
         )
 
 
+def validate_app_slot_name(name: str) -> None:
+    if not APP_SLOT_NAME_RE.match(name):
+        raise CliError("app name must be lowercase kebab-case, e.g. notes or my-app")
+
+
+def nix_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
+
+
+def existing_app_ports(repo_root: Path) -> list[int]:
+    ports: list[int] = []
+    for path in (repo_root / APP_SLOT_DIR).glob("*.nix"):
+        match = PORT_RE.search(path.read_text())
+        if match:
+            ports.append(int(match.group(1)))
+    return ports
+
+
+def next_app_port(repo_root: Path) -> int:
+    used = set(existing_app_ports(repo_root))
+    port = FIRST_APP_PORT
+    while port in used:
+        port += 1
+    return port
+
+
+def render_app_slot_file(args: argparse.Namespace, host_port: int, domain: str) -> str:
+    lines = ["{", f"  exposure = {nix_string(args.exposure)};"]
+    if domain != f"{args.name}.{BASE_DOMAIN}":
+        lines.append(f"  domain = {nix_string(domain)};")
+    lines.extend([
+        f"  hostPort = {host_port};",
+        f"  containerPort = {args.container_port};",
+        f"  healthPath = {nix_string(args.health_path)};",
+    ])
+    if not args.no_metrics:
+        lines.extend([
+            "  metrics = {",
+            "    enable = true;",
+            f"    path = {nix_string('/metrics')};",
+            "  };",
+        ])
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def validate_app_slot_eval(repo_root: Path, app_name: str) -> None:
+    run = capture_command
+    run(["git", "add", str(repo_root / APP_SLOT_DIR / f"{app_name}.nix")], cwd=repo_root)
+    expr = (
+        '(builtins.getAttr "mele-apps/config.json" '
+        '(builtins.getFlake "git+file://'
+        + str(repo_root)
+        + '").nixosConfigurations.mele-hub.config.environment.etc).text'
+    )
+    result = run(["nix", "eval", "--impure", "--raw", "--expr", expr], cwd=repo_root)
+    if result.returncode != 0:
+        output = (result.stdout + result.stderr).strip()
+        raise CliError(f"MeLE app slot evaluation failed: {output}")
+    data = json.loads(result.stdout)
+    if app_name not in data.get("apps", {}):
+        raise CliError(f"generated config does not include app {app_name!r}")
+
+
 def render_static_site_file(name: str, domain: str) -> str:
     return (
-        f"# Generated by: mele-app static create {name}\n"
+        f"# Generated by: mele-app create --static {name}\n"
         "{\n"
         f"  domain = {json.dumps(domain, ensure_ascii=False)};\n"
         "}\n"
@@ -981,6 +1243,69 @@ def validate_mele_eval(repo_root: Path) -> None:
     print("MeLE config validation passed")
 
 
+def cmd_app_create(args: argparse.Namespace) -> int:
+    validate_app_slot_name(args.name)
+    repo_root = find_repo_root()
+    app_dir = repo_root / APP_SLOT_DIR
+    if not (repo_root / "configurations/nixos/mele-hub/apps.nix").is_file():
+        raise CliError("app substrate not found; update nixos-config first")
+    app_dir.mkdir(parents=True, exist_ok=True)
+    target = app_dir / f"{args.name}.nix"
+    if target.exists():
+        raise CliError(f"app slot already exists: {target}")
+
+    host_port = args.host_port or next_app_port(repo_root)
+    if host_port in set(existing_app_ports(repo_root)):
+        raise CliError(f"host port already in use: {host_port}")
+
+    domain = args.domain or f"{args.name}.{BASE_DOMAIN}"
+    content = render_app_slot_file(args, host_port, domain)
+    if args.dry_run:
+        print(content, end="")
+        return 0
+
+    target.write_text(content)
+    if not args.no_validate:
+        validate_app_slot_eval(repo_root, args.name)
+    rel_target = target.relative_to(repo_root)
+    print(f"Created {rel_target}")
+    print(f"  app: {args.name}")
+    print(f"  domain: {domain}")
+    print(f"  hostPort: {host_port}")
+    if not args.no_validate:
+        print("Validated generated /etc/mele-apps/config.json")
+    print()
+    print("Next steps:")
+    print(f"  git add {rel_target}")
+    print(f"  git commit -m 'mele: add {args.name} app slot'")
+    print("  devenv -q shell -- mele:activate")
+    print()
+    print("Recommended project initialization:")
+    params = json.dumps({"app-name": args.name}, separators=(",", ":"))
+    print(
+        f"  om init --non-interactive --params '{params}' "
+        f"-o ~/ws/{args.name} {repo_root}#mele-vite-app"
+    )
+    print()
+    print("This single value derives package name, MeLE app name, image name, title,")
+    print("and default API message:")
+    print(f"  app-name: {args.name}")
+    print()
+    print("Fallback without Omnix:")
+    print(f"  nix flake new ~/ws/{args.name} --template {repo_root}#mele-vite-app")
+    print(f"  # then replace example -> {args.name}")
+    print()
+    print("Activation is required for this new app slot. Normal app releases after")
+    print("this onboarding step should use mele:deploy from the app project instead.")
+    return 0
+
+
+def cmd_create(args: argparse.Namespace) -> int:
+    if args.static:
+        return cmd_static_create(args)
+    return cmd_app_create(args)
+
+
 def cmd_static_create(args: argparse.Namespace) -> int:
     validate_static_site_name(args.name)
     repo_root = find_repo_root()
@@ -989,10 +1314,14 @@ def cmd_static_create(args: argparse.Namespace) -> int:
         raise CliError("static-sites substrate not found; update nixos-config first")
     domain = args.domain or f"{args.name}.home.behaghel.org"
     site_path = site_dir / f"{args.name}.nix"
+    content = render_static_site_file(args.name, domain)
     if site_path.exists() and not args.force:
         raise CliError(f"static site already exists: {site_path}; use --force")
+    if args.dry_run:
+        print(content, end="")
+        return 0
     site_dir.mkdir(parents=True, exist_ok=True)
-    site_path.write_text(render_static_site_file(args.name, domain))
+    site_path.write_text(content)
     if not args.no_validate:
         validate_mele_eval(repo_root)
     print(f"created static site: {site_path.relative_to(repo_root)}")
@@ -1063,6 +1392,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
+    create = subparsers.add_parser("create", help="Create dynamic or static host slots")
+    create.add_argument("name")
+    create.add_argument(
+        "--static",
+        action="store_true",
+        help="Create a static site slot instead of a dynamic app slot",
+    )
+    create.add_argument("--domain")
+    create.add_argument("--force", action="store_true", help="Overwrite an existing static site slot")
+    create.add_argument("--host-port", type=int, help="Dynamic app localhost host port")
+    create.add_argument(
+        "--container-port",
+        type=int,
+        default=8080,
+        help="Dynamic app container port, default: 8080",
+    )
+    create.add_argument(
+        "--exposure",
+        choices=("public", "lan"),
+        default="public",
+        help="Dynamic app exposure mode, default: public",
+    )
+    create.add_argument(
+        "--health-path",
+        default="/health",
+        help="Dynamic app health path, default: /health",
+    )
+    create.add_argument(
+        "--no-metrics",
+        action="store_true",
+        help="Disable /metrics scraping for dynamic apps",
+    )
+    create.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the dynamic app slot that would be written",
+    )
+    create.add_argument(
+        "--no-validate",
+        action="store_true",
+        help="Skip MeLE NixOS evaluation after writing the slot file",
+    )
+
     probe_health = subparsers.add_parser("probe-health")
     probe_health.add_argument(
         "--quiet",
@@ -1085,9 +1457,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Skip full MeLE NixOS evaluation after writing the site file",
     )
 
-    for command in ("status", "health", "releases", "contract-check"):
+    for command in ("status", "health", "contract-check"):
         sub = subparsers.add_parser(command)
         sub.add_argument("app")
+
+    releases = subparsers.add_parser("releases")
+    releases.add_argument("app")
+    releases.add_argument("--json", action="store_true")
+    releases.add_argument("--jsonl", action="store_true")
+
+    rollback = subparsers.add_parser("rollback")
+    rollback.add_argument("app")
+    rollback.add_argument("--release")
+    rollback.add_argument("--no-health-check", action="store_true")
+
+    backup_status = subparsers.add_parser("backup-status")
+    backup_status.add_argument("app")
+    backup_status.add_argument("--verify", action="store_true")
+
+    backup_now = subparsers.add_parser("backup-now")
+    backup_now.add_argument("app")
+    backup_now.add_argument("--force", action="store_true")
+
+    restore = subparsers.add_parser("restore")
+    restore.add_argument("app")
+    restore.add_argument("--snapshot", default="latest")
+    restore.add_argument("--scope", choices=("data", "state", "all"), default="data")
+    restore.add_argument("--target", type=Path)
 
     verify_restore = subparsers.add_parser("verify-restore")
     verify_restore.add_argument("app")
@@ -1142,6 +1538,14 @@ def dispatch(app: dict[str, Any], args: argparse.Namespace) -> int:
         return cmd_health(app, args)
     if args.command == "releases":
         return cmd_releases(app, args)
+    if args.command == "rollback":
+        return cmd_rollback(app, args)
+    if args.command == "backup-status":
+        return cmd_backup_status(app, args)
+    if args.command == "backup-now":
+        return cmd_backup_now(app, args)
+    if args.command == "restore":
+        return cmd_restore(app, args)
     if args.command == "contract-check":
         return cmd_contract_check(app, args)
     if args.command == "update-secretspec":
@@ -1159,6 +1563,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
+        if args.command == "create":
+            return cmd_create(args)
         if args.command == "static":
             return dispatch_static(args)
         config = load_config(args.config)

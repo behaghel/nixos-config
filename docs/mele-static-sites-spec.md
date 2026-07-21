@@ -13,8 +13,8 @@ MeLE should make public static website hosting easy to repeat without treating s
 ## Decisions
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| CLI surface | Extend `mele-app` with `static` subcommands | Keeps MeLE operations discoverable through one command. |
-| Creation scope | `mele-app static create <name>` creates host-side per-site Nix files only and prints project template guidance | Host CLI owns host declarations; project creation remains explicit and separate. |
+| CLI surface | Use `mele-app create --static <name>` | Keeps host-slot creation under the same `mele-app create` verb as dynamic apps. |
+| Creation scope | `mele-app create --static <name>` creates host-side per-site Nix files only and prints project template guidance | Host CLI owns host declarations; project creation remains explicit and separate. |
 | Site declaration shape | `configurations/nixos/mele-hub/static-sites/<name>.nix` with raw site attrs | Filename is the site key; files stay tiny and reviewable. |
 | Site discovery | Auto-import `static-sites/*.nix` | Creating a site requires one new file and no import-list edits. |
 | Names | Require lowercase alphanumeric + hyphens | Keeps paths, domains, and deploy scripts predictable. |
@@ -29,13 +29,13 @@ MeLE should make public static website hosting easy to repeat without treating s
 ## Acceptance Criteria
 - [ ] AC-1: Given `static-sites.nix` is enabled, when MeLE config evaluates, then every `configurations/nixos/mele-hub/static-sites/*.nix` file is exposed as a Caddy static file vhost keyed by filename.
 - [ ] AC-2: Given a site file `lleons-18.nix` with `domain = "lleons-18.home.behaghel.org"`, when MeLE config evaluates, then Caddy serves that domain from `/srv/static/lleons-18/current`.
-- [ ] AC-3: Given a valid site name, when `mele-app static create <name> --no-validate` runs inside `nixos-config`, then it creates `configurations/nixos/mele-hub/static-sites/<name>.nix` with a generated header and default domain, and prints the `om init` command for `hugo-ox-static-site`.
-- [ ] AC-4: Given `--domain <domain>`, when `mele-app static create <name> --domain <domain> --no-validate` runs, then the generated file uses the supplied domain.
-- [ ] AC-5: Given an invalid name, when `mele-app static create` runs, then it exits nonzero and does not create a file.
-- [ ] AC-6: Given the site file already exists, when `mele-app static create <name>` runs without `--force`, then it exits nonzero and preserves the file.
-- [ ] AC-7: Given the site file already exists, when `mele-app static create <name> --force --no-validate` runs, then it overwrites the file.
-- [ ] AC-8: Given validation is enabled, when `mele-app static create <name>` succeeds in writing the file, then it runs a full MeLE NixOS eval and reports success or failure.
-- [ ] AC-9: Given the command is run outside `nixos-config`, when `mele-app static create` runs, then it exits nonzero with a helpful repo-root error.
+- [ ] AC-3: Given a valid site name, when `mele-app create --static <name> --no-validate` runs inside `nixos-config`, then it creates `configurations/nixos/mele-hub/static-sites/<name>.nix` with a generated header and default domain, and prints the `om init` command for `hugo-ox-static-site`.
+- [ ] AC-4: Given `--domain <domain>`, when `mele-app create --static <name> --domain <domain> --no-validate` runs, then the generated file uses the supplied domain.
+- [ ] AC-5: Given an invalid name, when `mele-app create --static` runs, then it exits nonzero and does not create a file.
+- [ ] AC-6: Given the site file already exists, when `mele-app create --static <name>` runs without `--force`, then it exits nonzero and preserves the file.
+- [ ] AC-7: Given the site file already exists, when `mele-app create --static <name> --force --no-validate` runs, then it overwrites the file.
+- [ ] AC-8: Given validation is enabled, when `mele-app create --static <name>` succeeds in writing the file, then it runs a full MeLE NixOS eval and reports success or failure.
+- [ ] AC-9: Given the command is run outside `nixos-config`, when `mele-app create --static` runs, then it exits nonzero with a helpful repo-root error.
 - [ ] AC-10: Given a static site is created and MeLE is activated before first deploy, when the domain is loaded, then Caddy serves a temporary `Soon here…` placeholder.
 - [ ] AC-11: Given the static-site docs are read, when a user wants to create and deploy a site, then the guide explains host creation, `hugo-ox-static-site` initialization, manual activation, placeholder validation, release-directory deployment, rollback model, and GitHub Pages backup direction.
 - [ ] AC-12: Given `om init --non-interactive --params '{"site-name":"lleons-18"}' ...#hugo-ox-static-site`, when a project is generated, then the single `site-name` value derives `baseURL`, `[params.mele].site`, and the deploy root.

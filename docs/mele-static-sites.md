@@ -17,7 +17,7 @@ Static sites are intentionally separate from `meleApps`: no container, no servic
 From inside `nixos-config`:
 
 ```bash
-mele-app static create lleons-18
+mele-app create --static lleons-18
 ```
 
 This creates:
@@ -44,7 +44,7 @@ The single `site-name` value derives `baseURL`, `[params.mele].site`, and the Me
 Use a custom domain when needed:
 
 ```bash
-mele-app static create notes --domain notes.behaghel.org
+mele-app create --static notes --domain notes.behaghel.org
 ```
 
 Custom domains affect the host slot. The `hugo-ox-static-site` template currently assumes the standard `<site-name>.home.behaghel.org` convention, so edit `hugo.toml` manually after initialization when using a custom domain.

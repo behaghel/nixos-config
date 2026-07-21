@@ -5,7 +5,7 @@ Creating new personal static websites should be fast, consistent, and compatible
 
 ## Context
 - Existing templates live under `templates/` and are exposed through flake template outputs.
-- The new MeLE static-site host concept serves Caddy `file_server` roots under `/srv/static/<site>/current` and provides `mele-app static create <site>` for host slot creation.
+- The new MeLE static-site host concept serves Caddy `file_server` roots under `/srv/static/<site>/current` and provides `mele-app create --static <site>` for host slot creation.
 - `~/ws/blog.behaghel.org` currently uses:
   - Hugo with `config.toml`;
   - Org sources in `content-org/`;

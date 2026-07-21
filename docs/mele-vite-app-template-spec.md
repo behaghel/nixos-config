@@ -64,6 +64,11 @@ Imported MeLE commands:
 - `mele:status`
 - `mele:health`
 - `mele:logs`
+- `mele:releases`
+- `mele:rollback`
+- `mele:backup-status`
+- `mele:backup-now`
+- `mele:restore`
 
 ## Acceptance Criteria
 - `nix flake new demo --template .#mele-vite-app` creates all required files.

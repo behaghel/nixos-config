@@ -86,5 +86,40 @@ in
     scripts."mele:logs".exec = ''
       ssh "''${MELE_HOST:-${cfg.host}}" "mele-app logs ${cfg.name} --lines ${toString cfg.logLines}"
     '';
+
+    scripts."mele:releases".exec = ''
+      target="''${MELE_HOST:-${cfg.host}}"
+      command="mele-app releases ${cfg.name}"
+      for arg do command="$command $(printf '%q' "$arg")"; done
+      ssh "$target" "$command"
+    '';
+
+    scripts."mele:rollback".exec = ''
+      target="''${MELE_HOST:-${cfg.host}}"
+      command="sudo mele-app rollback ${cfg.name}"
+      for arg do command="$command $(printf '%q' "$arg")"; done
+      ssh "$target" "$command"
+    '';
+
+    scripts."mele:backup-status".exec = ''
+      target="''${MELE_HOST:-${cfg.host}}"
+      command="sudo mele-app backup-status ${cfg.name}"
+      for arg do command="$command $(printf '%q' "$arg")"; done
+      ssh "$target" "$command"
+    '';
+
+    scripts."mele:backup-now".exec = ''
+      target="''${MELE_HOST:-${cfg.host}}"
+      command="sudo mele-app backup-now ${cfg.name}"
+      for arg do command="$command $(printf '%q' "$arg")"; done
+      ssh "$target" "$command"
+    '';
+
+    scripts."mele:restore".exec = ''
+      target="''${MELE_HOST:-${cfg.host}}"
+      command="sudo mele-app restore ${cfg.name}"
+      for arg do command="$command $(printf '%q' "$arg")"; done
+      ssh "$target" "$command"
+    '';
   };
 }

@@ -21,7 +21,9 @@ Open `http://127.0.0.1:8080` after `app:serve`.
 - `app:doctor` — run checks and verify the flake exposes `.#ociImage`.
 - `mele:image` — build the OCI image archive.
 - `mele:deploy` — deploy to the matching MeLE app slot.
-- `mele:status`, `mele:health`, `mele:logs` — inspect the deployed app.
+- `mele:status`, `mele:health`, `mele:logs`, `mele:releases` — inspect the deployed app.
+- `mele:rollback` — roll back to a retained image release.
+- `mele:backup-status`, `mele:backup-now`, `mele:restore` — inspect, trigger, and stage app data backups.
 
 ## MeLE runtime contract
 
@@ -39,7 +41,7 @@ The server:
 Create the host slot in `nixos-config` first:
 
 ```sh
-devenv -q shell -- mele:create-app example
+devenv -q shell -- mele-app create example
 ```
 
 Activate MeLE manually from `nixos-config`, then deploy from this project:

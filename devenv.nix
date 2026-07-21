@@ -96,9 +96,6 @@ in
     ${pkgs.python3}/bin/python3 ./scripts/mele_app_cli.py "$@"
   '';
 
-  scripts."mele:create-app".exec = ''
-    ${pkgs.python3}/bin/python3 ./scripts/mele-app-create.py "$@"
-  '';
 
   scripts."mele:onboard-app".exec = ''
     ${pkgs.python3}/bin/python3 ./scripts/mele-app-onboard.py "$@"

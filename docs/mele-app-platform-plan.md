@@ -24,13 +24,13 @@ explicit user approval before execution.
 | App Unix identity | One Unix user/group per app; `/srv/apps/<app>/data` and `/srv/apps/<app>/state`. |
 | Public edge | Caddy owns public routing/TLS; unknown hosts return safe errors; router/DNS/NAT loopback verified. |
 | Podman runner | Root-managed systemd units run rootless Podman as app users, bind localhost-only host ports, mount `/data`. |
-| CLI read operations | `mele-app status`, `health`, `logs`, `releases`, `contract-check`, and `verify-restore` read `/etc/mele-apps/config.json`. |
+| CLI read operations | `mele-app status`, `health`, `logs`, `releases`, `backup-status`, `contract-check`, and restore helpers read `/etc/mele-apps/config.json`. |
 | Deploy happy path | `mele-app deploy <app> --release <id> -` loads image, tags immutable/current, restarts only that app, records release metadata. |
-| Go blueprint app | `~/ws/mele-home` builds `linux/amd64` OCI image locally, deploys with `mele:deploy`, serves `/health` and `/metrics`. |
-| Generic HTTP metrics | `mele-home` emits `http_requests_total`, `http_request_duration_seconds`, `http_requests_in_flight`, and `app_build_info`. |
+| Reference app template | `mele-vite-app` builds `linux/amd64` OCI images locally, deploys with `mele:deploy`, and serves `/health` and `/metrics`. |
+| Generic HTTP metrics | MeLE apps emit valid Prometheus text with useful app-owned metrics; mature apps should add request rate/error/latency series. |
 | Central app module | External projects import `nixos-config/modules/flake/mele-app` in `devenv.yaml`; no helper file copying. |
-| Onboarding commands | `mele:create-app` creates/stages app slots and reminds about `mele:activate`; `mele:onboard-app` prints app-side devenv snippets. |
-| Onboarding docs | `docs/mele-app-onboarding.md` documents HTTP/runtime/OCI contracts, metrics, Node/PWA guidance, and cross-arch image patterns. |
+| Onboarding commands | `mele-app create` creates/stages app slots and reminds about `mele:activate`; `mele:onboard-app` prints app-side devenv snippets. |
+| Onboarding docs | `docs/mele-app-onboarding.md` documents the copy-paste start-to-live flow, slot model, CLI surface, observability, environment, packaging, deploy/rollback, hardening, and existing-project conversion. |
 | SecretSpec gate | `mele-app update-secretspec <app> -` stores the app contract; deploy validates required keys in `/etc/mele-apps/<app>.env` before image load/tag/restart. |
 | Health-check rollback | Deploy polls configured health after restart and rolls back to the previous release image when health fails. |
 | Release retention | Deploy prunes older immutable app image tags beyond `keepReleases` while preserving current and rollback candidates. |
@@ -40,7 +40,7 @@ explicit user approval before execution.
 | App-level hardening contract | `mele-app contract-check <app>` verifies health/metrics contracts and optional oversized write probes; onboarding docs define in-process safeguards. |
 | Generic Grafana dashboard | `MeLE Apps` dashboard is provisioned with service availability, user-facing request behavior, operational request behavior, rollout/version tables, and observability health sections. |
 | Backup inclusion | App `/srv/apps/<app>/data` and `/srv/apps/<app>/state` are backed up to the separate MeLE apps Restic repository for slots with `backup = true`. |
-| Restore validation | `mele-app verify-restore <app> --target <temp-dir> [--marker data/...|state/...]` restores app data/state non-destructively from the apps repo. |
+| Restore validation | `mele-app restore <app> --scope data|state|all` stages restores under `/srv/restore/mele-apps/...`; `verify-restore` remains available for marker checks. |
 | Backup/restore runbook | `docs/mele-backup-restore.md` documents repositories, helpers, credential files, checks, app restore, and Syncthing restore. |
 | Grafana access | Grafana is bound to `127.0.0.1:3000` and proxied at `grafana.home.behaghel.org` through Caddy basic auth; direct port `3000` is not exposed. |
 | Remote deploy access | MeLE enables Tailscale; app and activation helpers target `hub@mele` so the alias can resolve to the Tailscale IP when remote. |
@@ -50,7 +50,7 @@ explicit user approval before execution.
 | Area | Status |
 |---|---|
 | Slice 20 multi-app hardening pass | Intentionally skipped for now. Existing per-app users, dirs, env files, services, ports, Caddy routes, and metrics labels are considered sufficient unless a concrete isolation issue appears. |
-| Hédonis generic HTTP metrics | Still a good next app-specific improvement: emit the same generic HTTP metrics contract as `mele-home`. |
+| Hédonis generic HTTP metrics | Still a good next app-specific improvement: emit mature request rate/error/latency metrics. |
 | Hédonis production packaging | Hédonis has WIP production server and `.#ociImage`; preferred cross-arch pattern is documented: build portable JS artifacts locally, assemble OCI locally, include `linuxPkgs.nodejs-slim_22`. |
 | Plugin-focused dashboard views | GitHub-style rollout calendars/heatmaps remain deferred until there is a plugin-focused slice. |
 
@@ -90,8 +90,7 @@ explicit user approval before execution.
   manually activate MeLE.
 - Build and deploy app releases from each app repo using the shared `mele.app`
   devenv module and `mele:deploy`; helpers target `hub@mele` by default.
-- Use `mele-app status|health|logs|releases|contract-check|verify-restore` for
-  day-to-day operations.
+- Use `mele-app status|health|logs|releases|rollback|backup-status|backup-now|restore|contract-check` for day-to-day operations and recovery staging.
 - Observe apps in Grafana through:
   - `MeLE Apps`
   - `MeLE Hub Health`

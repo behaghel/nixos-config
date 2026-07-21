@@ -50,11 +50,14 @@
 
     echo "🚀 example MeLE Vite app"
     echo ""
-    echo "🧪 Check:     app:check"
-    echo "🏗️  Build:     app:build"
-    echo "💻 Dev:       app:dev"
-    echo "📦 OCI image: mele:image"
-    echo "🚀 Deploy:    mele:deploy"
+    echo "🧪 Check:      app:check"
+    echo "🏗️  Build:      app:build"
+    echo "💻 Dev:        app:dev"
+    echo "📦 OCI image:  mele:image"
+    echo "🚀 Deploy:     mele:deploy"
+    echo "🩺 Live check: mele:health  |  mele:logs"
+    echo "📜 Releases:   mele:releases  |  mele:rollback"
+    echo "💾 Backups:    mele:backup-status  |  mele:restore"
     echo ""
   '';
 

@@ -52,7 +52,7 @@ the primary MeLE domain.
 
 ## MeLE
 
-Create the host slot from `nixos-config` with `mele-app static create <site>`, then deploy this site's `public/` output to `/srv/static/<site>/current` using:
+Create the host slot from `nixos-config` with `mele-app create --static <site>`, then deploy this site's `public/` output to `/srv/static/<site>/current` using:
 
 ```bash
 site:deploy:mele
