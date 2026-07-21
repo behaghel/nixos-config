@@ -447,6 +447,7 @@ in
         enable = true;
         listenAddress = "127.0.0.1";
         port = 9093;
+        webExternalUrl = "https://alertmanager.home.behaghel.org/";
         configuration = {
           global = {
             smtp_smarthost = "smtp.gmail.com:587";
@@ -512,6 +513,13 @@ in
         import /etc/caddy/grafana-basicauth
       }
       reverse_proxy 127.0.0.1:3000
+    '';
+    caddy.virtualHosts."alertmanager.home.behaghel.org".extraConfig = ''
+      encode zstd gzip
+      basic_auth {
+        import /etc/caddy/grafana-basicauth
+      }
+      reverse_proxy 127.0.0.1:9093
     '';
     syncthing = {
       enable = true;
