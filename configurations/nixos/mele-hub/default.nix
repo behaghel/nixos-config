@@ -5,6 +5,7 @@ let
   me = (import ../../../config.nix).me;
   syncthingDataDir = "/srv/syncthing";
   syncthingConfigDir = "/var/lib/syncthing";
+  transactionalEmail = config.hub.transactionalEmail.smtp2go;
   ccidNoKobil = pkgs.ccid.overrideAttrs (old: {
     # Drop the Kobil mIDentity helper call to avoid failing the udev absolute-path check.
     postInstall = (old.postInstall or "") + ''
@@ -450,11 +451,11 @@ in
         webExternalUrl = "https://alertmanager.home.behaghel.org/";
         configuration = {
           global = {
-            smtp_smarthost = "smtp.gmail.com:587";
-            smtp_from = "behaghel@gmail.com";
+            smtp_smarthost = "${transactionalEmail.host}:${toString transactionalEmail.port}";
+            smtp_from = transactionalEmail.fromAddress;
             smtp_require_tls = true;
-            smtp_auth_username = "behaghel@gmail.com";
-            smtp_auth_password_file = "/etc/alertmanager-smtp-pass";
+            smtp_auth_username = transactionalEmail.username;
+            smtp_auth_password_file = "$CREDENTIALS_DIRECTORY/smtp-pass";
           };
           route = {
             receiver = "email";
@@ -567,6 +568,10 @@ in
   home-manager.users.hub.services.emacs.package = lib.mkForce pkgs.emacs30;
   # Console-friendly pinentry for YubiKey on this headless host.
   home-manager.users.hub.services.gpg-agent.pinentry.package = lib.mkForce pkgs.pinentry-tty;
+
+  systemd.services.alertmanager.serviceConfig.LoadCredential = [
+    "smtp-pass:${toString transactionalEmail.passwordFile}"
+  ];
 
   systemd.tmpfiles.rules = [
     "d ${syncthingDataDir} 0770 syncthing syncthing -"

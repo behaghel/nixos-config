@@ -4,6 +4,7 @@
 {
   imports = [
     flake.inputs.self.nixosModules.common
+    ./smtp2go.nix
   ];
   services.openssh.enable = true;
 
