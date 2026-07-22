@@ -570,6 +570,27 @@ class MeleAppCliTests(unittest.TestCase):
             ensure_runtime.assert_not_called()
             run.assert_not_called()
 
+    def test_deploy_refuses_to_overwrite_current_release(self) -> None:
+        with tempfile.TemporaryDirectory() as raw_tmp:
+            tmp = Path(raw_tmp)
+            state = tmp / "state"
+            state.mkdir()
+            (state / "current").write_text("abc1234\n")
+            config = self.write_config(tmp, state)
+            with mock.patch.object(mele_app_cli.os, "geteuid", return_value=0), \
+                    mock.patch.object(mele_app_cli, "ensure_runtime_dir"), \
+                    mock.patch.object(mele_app_cli, "capture_command") as run:
+                exit_code = mele_app_cli.main([
+                    "--config",
+                    str(config),
+                    "deploy",
+                    "home",
+                    "--release",
+                    "abc1234",
+                ])
+            self.assertEqual(exit_code, 2)
+            run.assert_not_called()
+
     def test_deploy_fails_before_load_when_required_secret_missing(self) -> None:
         with tempfile.TemporaryDirectory() as raw_tmp:
             tmp = Path(raw_tmp)

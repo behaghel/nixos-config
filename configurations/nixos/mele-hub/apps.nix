@@ -13,6 +13,12 @@ let
       "d /srv/apps/${name} 0751 ${user} ${user} -"
       "d /srv/apps/${name}/data 0750 ${user} ${user} -"
       "d /srv/apps/${name}/state 0755 root root -"
+      "d /srv/apps/${name}/.local 0750 ${user} ${user} -"
+      "d /srv/apps/${name}/.config 0750 ${user} ${user} -"
+      "d /srv/apps/${name}/.cache 0750 ${user} ${user} -"
+      "Z /srv/apps/${name}/.local - ${user} ${user} -"
+      "Z /srv/apps/${name}/.config - ${user} ${user} -"
+      "Z /srv/apps/${name}/.cache - ${user} ${user} -"
     ];
 
   appFiles = lib.filterAttrs
@@ -80,6 +86,7 @@ let
       WorkingDirectory = "/srv/apps/${name}";
       RuntimeDirectory = "mele-app-${name}";
       Environment = [
+        "HOME=/srv/apps/${name}"
         "XDG_RUNTIME_DIR=/run/mele-app-${name}"
         "PATH=/run/wrappers/bin:${appRuntimePath}"
       ];

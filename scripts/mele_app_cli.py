@@ -115,6 +115,7 @@ def app_command(app: dict[str, Any], command: Sequence[str]) -> list[str]:
         f"cd {workdir} && "
         "exec env "
         "PATH=/run/wrappers/bin:/run/current-system/sw/bin "
+        f"HOME={workdir} "
         f"XDG_RUNTIME_DIR={runtime_dir} "
         f"{quoted}"
     )
@@ -1091,15 +1092,18 @@ def rollback_after_failed_health(
     previous_release: str | None,
 ) -> int:
     rollback_status = "none"
-    if previous_release is not None:
-        previous_image = f"localhost/{app['name']}:{previous_release}"
+    rollback_release = previous_release
+    if rollback_release == args.release:
+        rollback_release = latest_previous_successful_release(app)
+    if rollback_release is not None:
+        previous_image = f"localhost/{app['name']}:{rollback_release}"
         current_image = f"localhost/{app['name']}:current"
         if app_image_exists(app, previous_image):
             tag_image(app, previous_image, current_image)
             restart_service(app)
             if poll_health(app):
                 rollback_status = "succeeded"
-                current_release_path(app).write_text(previous_release + "\n")
+                current_release_path(app).write_text(rollback_release + "\n")
             else:
                 rollback_status = "failed"
         else:
@@ -1110,7 +1114,7 @@ def rollback_after_failed_health(
         args,
         release_image,
         "failed_health",
-        previous_release,
+        rollback_release,
         rollback_status,
     )
     append_jsonl(release_log_path(app), record)
@@ -1122,7 +1126,7 @@ def rollback_after_failed_health(
         "health": health_metrics(rollback_status == "succeeded"),
         "rollback": {
             "status": rollback_status,
-            "previous_release": previous_release or "",
+            "previous_release": rollback_release or "",
         },
     })
     print(
@@ -1353,6 +1357,11 @@ def cmd_deploy(app: dict[str, Any], args: argparse.Namespace) -> int:
     validate_secret_contract(app)
     ensure_runtime_dir(app)
     previous_release = read_current_release(app)
+    if previous_release == args.release:
+        raise CliError(
+            f"release {args.release} is already current for {app['name']}; "
+            "use a unique release id before redeploying"
+        )
     load = capture_command(app_command(app, ["podman", "load"]), stdin=sys.stdin.buffer)
     load_output = load.stdout + load.stderr
     if load.returncode != 0:

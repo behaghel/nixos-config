@@ -55,6 +55,7 @@ in
       dirty=false
       if ! git diff --quiet --ignore-submodules -- 2>/dev/null || ! git diff --cached --quiet --ignore-submodules -- 2>/dev/null; then
         dirty=true
+        release="$release-dirty-$(date -u +%Y%m%d%H%M%S)"
       fi
       repo="$(git config --get remote.origin.url || true)"
       target="''${MELE_HOST:-${cfg.host}}"
