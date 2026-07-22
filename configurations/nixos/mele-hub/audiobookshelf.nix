@@ -1,4 +1,4 @@
-{ config, lib, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   cfg = config.hub.mele.audiobookshelf;
@@ -54,6 +54,24 @@ in
     };
 
     systemd.services.syncthing.serviceConfig.UMask = lib.mkIf cfg.syncthing.enable "0007";
+
+    systemd.services.audiobookshelf-library-permissions = lib.mkIf cfg.syncthing.enable {
+      description = "Ensure Audiobookshelf can read the Syncthing audiobook library";
+      wantedBy = [ "multi-user.target" ];
+      before = [ "audiobookshelf.service" ];
+      serviceConfig = {
+        Type = "oneshot";
+        RemainAfterExit = true;
+      };
+      script = ''
+        set -euo pipefail
+        ${pkgs.coreutils}/bin/chmod 0770 /srv/syncthing
+        ${pkgs.coreutils}/bin/chmod 2770 ${lib.escapeShellArg cfg.libraryPath}
+        ${pkgs.coreutils}/bin/chgrp -R syncthing ${lib.escapeShellArg cfg.libraryPath}
+        ${pkgs.findutils}/bin/find ${lib.escapeShellArg cfg.libraryPath} -type d -exec ${pkgs.coreutils}/bin/chmod 2770 {} +
+        ${pkgs.findutils}/bin/find ${lib.escapeShellArg cfg.libraryPath} -type f -exec ${pkgs.coreutils}/bin/chmod 0660 {} +
+      '';
+    };
 
     systemd.tmpfiles.rules = lib.mkIf cfg.syncthing.enable [
       "d ${cfg.libraryPath} 2770 syncthing syncthing -"
