@@ -143,17 +143,36 @@ Activate with `devenv --profile backend shell`.
 
 ### Git hooks
 
-Pre-configured hooks (100+ available: ruff, eslint, clippy, prettier, nixfmt, etc.):
+Pre-configured hooks (100+ available: ruff, eslint, clippy, prettier, nixfmt, etc.) are powered by `git-hooks.nix` and require a `devenv.yaml` input:
+
+```yaml
+inputs:
+  git-hooks:
+    url: github:cachix/git-hooks.nix
+```
+
+Then configure hooks in `devenv.nix`:
 
 ```nix
-git-hooks.hooks.prettier.enable = true;
-git-hooks.hooks.custom-lint = {
+git-hooks = {
   enable = true;
-  entry = "./scripts/lint.sh";
-  language = "system";
-  pass_filenames = false;
+  hooks.prettier.enable = true;
+  hooks.custom-lint = {
+    enable = true;
+    entry = "./scripts/lint.sh";
+    language = "system";
+    pass_filenames = false;
+    stages = [ "pre-commit" ];
+  };
 };
 ```
+
+Operational notes:
+- `devenv shell` installs/refreshes `.git/hooks/pre-commit` and generates `.pre-commit-config.yaml` as a symlink into the Nix store.
+- `.pre-commit-config.yaml` is usually ignored, not committed.
+- The generated hook may use `prek` internally even when `pre-commit` is also available; both can be provided by the devenv shell.
+- If `git commit` fails with `config file not found: .pre-commit-config.yaml`, the repo likely has a stale/generated hook but `git-hooks` is not enabled or the shell has not refreshed it. Fix declaratively (`git-hooks.enable`, input), then run/evaluate `devenv shell`; do not work around permanently with `PREK_ALLOW_NO_CONFIG=1`.
+- For project-local aggregate checks, prefer one custom hook with `entry = "parse && checkdoc && load-check"; language = "system"; pass_filenames = false;` over hand-writing `.git/hooks/pre-commit`.
 
 ### Containers
 
