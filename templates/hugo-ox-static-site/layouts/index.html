@@ -1,6 +1,30 @@
 {{ define "main" }}
-<section>
+<section class="home-intro">
   <h1>{{ site.Title }}</h1>
   {{ .Content }}
 </section>
+
+{{ $sections := site.Sections.ByTitle }}
+{{ $rootPages := where site.RegularPages.ByTitle "Section" "" }}
+{{ if or $sections $rootPages }}
+  <section class="content-overview" aria-labelledby="content-overview-title">
+    <h2 id="content-overview-title">Explore</h2>
+    {{ with $sections }}
+      <section class="overview-group" aria-labelledby="sections-title">
+        <h3 id="sections-title">Sections</h3>
+        <div class="card-grid">
+          {{ range . }}{{ partial "page-card.html" . }}{{ end }}
+        </div>
+      </section>
+    {{ end }}
+    {{ with $rootPages }}
+      <section class="overview-group" aria-labelledby="pages-title">
+        <h3 id="pages-title">Pages</h3>
+        <div class="card-grid">
+          {{ range . }}{{ partial "page-card.html" . }}{{ end }}
+        </div>
+      </section>
+    {{ end }}
+  </section>
+{{ end }}
 {{ end }}

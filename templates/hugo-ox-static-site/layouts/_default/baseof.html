@@ -1,11 +1,13 @@
 <!doctype html>
-<html lang="{{ site.Language.Locale | default "en" }}">
+<html lang="{{ site.Language.Lang | default "en" }}">
   {{ partial "head.html" . }}
   <body>
-    <header>
-      <a href="{{ site.Home.RelPermalink }}">{{ site.Title }}</a>
+    <header class="site-header">
+      <a class="site-title" href="{{ site.Home.RelPermalink }}">{{ site.Title }}</a>
+      {{ partial "nav.html" . }}
     </header>
-    <main>
+    <main class="site-main">
+      {{ partial "breadcrumbs.html" . }}
       {{ block "main" . }}{{ end }}
     </main>
     {{ partial "footer.html" . }}

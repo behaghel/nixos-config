@@ -1,0 +1,29 @@
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--font-mono);
+}
+
+pre {
+  margin: 0;
+  overflow-x: auto;
+}
+
+div.highlight pre,
+pre code {
+  line-height: 1.3;
+}
+
+p > code,
+li > code,
+h1 > code,
+h2 > code,
+h3 > code {
+  background-color: var(--color-accent-soft);
+  border-radius: 0.25rem;
+  color: var(--color-text);
+  font-size: 0.85em;
+  padding: 0.1em 0.25em;
+  white-space: nowrap;
+}

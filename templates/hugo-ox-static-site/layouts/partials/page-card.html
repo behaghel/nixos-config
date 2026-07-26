@@ -1,0 +1,11 @@
+<article class="page-card">
+  <h3 class="page-card__title">
+    <a href="{{ .RelPermalink }}">{{ .Title }}</a>
+    {{ if .Draft }}<span class="draft-marker">Draft</span>{{ end }}
+  </h3>
+  {{ with .Description }}
+    <p class="page-card__summary">{{ . }}</p>
+  {{ else }}
+    {{ with .Summary }}<p class="page-card__summary">{{ . | plainify | truncate 180 }}</p>{{ end }}
+  {{ end }}
+</article>

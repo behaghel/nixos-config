@@ -1,6 +1,6 @@
 {{ define "main" }}
 <article>
-  <h1>{{ .Title }}</h1>
+  <h1>{{ .Title }}{{ if .Draft }} <span class="draft-marker">Draft</span>{{ end }}</h1>
   {{ .Content }}
 </article>
 {{ end }}

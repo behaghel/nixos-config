@@ -1,0 +1,66 @@
+.standfirst {
+  color: var(--color-muted);
+  font-size: 1.15rem;
+  line-height: 1.55;
+  margin: 1.5rem 0 2rem;
+}
+
+.epigraph blockquote,
+blockquote.epigraph {
+  background: transparent;
+  border-left: 0;
+  color: var(--color-muted);
+  text-align: right;
+}
+
+.callout,
+.encart {
+  background: var(--color-surface);
+  border: 1px solid var(--color-subtle);
+  border-left: 0.35rem solid var(--color-accent);
+  border-radius: 0.35rem;
+  margin: 1.5rem 0;
+  padding: 1rem;
+}
+
+.callout__title {
+  font-weight: 700;
+  margin-block: 0 0.5rem;
+}
+
+.callout__body > :first-child {
+  margin-top: 0;
+}
+
+.callout__body > :last-child {
+  margin-bottom: 0;
+}
+
+.callout--warning {
+  border-left-color: var(--color-warning);
+}
+
+.two-axis-table td,
+.two-axis-table th {
+  border: 1px solid var(--color-text);
+}
+
+.two-axis-table th,
+.two-axis-table td:first-child {
+  background: var(--color-surface);
+  font-weight: 700;
+}
+
+hr.section-break,
+article hr {
+  border: 0;
+  color: var(--color-muted);
+  margin: 2rem auto;
+  text-align: center;
+}
+
+hr.section-break::after,
+article hr::after {
+  content: "* * *";
+  letter-spacing: 0.35em;
+}

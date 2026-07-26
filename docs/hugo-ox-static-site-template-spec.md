@@ -67,7 +67,13 @@ hugo-ox-static-site/
       head.html
   assets/
     css/
-      main.css
+      main.scss
+      semantic/
+        _tokens.scss
+        _base.scss
+        _images.scss
+        _blocks.scss
+        _code.scss
   static/
     .keep
   .github/

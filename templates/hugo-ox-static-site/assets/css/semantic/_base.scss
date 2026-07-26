@@ -1,0 +1,88 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  color: var(--color-text);
+  font-family: var(--font-body);
+  line-height: 1.6;
+  margin: 0 auto;
+  max-width: var(--measure);
+  padding: 2rem;
+}
+
+header,
+footer {
+  margin: 2rem 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--color-accent);
+  font-family: var(--font-heading);
+  line-height: 1.2;
+}
+
+a {
+  color: var(--color-accent);
+}
+
+blockquote {
+  background: var(--color-surface);
+  border-left: 0.35rem solid var(--color-subtle);
+  font-style: italic;
+  margin: 1.5rem 0;
+  padding: 0.75rem 1rem;
+}
+
+blockquote em {
+  font-style: normal;
+}
+
+table {
+  border-collapse: collapse;
+  border-bottom: 1px solid var(--color-text);
+  border-top: 1px solid var(--color-text);
+  margin-inline: auto;
+}
+
+th {
+  border-bottom: 1px solid var(--color-text);
+}
+
+th,
+td {
+  padding: 0.375rem 0.5rem;
+}
+
+dl {
+  margin: 1.5rem 0;
+}
+
+dt {
+  color: var(--color-accent);
+  font-weight: 700;
+}
+
+dd {
+  margin: 0 0 0.75rem 1.5rem;
+}
+
+ul.task-list {
+  list-style-type: none;
+  padding-inline-start: 1.125rem;
+}
+
+.footnotes {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  padding-top: 2rem;
+}
+
+.underline {
+  text-decoration: underline;
+}

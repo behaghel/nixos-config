@@ -2,6 +2,7 @@
 
 {
   packages = with pkgs; [
+    dart-sass
     gh
     git
     hugo
@@ -15,6 +16,18 @@
   '';
 
   scripts."site:serve".exec = ''
+    set -euo pipefail
+
+    hugo version | grep -q '+extended' || {
+      echo "Hugo Extended is required for SCSS processing." >&2
+      exit 1
+    }
+    command -v dart-sass >/dev/null || {
+      echo "dart-sass is required for modern Sass @use support." >&2
+      echo "Reload direnv or run through: devenv -q shell -- site:serve" >&2
+      exit 1
+    }
+
     hugo server --buildDrafts --disableFastRender --navigateToChanged "$@"
   '';
 
@@ -32,6 +45,15 @@ with open("hugo.toml", "rb") as handle:
 print(data.get("params", {}).get("mele", {}).get("host", "hub@mele"))
 PY
 )
+
+    hugo version | grep -q '+extended' || {
+      echo "Hugo Extended is required for SCSS processing." >&2
+      exit 1
+    }
+    command -v dart-sass >/dev/null || {
+      echo "dart-sass is required for modern Sass @use support." >&2
+      exit 1
+    }
 
     hugo config >/dev/null
     tmp=$(mktemp -d)
@@ -76,6 +98,7 @@ PY
 🌐 Hugo ox-hugo static site
 
 ✍️  Write Org in content-org/ (Emacs + hb-static-site-mode)
+🧭 Emacs: C-c w s sections, C-c w p bundle pages, C-c w P flat pages, C-c w n posts
 📝 Commit generated Markdown in content/
 🏗️  Build:          site:build
 🔎 Check:          MELE_SKIP_SSH_CHECK=1 site:doctor

@@ -1,9 +1,11 @@
 {{ define "main" }}
-<h1>{{ .Title }}</h1>
-{{ .Content }}
-<ul>
-  {{ range .Pages }}
-    <li><a href="{{ .RelPermalink }}">{{ .Title }}</a></li>
+<section class="section-page">
+  <h1>{{ .Title }}</h1>
+  {{ .Content }}
+  {{ with .Pages.ByTitle }}
+    <div class="card-grid">
+      {{ range . }}{{ partial "page-card.html" . }}{{ end }}
+    </div>
   {{ end }}
-</ul>
+</section>
 {{ end }}

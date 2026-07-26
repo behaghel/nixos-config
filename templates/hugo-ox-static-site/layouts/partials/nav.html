@@ -1,0 +1,17 @@
+<nav class="site-nav" aria-label="Main navigation">
+  <a class="site-nav__link{{ if .IsHome }} is-active{{ end }}" href="{{ site.Home.RelPermalink }}">Home</a>
+  {{ with site.Menus.main }}
+    {{ range . }}
+      <a class="site-nav__link" href="{{ .URL }}">{{ .Name }}</a>
+    {{ end }}
+  {{ else }}
+    {{ range site.RegularPages.ByTitle }}
+      {{ if eq .Section "" }}
+        <a class="site-nav__link{{ if eq $.RelPermalink .RelPermalink }} is-active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+      {{ end }}
+    {{ end }}
+    {{ range site.Sections.ByTitle }}
+      <a class="site-nav__link{{ if or (eq $.RelPermalink .RelPermalink) (eq $.Section .Section) }} is-active{{ end }}" href="{{ .RelPermalink }}">{{ .Title }}</a>
+    {{ end }}
+  {{ end }}
+</nav>

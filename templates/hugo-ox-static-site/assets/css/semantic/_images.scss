@@ -1,0 +1,54 @@
+figure {
+  margin: 1.5rem 0;
+}
+
+figure img,
+picture img {
+  height: auto;
+  max-width: 100%;
+}
+
+figcaption,
+.src-block-caption,
+.table-caption {
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  font-style: italic;
+  text-align: center;
+}
+
+figcaption a,
+.src-block-caption a,
+.table-caption a {
+  color: inherit;
+}
+
+.right {
+  text-align: center;
+}
+
+@media screen and (min-width: 500px) {
+  .right {
+    float: right;
+    margin-left: 1.3rem;
+    max-width: min(45%, 24rem);
+  }
+}
+
+.small img,
+img.small {
+  max-width: 250px;
+}
+
+.fullwidth img,
+img.fullwidth {
+  width: 100%;
+}
+
+.centered img,
+.centered picture,
+img.centered,
+picture.centered {
+  display: block;
+  margin-inline: auto;
+}

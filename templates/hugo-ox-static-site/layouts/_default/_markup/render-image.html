@@ -1,0 +1,38 @@
+{{- $destination := .Destination -}}
+{{- $assetPath := strings.TrimPrefix "/" $destination -}}
+{{- $pageResource := or (.Page.Resources.GetMatch $destination) (.Page.Resources.GetMatch $assetPath) -}}
+{{- $globalResource := resources.GetMatch $assetPath -}}
+{{- $resource := or $pageResource $globalResource -}}
+{{- $titleAttrs := "" -}}
+{{- with findRE `{.*}` .Title -}}{{- $titleAttrs = index . 0 -}}{{- end -}}
+{{- $title := strings.TrimSpace (replaceRE `{.*}$` `` .Title) -}}
+{{- $class := "" -}}
+{{- with .Attributes -}}
+  {{- with index . "class" -}}{{- $class = . -}}{{- end -}}
+{{- end -}}
+{{- range findRE `\.[A-Za-z0-9_-]+` $titleAttrs -}}
+  {{- $class = printf "%s %s" $class (strings.TrimPrefix "." .) -}}
+{{- end -}}
+{{- $class = strings.TrimSpace $class -}}
+{{- $responsive := and $resource (in (printf " %s " $class) " responsive ") (eq $resource.MediaType.MainType "image") (ne $resource.MediaType.SubType "svg") -}}
+{{- $alt := .PlainText | safeHTML -}}
+
+{{- if $responsive -}}
+  {{- $tiny := $resource.Resize "500x webp" -}}
+  {{- $small := $resource.Resize "800x webp" -}}
+  {{- $medium := $resource.Resize "1200x webp" -}}
+  {{- $large := $resource.Resize "1500x webp" -}}
+  <a href="{{ $resource.RelPermalink }}">
+    <picture>
+      <source media="(max-width: 376px)" srcset="{{ $tiny.RelPermalink }}">
+      <source media="(max-width: 992px)" srcset="{{ $small.RelPermalink }}">
+      <source media="(max-width: 1400px)" srcset="{{ $medium.RelPermalink }}">
+      <source media="(min-width: 1600px)" srcset="{{ $large.RelPermalink }}">
+      <img src="{{ $resource.RelPermalink }}" alt="{{ $alt }}"{{ with $title }} title="{{ . }}"{{ end }} height="{{ $resource.Height }}" width="{{ $resource.Width }}"{{ with $class }} class="{{ . }}"{{ end }}{{ range $attr, $val := .Attributes }}{{ if ne $attr "class" }} {{ $attr }}="{{ $val }}"{{ end }}{{ end }}>
+    </picture>
+  </a>
+{{- else if $resource -}}
+  <img src="{{ $resource.RelPermalink }}" alt="{{ $alt }}"{{ with $title }} title="{{ . }}"{{ end }}{{ with $class }} class="{{ . }}"{{ end }}{{ range $attr, $val := .Attributes }}{{ if ne $attr "class" }} {{ $attr }}="{{ $val }}"{{ end }}{{ end }}>
+{{- else -}}
+  <img src="{{ $destination | safeURL }}" alt="{{ $alt }}"{{ with $title }} title="{{ . }}"{{ end }}{{ with $class }} class="{{ . }}"{{ end }}{{ range $attr, $val := .Attributes }}{{ if ne $attr "class" }} {{ $attr }}="{{ $val }}"{{ end }}{{ end }}>
+{{- end -}}
