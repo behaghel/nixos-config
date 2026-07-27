@@ -72,9 +72,18 @@ dd {
   margin: 0 0 0.75rem 1.5rem;
 }
 
-ul.task-list {
+ul.task-list,
+ul:has(> li > input[type="checkbox"]) {
   list-style-type: none;
   padding-inline-start: 1.125rem;
+}
+
+li:has(> input[type="checkbox"]) {
+  list-style-type: none;
+}
+
+li > input[type="checkbox"]:first-child {
+  margin-inline: 0.15rem 0.5rem;
 }
 
 .footnotes {
