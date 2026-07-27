@@ -50,6 +50,26 @@ MELE_SKIP_SSH_CHECK=1 site:doctor
 site:serve
 ```
 
+## Analytics
+
+Analytics are opt-in and production-only. The template ships with a
+GoatCounter-compatible partial that renders nothing until enabled in
+`hugo.toml`.
+
+```toml
+[params.analytics]
+enable = true
+provider = "goatcounter"
+
+[params.analytics.goatcounter]
+code = "example"
+domain = "example.goatcounter.com"
+script = "https://gc.zgo.at/count.js"
+```
+
+When enabled, the Hugo build fails loudly if the provider or GoatCounter domain
+is missing. Local `hugo server` previews do not emit the analytics script.
+
 ## GitHub Pages backup
 
 Authenticate once with `gh auth login`, then create/push the repository and wait

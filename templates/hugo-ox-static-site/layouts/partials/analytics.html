@@ -1,3 +1,24 @@
-{{ if site.Params.analytics.enable }}
-  {{/* Add site-specific analytics here. */}}
+{{ $analytics := site.Params.analytics }}
+{{ if and $analytics.enable hugo.IsProduction }}
+  {{ $provider := $analytics.provider | default "" }}
+  {{ if eq $provider "goatcounter" }}
+    {{ $goatcounter := $analytics.goatcounter }}
+    {{ $code := $goatcounter.code | default "" }}
+    {{ $domain := $goatcounter.domain | default "" }}
+    {{ $script := $goatcounter.script | default "https://gc.zgo.at/count.js" }}
+    {{ if and (not $domain) $code }}
+      {{ $domain = printf "%s.goatcounter.com" $code }}
+    {{ end }}
+    {{ if not $domain }}
+      {{ errorf "analytics: GoatCounter analytics is enabled but params.analytics.goatcounter.domain or code is missing" }}
+    {{ end }}
+    {{ if not $script }}
+      {{ errorf "analytics: GoatCounter analytics is enabled but params.analytics.goatcounter.script is missing" }}
+    {{ end }}
+    <script data-goatcounter="https://{{ $domain }}/count" async src="{{ $script }}"></script>
+  {{ else if $provider }}
+    {{ errorf "analytics: unsupported provider %q" $provider }}
+  {{ else }}
+    {{ errorf "analytics: params.analytics.provider is required when analytics are enabled" }}
+  {{ end }}
 {{ end }}
