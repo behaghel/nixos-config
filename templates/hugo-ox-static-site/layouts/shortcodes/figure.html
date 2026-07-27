@@ -1,5 +1,5 @@
 {{- $src := .Get "src" -}}
-{{- $assetPath := strings.TrimPrefix "/" $src -}}
+{{- $assetPath := strings.TrimPrefix "./" (strings.TrimPrefix "/" $src) -}}
 {{- $resource := or (.Page.Resources.GetMatch $src) (.Page.Resources.GetMatch $assetPath) (resources.GetMatch $assetPath) -}}
 {{- $class := .Get "class" | default "" -}}
 {{- $responsive := and $resource (in (printf " %s " $class) " responsive ") (eq $resource.MediaType.MainType "image") (ne $resource.MediaType.SubType "svg") -}}

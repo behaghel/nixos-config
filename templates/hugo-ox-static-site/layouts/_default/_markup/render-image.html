@@ -1,5 +1,5 @@
 {{- $destination := .Destination -}}
-{{- $assetPath := strings.TrimPrefix "/" $destination -}}
+{{- $assetPath := strings.TrimPrefix "./" (strings.TrimPrefix "/" $destination) -}}
 {{- $pageResource := or (.Page.Resources.GetMatch $destination) (.Page.Resources.GetMatch $assetPath) -}}
 {{- $globalResource := resources.GetMatch $assetPath -}}
 {{- $resource := or $pageResource $globalResource -}}
