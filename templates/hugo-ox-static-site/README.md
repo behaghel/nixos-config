@@ -95,11 +95,11 @@ the primary MeLE domain.
 Create the host slot from `nixos-config` with `mele-app create --static <site>`, then deploy this site's `public/` output to `/srv/static/<site>/current` using:
 
 ```bash
-site:deploy:mele
+mele:deploy
 ```
 
 Rollback to a known release:
 
 ```bash
-site:rollback:mele --release <release-id>
+mele:rollback --release <release-id>
 ```

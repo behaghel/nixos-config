@@ -99,11 +99,11 @@ PY
     echo "site doctor passed"
   '';
 
-  scripts."site:deploy:mele".exec = ''
+  scripts."mele:deploy".exec = ''
     python3 scripts/site.py deploy-mele "$@"
   '';
 
-  scripts."site:rollback:mele".exec = ''
+  scripts."mele:rollback".exec = ''
     python3 scripts/site.py rollback-mele "$@"
   '';
 
@@ -121,8 +121,8 @@ PY
 📝 Commit generated Markdown in content/
 🏗️  Build:          site:build
 🔎 Check:          MELE_SKIP_SSH_CHECK=1 site:doctor
-🚀 Deploy to MeLE: site:deploy:mele
-↩️  Roll back:      site:rollback:mele --release <id>
+🚀 Deploy to MeLE: mele:deploy
+↩️  Roll back:      mele:rollback --release <id>
 🐙 GitHub Pages:  github:setup
 
 Edit hugo.toml for title, baseURL, and [params.mele].
@@ -133,7 +133,7 @@ EOF
   tasks."site:serve".exec = "site:serve";
   tasks."site:export-org".exec = "site:export-org";
   tasks."site:doctor".exec = "site:doctor";
-  tasks."site:deploy:mele".exec = "site:deploy:mele";
-  tasks."site:rollback:mele".exec = "site:rollback:mele";
+  tasks."mele:deploy".exec = "mele:deploy";
+  tasks."mele:rollback".exec = "mele:rollback";
   tasks."github:setup".exec = "github:setup";
 }
