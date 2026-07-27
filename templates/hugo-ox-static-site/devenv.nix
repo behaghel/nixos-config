@@ -31,6 +31,24 @@
     hugo server --buildDrafts --disableFastRender --navigateToChanged "$@"
   '';
 
+  scripts."site:export-org".exec = ''
+    set -euo pipefail
+
+    command -v emacs >/dev/null || {
+      echo "emacs is required for Org export." >&2
+      exit 1
+    }
+    test -d content-org || { echo "missing content-org/" >&2; exit 1; }
+
+    emacs --batch -Q \
+      -L "$HOME/.emacs.d/packages/hb-static-site" \
+      -L "$HOME/.emacs.d/straight/repos/ox-hugo" \
+      -L "$HOME/.emacs.d/straight/repos/tomelr" \
+      -L "$HOME/.emacs.d/straight/repos/htmlize" \
+      -l hb-static-site \
+      --eval '(progn (find-file "content-org/pages/_index.org") (hb-static-site-export-all))'
+  '';
+
   scripts."site:doctor".exec = ''
     set -euo pipefail
 
@@ -99,6 +117,7 @@ PY
 
 ✍️  Write Org in content-org/ (Emacs + hb-static-site-mode)
 🧭 Emacs: C-c w s sections, C-c w p bundle pages, C-c w P flat pages, C-c w n posts
+📝 Export Org:      site:export-org
 📝 Commit generated Markdown in content/
 🏗️  Build:          site:build
 🔎 Check:          MELE_SKIP_SSH_CHECK=1 site:doctor
@@ -112,6 +131,7 @@ EOF
 
   tasks."site:build".exec = "site:build";
   tasks."site:serve".exec = "site:serve";
+  tasks."site:export-org".exec = "site:export-org";
   tasks."site:doctor".exec = "site:doctor";
   tasks."site:deploy:mele".exec = "site:deploy:mele";
   tasks."site:rollback:mele".exec = "site:rollback:mele";
