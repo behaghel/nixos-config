@@ -46,7 +46,7 @@
       -L "$HOME/.emacs.d/straight/repos/tomelr" \
       -L "$HOME/.emacs.d/straight/repos/htmlize" \
       -l hb-static-site \
-      --eval '(progn (find-file "content-org/pages/_index.org") (hb-static-site-export-all))'
+      --eval '(progn (setq org-hugo-base-dir ".") (find-file "content-org/pages/_index.org") (hb-static-site-export-all))'
   '';
 
   scripts."site:doctor".exec = ''
