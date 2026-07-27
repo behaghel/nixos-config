@@ -6,6 +6,7 @@ enableRobotsTXT = true
 
 [params]
 description = "A personal static site."
+copyright = ""
 
 [params.mele]
 site = "example"
