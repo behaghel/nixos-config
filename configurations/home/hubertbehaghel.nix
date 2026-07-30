@@ -1,9 +1,9 @@
-{ flake, pkgs, lib, osConfig ? null, ... }:
+{ flake, pkgs, lib, ... }:
 let
   inherit (flake) inputs;
   inherit (inputs) self;
   isLinux = pkgs.stdenv.isLinux;
-  hostName = if osConfig == null then null else osConfig.networking.hostName or null;
+  homeHost = "F2400216";
 in
 {
   imports =
@@ -14,7 +14,7 @@ in
       self.homeModules.texlive
       self.homeModules.password-store
       self.homeModules.linux-only
-    ] ++ lib.optionals (hostName == "F2400216") [
+    ] ++ lib.optionals (homeHost == "F2400216") [
       ./hubertbehaghel/F2400216.nix
     ];
   programs.gpg.useNixGPG = true;
