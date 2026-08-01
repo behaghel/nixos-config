@@ -76,11 +76,11 @@ dt::before {
 
 dt::after {
   color: var(--color-text);
-  content: ":";
+  content: ": ";
 }
 
 html[lang="fr"] dt::after {
-  content: " :";
+  content: " : ";
 }
 
 dd {
