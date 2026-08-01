@@ -60,23 +60,18 @@ td {
 }
 
 dl {
-  column-gap: 0.35rem;
-  display: grid;
-  grid-template-columns: max-content 1fr;
   margin: 1.5rem 0;
-  row-gap: 0.5rem;
 }
 
 dt {
   color: var(--color-accent);
-  display: flex;
+  display: inline;
   font-weight: 700;
-  gap: 0.35rem;
 }
 
 dt::before {
   color: var(--color-text);
-  content: "•";
+  content: "• ";
 }
 
 dt::after {
@@ -84,16 +79,24 @@ dt::after {
   content: ":";
 }
 
+html[lang="fr"] dt::after {
+  content: " :";
+}
+
 dd {
+  display: inline;
   margin: 0;
 }
 
-dd > :first-child {
-  margin-top: 0;
+dd::after {
+  content: "";
+  display: block;
+  margin-bottom: 0.5rem;
 }
 
-dd > :last-child {
-  margin-bottom: 0;
+dd > p {
+  display: inline;
+  margin: 0;
 }
 
 ul.task-list,
