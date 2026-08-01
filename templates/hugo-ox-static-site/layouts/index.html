@@ -1,6 +1,6 @@
 {{ define "main" }}
 <section class="home-intro">
-  <h1>{{ site.Title }}</h1>
+  <h1>{{ partial "site-title.html" . }}</h1>
   {{ .Content }}
 </section>
 

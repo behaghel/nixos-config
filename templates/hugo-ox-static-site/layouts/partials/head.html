@@ -2,7 +2,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="description" content="{{ site.Params.description }}">
-  <title>{{ if .IsHome }}{{ site.Title }}{{ else }}{{ .Title }} | {{ site.Title }}{{ end }}</title>
+  {{ $siteTitle := partial "site-title.html" . }}
+  <title>{{ if .IsHome }}{{ $siteTitle }}{{ else }}{{ .Title }} | {{ $siteTitle }}{{ end }}</title>
   {{ with resources.Get "css/main.scss" | css.Sass (dict "transpiler" "dartsass") | minify | fingerprint }}
     <link rel="stylesheet" href="{{ .RelPermalink }}" integrity="{{ .Data.Integrity }}">
   {{ end }}
