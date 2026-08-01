@@ -60,16 +60,40 @@ td {
 }
 
 dl {
+  column-gap: 0.35rem;
+  display: grid;
+  grid-template-columns: max-content 1fr;
   margin: 1.5rem 0;
+  row-gap: 0.5rem;
 }
 
 dt {
   color: var(--color-accent);
+  display: flex;
   font-weight: 700;
+  gap: 0.35rem;
+}
+
+dt::before {
+  color: var(--color-text);
+  content: "•";
+}
+
+dt::after {
+  color: var(--color-text);
+  content: ":";
 }
 
 dd {
-  margin: 0 0 0.75rem 1.5rem;
+  margin: 0;
+}
+
+dd > :first-child {
+  margin-top: 0;
+}
+
+dd > :last-child {
+  margin-bottom: 0;
 }
 
 ul.task-list,
