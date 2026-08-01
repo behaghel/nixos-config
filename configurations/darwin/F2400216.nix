@@ -22,12 +22,14 @@ in
   myusers = [ "hubertbehaghel" ];
 
   environment.systemPackages = [
+    pkgs.graphviz
     pkgs.jdk21_headless
     pkgs.qemu
   ];
 
-  # MeLE's Tailscale IPv4 so `hub@mele` works both at home and away from the LAN.
-  hub.localNetwork.entries."100.115.20.65" = [ "mele" ];
+  # Resolve MeLE from Tailscale during activation so `hub@mele` follows the
+  # tailnet node instead of a manually maintained IP address.
+  hub.localNetwork.tailscaleAliases.mele = "mele-hub";
 
   hub.darwin.openSourceTailscale.enable = true;
 

@@ -187,20 +187,13 @@
       export DEVENV_TUI="''${DEVENV_TUI:-false}"
 
       resolve_default_assistant() {
-        opencode_path="$(command -v opencode 2>/dev/null || true)"
-        if [ -n "$opencode_path" ] && [ -x "$opencode_path" ]; then
-          printf '%s\n' "$opencode_path"
+        pi_path="$(command -v pi 2>/dev/null || true)"
+        if [ -n "$pi_path" ] && [ -x "$pi_path" ]; then
+          printf '%s\n' "$pi_path"
           return 0
         fi
 
-        for candidate in /opt/homebrew/bin/opencode /usr/local/bin/opencode; do
-          if [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-          fi
-        done
-
-        printf '%s\n' "opencode"
+        printf '%s\n' "pi"
       }
 
       if [ "$#" -eq 0 ]; then
@@ -242,151 +235,144 @@
   home.file.".local/bin/workon" = {
     executable = true;
     text = ''
-      #!/usr/bin/env sh
-      # workon: ensure a session, and on each call create a new two-pane window
-      # Usage: workon [-a|--assistant CMD] [dir] [session-name] [window-name]
-      # Be POSIX-sh friendly; enable pipefail only when supported (bash/zsh)
-      set -eu
-      if [ "''${BASH-}''${ZSH_VERSION-}" ]; then
-        set -o pipefail 2>/dev/null || true
-      fi
+            #!/usr/bin/env sh
+            # workon: ensure a session, and on each call create a new two-pane window
+            # Usage: workon [-a|--assistant CMD] [dir] [session-name] [window-name]
+            # Be POSIX-sh friendly; enable pipefail only when supported (bash/zsh)
+            set -eu
+            if [ "''${BASH-}''${ZSH_VERSION-}" ]; then
+              set -o pipefail 2>/dev/null || true
+            fi
 
-      usage() {
-        cat <<EOF
-Usage: workon [-a|--assistant CMD] [dir] [session-name] [window-name]
+            usage() {
+              cat <<EOF
+      Usage: workon [-a|--assistant CMD] [dir] [session-name] [window-name]
 
-Options:
-  -a, --assistant CMD   One-off assistant command to run in left pane
-  -h, --help            Show this help and exit
+      Options:
+        -a, --assistant CMD   One-off assistant command to run in left pane
+        -h, --help            Show this help and exit
 
-Resolution order for assistant command:
-  1) CLI flag -a/--assistant
-  2) Env var ASSIST_CMD
-  3) Project file .workon-assistant (plain command, first non-empty non-comment line)
-  4) Project file .workonrc (ASSIST_CMD=...)
-  5) Default: opencode
+      Resolution order for assistant command:
+        1) CLI flag -a/--assistant
+        2) Env var ASSIST_CMD
+        3) Project file .workon-assistant (plain command, first non-empty non-comment line)
+        4) Project file .workonrc (ASSIST_CMD=...)
+        5) Default: pi
 
-By default, assistant commands run via a completion wrapper that sends a
-desktop notification + bell when the process exits.
-Set WORKON_NOTIFY_ON_EXIT=0 to disable this behavior.
-EOF
-      }
+      By default, assistant commands run via a completion wrapper that sends a
+      desktop notification + bell when the process exits.
+      Set WORKON_NOTIFY_ON_EXIT=0 to disable this behavior.
+      EOF
+            }
 
-      # Parse options
-      assistant_override=""
-      while [ $# -gt 0 ]; do
-        case "$1" in
-          -a|--assistant)
-            if [ $# -lt 2 ]; then echo "Missing value for $1" >&2; exit 2; fi
-            assistant_override="$2"; shift 2 ;;
-          -h|--help)
-            usage; exit 0 ;;
-          --)
-            shift; break ;;
-          -*)
-            echo "Unknown option: $1" >&2; usage; exit 2 ;;
-          *)
-            break ;;
-        esac
-      done
+            # Parse options
+            assistant_override=""
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                -a|--assistant)
+                  if [ $# -lt 2 ]; then echo "Missing value for $1" >&2; exit 2; fi
+                  assistant_override="$2"; shift 2 ;;
+                -h|--help)
+                  usage; exit 0 ;;
+                --)
+                  shift; break ;;
+                -*)
+                  echo "Unknown option: $1" >&2; usage; exit 2 ;;
+                *)
+                  break ;;
+              esac
+            done
 
-      dir="''${1:-$PWD}"
-      name="''${2:-$(basename "$dir")}"
-      wname="''${3:-$(basename "$dir")}"
+            dir="''${1:-$PWD}"
+            name="''${2:-$(basename "$dir")}"
+            wname="''${3:-$(basename "$dir")}"
 
-      # Discover assistant command from project files up the directory tree
-      discover_assistant() {
-        d="$1"
-        while true; do
-          if [ -f "$d/.workon-assistant" ]; then
-            # First non-empty, non-comment line is the command
-            sed -E '/^[[:space:]]*#/d; /^[[:space:]]*$/d; q' "$d/.workon-assistant"
-            return 0
-          fi
-          if [ -f "$d/.workonrc" ]; then
-            # Extract ASSIST_CMD=... (strip surrounding quotes and whitespace)
-            awk -F= '/^ASSIST_CMD[[:space:]]*=/ {val=$2; gsub(/^[ \t"\047]+|[ \t"\047]+$/, "", val); print val; exit}' "$d/.workonrc"
-            return 0
-          fi
-          if [ "$d" = "/" ] || [ -z "$d" ]; then
-            break
-          fi
-          parent="$(dirname "$d")"
-          if [ "$parent" = "$d" ]; then
-            break
-          fi
-          d="$parent"
-        done
-        return 0
-      }
+            # Discover assistant command from project files up the directory tree
+            discover_assistant() {
+              d="$1"
+              while true; do
+                if [ -f "$d/.workon-assistant" ]; then
+                  # First non-empty, non-comment line is the command
+                  sed -E '/^[[:space:]]*#/d; /^[[:space:]]*$/d; q' "$d/.workon-assistant"
+                  return 0
+                fi
+                if [ -f "$d/.workonrc" ]; then
+                  # Extract ASSIST_CMD=... (strip surrounding quotes and whitespace)
+                  awk -F= '/^ASSIST_CMD[[:space:]]*=/ {val=$2; gsub(/^[ \t"\047]+|[ \t"\047]+$/, "", val); print val; exit}' "$d/.workonrc"
+                  return 0
+                fi
+                if [ "$d" = "/" ] || [ -z "$d" ]; then
+                  break
+                fi
+                parent="$(dirname "$d")"
+                if [ "$parent" = "$d" ]; then
+                  break
+                fi
+                d="$parent"
+              done
+              return 0
+            }
 
-      resolve_default_assistant() {
-        opencode_path="$(command -v opencode 2>/dev/null || true)"
-        if [ -n "$opencode_path" ] && [ -x "$opencode_path" ]; then
-          printf '%s\n' "$opencode_path"
-          return 0
-        fi
+            resolve_default_assistant() {
+              pi_path="$(command -v pi 2>/dev/null || true)"
+              if [ -n "$pi_path" ] && [ -x "$pi_path" ]; then
+                printf '%s\n' "$pi_path"
+                return 0
+              fi
 
-        for candidate in /opt/homebrew/bin/opencode /usr/local/bin/opencode; do
-          if [ -x "$candidate" ]; then
-            printf '%s\n' "$candidate"
-            return 0
-          fi
-        done
+              printf '%s\n' "pi"
+            }
 
-        printf '%s\n' "opencode"
-      }
+            assist="''${assistant_override-}"
+            if [ -z "''${assist-}" ]; then
+              assist="''${ASSIST_CMD-}"
+            fi
+            if [ -z "''${assist-}" ]; then
+              assist="$(discover_assistant "$dir" | head -n1)"
+            fi
+            if [ -z "''${assist-}" ]; then
+              assist="$(resolve_default_assistant)"
+            fi
 
-      assist="''${assistant_override-}"
-      if [ -z "''${assist-}" ]; then
-        assist="''${ASSIST_CMD-}"
-      fi
-      if [ -z "''${assist-}" ]; then
-        assist="$(discover_assistant "$dir" | head -n1)"
-      fi
-      if [ -z "''${assist-}" ]; then
-        assist="$(resolve_default_assistant)"
-      fi
+            launch_cmd="$assist"
+            if [ "''${WORKON_NOTIFY_ON_EXIT:-1}" = "1" ]; then
+              launch_cmd="$HOME/.local/bin/workon-assistant \"$assist\""
+            fi
 
-      launch_cmd="$assist"
-      if [ "''${WORKON_NOTIFY_ON_EXIT:-1}" = "1" ]; then
-        launch_cmd="$HOME/.local/bin/workon-assistant \"$assist\""
-      fi
+            user_shell="''${SHELL:-/bin/zsh}"
 
-      user_shell="''${SHELL:-/bin/zsh}"
+            if [ "''${WORKON_DEBUG-}" = "1" ]; then
+              echo "workon: dir=$dir name=$name wname=$wname assist=$assist launch=$launch_cmd" >&2
+            fi
 
-      if [ "''${WORKON_DEBUG-}" = "1" ]; then
-        echo "workon: dir=$dir name=$name wname=$wname assist=$assist launch=$launch_cmd" >&2
-      fi
+            if command -v tmux >/dev/null 2>&1; then
+              tmux start-server >/dev/null 2>&1 || true
+              tmux set-environment -g PATH "$PATH" >/dev/null 2>&1 || true
+            fi
 
-      if command -v tmux >/dev/null 2>&1; then
-        tmux start-server >/dev/null 2>&1 || true
-        tmux set-environment -g PATH "$PATH" >/dev/null 2>&1 || true
-      fi
-
-      if tmux has-session -t "$name" 2>/dev/null; then
-        # Create a new window in the existing session
-        idx="$(tmux new-window -P -F '#I' -t "$name" -c "$dir" -n "$wname")"
-        # Layout: assistant (left) + shell (right)
-        pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:$idx" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
-        tmux select-pane -t "$pane"
-        # Focus the new window
-        tmux select-window -t "$name:$idx"
-        if [ -z "''${TMUX-}" ]; then
-          tmux attach -t "$name"
-        fi
-      else
-        # Create session and first window
-        tmux new-session -d -s "$name" -c "$dir" -n "$wname"
-        pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:1" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
-        tmux select-pane -t "$pane"
-        tmux select-window -t "$name:1"
-        if [ -n "''${TMUX-}" ]; then
-          tmux switch-client -t "$name"
-        else
-          tmux attach -t "$name"
-        fi
-      fi
+            if tmux has-session -t "$name" 2>/dev/null; then
+              # Create a new window in the existing session
+              idx="$(tmux new-window -P -F '#I' -t "$name" -c "$dir" -n "$wname")"
+              # Layout: assistant (left) + shell (right)
+              pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:$idx" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
+              tmux select-pane -t "$pane"
+              # Focus the new window
+              tmux select-window -t "$name:$idx"
+              if [ -z "''${TMUX-}" ]; then
+                tmux attach -t "$name"
+              fi
+            else
+              # Create session and first window
+              tmux new-session -d -s "$name" -c "$dir" -n "$wname"
+              pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:1" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
+              tmux select-pane -t "$pane"
+              tmux select-window -t "$name:1"
+              if [ -n "''${TMUX-}" ]; then
+                tmux switch-client -t "$name"
+              else
+                tmux attach -t "$name"
+              fi
+            fi
     '';
   };
 }

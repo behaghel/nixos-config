@@ -26,26 +26,12 @@ let
     font-awesome
   ];
 
-  nameOf = p: (p.pname or (lib.getName p));
-
-  linkFor = p:
-    let shareFonts = "${p}/share/fonts"; in
-    lib.optionalAttrs (builtins.pathExists shareFonts) {
-      "Library/Fonts/Nix/${nameOf p}" = {
-        source = shareFonts;
-        recursive = true;
-      };
-    };
-
-  fontLinks = lib.mkMerge (map linkFor fontsPkgs);
 in
 {
   config = lib.mkIf isDarwin {
-    # Ensure the font packages are present in the profile so sources exist.
+    # Keep font packages in the profile without exploding each font file into a
+    # Home Manager link. Recursive links under ~/Library/Fonts made activation
+    # spend minutes in checkLinkTargets/linkGeneration/cleanOldGen.
     home.packages = fontsPkgs;
-
-    # Declaratively expose their font directories to macOS by symlinking
-    # into ~/Library/Fonts/Nix/<pkg>.
-    home.file = fontLinks;
   };
 }

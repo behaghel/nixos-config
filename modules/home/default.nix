@@ -13,7 +13,6 @@
     ./ghostty
     ./ssh
     ./nix.nix
-    ./opencode
     ./pi
     ./tmux
     ./darwin-only.nix

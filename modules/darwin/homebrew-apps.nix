@@ -14,8 +14,8 @@ let
     "mpv"
     "utm"
   ];
-  defaultBrews = [ "sst/tap/opencode" ];
-  defaultTaps = [ "sst/tap" ];
+  defaultBrews = [ ];
+  defaultTaps = [ ];
 in
 {
   options.hub.darwin.apps = {
