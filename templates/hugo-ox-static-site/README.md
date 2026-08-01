@@ -46,6 +46,7 @@ as `standfirst`, `epigraph`, `callout`, legacy `encart`, and `two-axis-table`.
 
 ```bash
 site:build
+site:check-links
 MELE_SKIP_SSH_CHECK=1 site:doctor
 site:serve
 ```

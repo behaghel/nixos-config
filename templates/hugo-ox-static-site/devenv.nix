@@ -1,4 +1,4 @@
-{ pkgs, ... }:
+{ pkgs, lib, inputs, ... }:
 
 {
   packages = with pkgs; [
@@ -29,6 +29,15 @@
     }
 
     hugo server --buildDrafts --disableFastRender --navigateToChanged "$@"
+  '';
+
+  scripts."site:check-links".exec = ''
+    set -euo pipefail
+
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    hugo --gc --minify --destination "$tmp"
+    python3 scripts/check_internal_links.py "$tmp"
   '';
 
   scripts."site:export-org".exec = ''
@@ -121,6 +130,7 @@ PY
 📝 Commit generated Markdown in content/
 🏗️  Build:          site:build
 🔎 Check:          MELE_SKIP_SSH_CHECK=1 site:doctor
+🔗 Links:          site:check-links
 🚀 Deploy to MeLE: mele:deploy
 ↩️  Roll back:      mele:rollback --release <id>
 🐙 GitHub Pages:  github:setup
@@ -131,9 +141,40 @@ EOF
 
   tasks."site:build".exec = "site:build";
   tasks."site:serve".exec = "site:serve";
+  tasks."site:check-links".exec = "site:check-links";
   tasks."site:export-org".exec = "site:export-org";
   tasks."site:doctor".exec = "site:doctor";
   tasks."mele:deploy".exec = "mele:deploy";
   tasks."mele:rollback".exec = "mele:rollback";
   tasks."github:setup".exec = "github:setup";
+
+  git-hooks.hooks.site-check-links = {
+    enable = true;
+    name = "Site internal links";
+    entry = "devenv -q shell -- site:check-links";
+    language = "system";
+    pass_filenames = false;
+  };
+
+  # Agent marketplace: explicit plugin opt-in via bundles.
+  # See marketplace/README.md for per-plugin and select usage.
+  claude.code = let
+    mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+    bundle = mp.bundles.total-spec;
+  in {
+    enable = true;
+    commands = bundle.commands;
+    hooks = mp.hooks;
+    mcpServers.devenv = mp.mcpServers.devenv;
+  };
+
+  opencode = let
+    mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
+    bundle = mp.bundles.total-spec;
+  in {
+    enable = true;
+    skills = mp.skills // bundle.skills;
+    commands = bundle.commands;
+    agents = bundle.agents;
+  };
 }

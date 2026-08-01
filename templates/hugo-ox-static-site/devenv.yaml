@@ -1,3 +1,13 @@
 inputs:
   nixpkgs:
     url: github:cachix/devenv-nixpkgs/rolling
+  git-hooks:
+    url: github:cachix/git-hooks.nix
+    inputs:
+      nixpkgs:
+        follows: nixpkgs
+  pre-commit-hooks:
+    follows: git-hooks
+  agent-marketplace:
+    url: github:behaghel/nixos-config
+    flake: false
