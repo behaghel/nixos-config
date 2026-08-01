@@ -1,0 +1,38 @@
+{{- $type := .Get "type" | default "note" -}}
+{{- $title := .Get "title" -}}
+{{- $src := or (.Get "image") (.Get "src") "" -}}
+{{- $caption := .Get "caption" -}}
+{{- $alt := .Get "alt" | default ($caption | markdownify | plainify) -}}
+{{- $class := .Get "class" | default "responsive" -}}
+{{- $imageSide := or (.Get "imageSide") (.Get "image-side") "right" -}}
+{{- $assetPath := strings.TrimPrefix "./" (strings.TrimPrefix "/" $src) -}}
+{{- $resource := or (.Page.Resources.GetMatch $src) (.Page.Resources.GetMatch $assetPath) (resources.GetMatch $assetPath) -}}
+{{- $responsive := and $resource (in (printf " %s " $class) " responsive ") (eq $resource.MediaType.MainType "image") (ne $resource.MediaType.SubType "svg") -}}
+<aside class="media-callout callout callout--{{ $type }} media-callout--image-{{ $imageSide }}">
+  <div class="media-callout__body callout__body">
+    {{- with $title }}<p class="callout__title">{{ . }}</p>{{ end -}}
+    {{ .Inner | markdownify }}
+  </div>
+  {{- with $src }}
+    <figure class="media-callout__figure {{ $class }}">
+      {{- if $responsive -}}
+        {{- $tiny := $resource.Resize "500x webp" -}}
+        {{- $small := $resource.Resize "800x webp" -}}
+        {{- $medium := $resource.Resize "1200x webp" -}}
+        {{- $large := $resource.Resize "1500x webp" -}}
+        <picture>
+          <source media="(max-width: 376px)" srcset="{{ $tiny.RelPermalink }}">
+          <source media="(max-width: 992px)" srcset="{{ $small.RelPermalink }}">
+          <source media="(max-width: 1400px)" srcset="{{ $medium.RelPermalink }}">
+          <source media="(min-width: 1600px)" srcset="{{ $large.RelPermalink }}">
+          <img src="{{ $resource.RelPermalink }}" alt="{{ $alt }}" height="{{ $resource.Height }}" width="{{ $resource.Width }}">
+        </picture>
+      {{- else if $resource -}}
+        <img src="{{ $resource.RelPermalink }}" alt="{{ $alt }}">
+      {{- else -}}
+        <img src="{{ $src }}" alt="{{ $alt }}">
+      {{- end -}}
+      {{- with $caption }}<figcaption><p>{{ . | markdownify }}</p></figcaption>{{ end -}}
+    </figure>
+  {{- end }}
+</aside>
