@@ -55,13 +55,19 @@ in
 
     systemd.services.syncthing.serviceConfig.UMask = lib.mkIf cfg.syncthing.enable "0007";
 
+    systemd.services.audiobookshelf = lib.mkIf cfg.syncthing.enable {
+      requires = [ "audiobookshelf-library-permissions.service" ];
+      after = [ "audiobookshelf-library-permissions.service" ];
+    };
+
     systemd.services.audiobookshelf-library-permissions = lib.mkIf cfg.syncthing.enable {
       description = "Ensure Audiobookshelf can read the Syncthing audiobook library";
       wantedBy = [ "multi-user.target" ];
+      requires = [ "syncthing.service" ];
+      after = [ "syncthing.service" "systemd-tmpfiles-setup.service" ];
       before = [ "audiobookshelf.service" ];
       serviceConfig = {
         Type = "oneshot";
-        RemainAfterExit = true;
       };
       script = ''
         set -euo pipefail
