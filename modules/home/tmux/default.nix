@@ -51,10 +51,15 @@
       set -ga terminal-overrides ",xterm-256color:RGB"
       set -g set-clipboard on
 
-      # Splits
-      bind - split-window -v
-      bind _ split-window -v
-      bind | split-window -h
+      # Splits. workon stores the project root in the window option
+      # @workon_dir so every new pane in that window starts from the project,
+      # not from the session's original cwd. Fall back to the active pane cwd
+      # for non-workon windows.
+      bind '"' split-window -v -c "#{?@workon_dir,#{@workon_dir},#{pane_current_path}}"
+      bind % split-window -h -c "#{?@workon_dir,#{@workon_dir},#{pane_current_path}}"
+      bind - split-window -v -c "#{?@workon_dir,#{@workon_dir},#{pane_current_path}}"
+      bind _ split-window -v -c "#{?@workon_dir,#{@workon_dir},#{pane_current_path}}"
+      bind | split-window -h -c "#{?@workon_dir,#{@workon_dir},#{pane_current_path}}"
 
       # Resizing (BEPO: C/T/S/R)
       unbind H
@@ -284,6 +289,11 @@
             done
 
             dir="''${1:-$PWD}"
+            if [ ! -d "$dir" ]; then
+              echo "Not a directory: $dir" >&2
+              exit 1
+            fi
+            dir="$(cd "$dir" && pwd -P)"
             name="''${2:-$(basename "$dir")}"
             wname="''${3:-$(basename "$dir")}"
 
@@ -353,6 +363,7 @@
             if tmux has-session -t "$name" 2>/dev/null; then
               # Create a new window in the existing session
               idx="$(tmux new-window -P -F '#I' -t "$name" -c "$dir" -n "$wname")"
+              tmux set-option -wq -t "$name:$idx" @workon_dir "$dir"
               # Layout: assistant (left) + shell (right)
               pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:$idx" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
               tmux select-pane -t "$pane"
@@ -364,6 +375,7 @@
             else
               # Create session and first window
               tmux new-session -d -s "$name" -c "$dir" -n "$wname"
+              tmux set-option -wq -t "$name:1" @workon_dir "$dir"
               pane="$(tmux split-window -h -b -P -F '#{pane_id}' -t "$name:1" -c "$dir" env "WORKON_LAUNCH_CMD=$launch_cmd" "WORKON_USER_SHELL=$user_shell" "$user_shell" -ic 'eval "$WORKON_LAUNCH_CMD"; exec "$WORKON_USER_SHELL" -i')"
               tmux select-pane -t "$pane"
               tmux select-window -t "$name:1"
