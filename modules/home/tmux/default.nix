@@ -1,7 +1,23 @@
-{ pkgs, lib, ... }:
+{ pkgs, lib, config, ... }:
 
+let
+  # Keep the tmux server socket and its saved state on a stable, persistent
+  # path instead of the default /tmp (which macOS purges at boot and is the
+  # least durable place for a long-lived session's socket). Everything tmux
+  # writes — the per-user socket dir (tmux-<uid>/) and tmux-resurrect's saved
+  # environments — lives under here so a server can be found and restored
+  # across terminal crashes and reboots.
+  tmuxDataDir = "${config.xdg.dataHome}/tmux";
+in
 {
   imports = [ ./bepo.nix ];
+
+  # Pin the socket dir off volatile /tmp. Interactive shells (where `workon`
+  # runs) source this, so every `tmux`/`workon` invocation shares one server.
+  home.sessionVariables.TMUX_TMPDIR = lib.mkForce tmuxDataDir;
+  # Make sure the parent exists before tmux tries to create tmux-<uid>/ inside it.
+  xdg.dataFile."tmux/.keep".text = "";
+
   programs.tmux = {
     enable = true;
     prefix = "C-a";
@@ -9,6 +25,33 @@
     mouse = true;
     keyMode = "vi";
     baseIndex = 1;
+
+    # Persistence net: resurrect snapshots sessions/windows/panes/layout/cwd to
+    # disk; continuum saves automatically every few minutes and restores on
+    # server start. Combined with the daemonised server that `workon` already
+    # creates, this means: Ghostty dying only detaches you (reattach), and if
+    # the server itself dies (crash, OOM, reboot) the next tmux start restores
+    # where you left off. resurrect must load before continuum (continuum
+    # depends on it); Home Manager preserves this list order and appends the
+    # plugins after extraConfig.
+    plugins = with pkgs.tmuxPlugins; [
+      {
+        plugin = resurrect;
+        extraConfig = ''
+          set -g @resurrect-dir '${tmuxDataDir}/resurrect'
+          set -g @resurrect-capture-pane-contents 'on'
+          set -g @resurrect-strategy-nvim 'session'
+        '';
+      }
+      {
+        plugin = continuum;
+        extraConfig = ''
+          set -g @continuum-restore 'on'
+          set -g @continuum-save-interval '5'
+        '';
+      }
+    ];
+
     extraConfig = ''
       # Prefix and key handling
       set -g prefix C-a
