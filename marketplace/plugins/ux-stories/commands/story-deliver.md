@@ -1,12 +1,16 @@
 ---
-description: Deliver a user story through BDD+TDD orchestration — outer BDD scenarios wrapping inner TDD iterations
+description: Deliver a graphical UX story through BDD+TDD orchestration — outer BDD scenarios wrapping inner TDD iterations
 argument-hint: [story-path or "next"]
 allowed-tools: [Read, Glob, Grep, Bash, Edit, Write]
 ---
 
 # Deliver User Story
 
-Orchestrates the full delivery of a user story: BDD scenarios as the outer test layer, TDD as the inner implementation loop, visual verification against wireframes.
+Orchestrates the full delivery of a graphical UX story: BDD scenarios as the outer test layer, TDD as the inner implementation loop, and visual verification against wireframes.
+
+## Scope gate
+
+Use this command only for graphical web, mobile, or desktop screens and flows. If the requested surface is CLI, API, CI/CD, repository automation, a report, chat/email output, or non-graphical developer tooling, redirect to `spec-driven` and `spec-tdd`; do not require Gherkin, screenshots, or SVG wireframes.
 
 ## Instructions
 

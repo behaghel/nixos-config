@@ -1,12 +1,25 @@
 ---
 name: story-writer
 description: |
-  User-story-driven UX development. Use when the user describes a UX change, a new screen, a user-facing feature, or any work that affects what users see or interact with. Also use when the user says "user story", "wireframe", "screen", "BDD", "scenario", "as a user", or references a persona. Ensures all UX work starts from a user story, is specced with SVG wireframes, validated with BDD scenarios, and delivered through BDD+TDD orchestration.
+  User-story-driven graphical UX development. Use for screen-based interfaces such as web, mobile, and desktop when the user describes a visual flow, screen, component, wireframe, or persona. Do not use for CLI, API, CI/CD, repository automation, reports, chat/email output, or developer tooling; route those through spec-driven and spec-tdd instead. Ensures graphical UX work starts from a user story, is specced with SVG wireframes, validated with BDD scenarios, and delivered through BDD+TDD orchestration.
 ---
 
 # Story Writer
 
-Ensures all UX work is anchored in user stories, specced visually with SVG wireframes, and validated with BDD scenarios before implementation.
+Ensures graphical, screen-based UX work is anchored in user stories, specced visually with SVG wireframes, and validated with BDD scenarios before implementation.
+
+## Scope boundary
+
+This skill applies only when the product behavior is expressed through a graphical screen whose layout and visual states can be compared with a wireframe.
+
+Do **not** activate it for:
+- CLI or terminal output
+- APIs and protocols
+- CI/CD or repository automation
+- reports, notifications, chat, email, or other text projections
+- developer tooling without a graphical interface
+
+For those surfaces, use `spec-driven` to define observable command/output or request/response examples and `spec-tdd` for executable acceptance tests. Gherkin may be chosen when behavior genuinely benefits from it, but it is not required. Never create SVG wireframes for non-graphical work.
 
 Load `references/story-format.md` when writing or reviewing user stories.
 Load `references/wireframe-conventions.md` when creating or evaluating wireframes.
@@ -15,15 +28,17 @@ Load `references/bdd-tdd-nesting.md` when planning or executing delivery.
 
 ## When to activate
 
-- User describes a UX change or new screen
-- User references a persona, user flow, or interaction
-- Code change would affect what users see or interact with
-- Before any modification to UI code, screens, or components
-- After spec-driven collection when the domain is a UX domain
+- User describes a graphical UX change or new screen
+- User references a visual flow, wireframe, screen state, or graphical interaction
+- Code change affects layout or visual behavior in web, mobile, or desktop UI
+- Before modifying graphical UI code, screens, or components
+- After spec-driven collection when the domain is explicitly graphical UX
+
+When the request is merely “user-facing,” first classify its delivery surface. Text output and operational interfaces are not graphical UX.
 
 ## Core principles
 
-1. **No UX code without a story.** Every screen change traces back to a user story.
+1. **No graphical UX code without a story.** Every screen change traces back to a user story.
 2. **Wireframes are the visual spec.** SVG wireframes are the source of truth for what the user sees. Not mockups, not descriptions — precise, versioned SVGs.
 3. **SVG UX is componentised.** Shared visual parts live in `design/wireframes/components.svg` using atomic levels: atoms → molecules → organisms → templates → pages.
 4. **BDD scenarios are the behavioral spec.** Given/When/Then scenarios written from the user's perspective define what "done" means.
@@ -33,7 +48,7 @@ Load `references/bdd-tdd-nesting.md` when planning or executing delivery.
 
 ### 1. Write the story as a .feature file
 
-Every UX change starts with a `.feature` file — the single story artifact:
+Every graphical UX change starts with a `.feature` file — the single story artifact:
 
 1. Identify the **persona** — who is this for?
 2. Define the **goal** — what do they want to achieve?
@@ -100,12 +115,13 @@ A story is done when:
 | Plugin | How ux-stories interacts |
 |--------|------------------------|
 | `domain-tree` | Stories live in `spec/{domain}/stories/`. Domain type determines rigor. |
-| `spec-driven` | Story + wireframes become input to spec collection. For UX domains, the wireframe IS the spec. |
-| `spec-tdd` | BDD scenarios replace spec-tdd's iteration model for UX work. ux-stories owns the orchestration. |
+| `spec-driven` | Story + wireframes become input to spec collection for graphical UX. It owns non-graphical interface specifications. |
+| `spec-tdd` | BDD scenarios replace spec-tdd's iteration model for graphical UX. It owns non-graphical delivery. |
 
 ## Guardrails
 
-- Do NOT modify UI code without a user story context.
+- Do NOT apply this workflow to non-graphical interfaces; redirect them to `spec-driven` and `spec-tdd`.
+- Do NOT modify graphical UI code without a user story context.
 - Do NOT create wireframes without a story (wireframes answer "what does the user see?" — the story provides "why?").
 - Do NOT write BDD scenarios without wireframes (scenarios validate what the wireframe specifies).
 - Do NOT redraw repeated UI in page wireframes when it belongs in `design/wireframes/components.svg`.

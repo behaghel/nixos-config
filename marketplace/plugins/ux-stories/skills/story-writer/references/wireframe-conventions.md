@@ -1,4 +1,6 @@
-# Wireframe Conventions
+# Wireframe Conventions for Graphical UX
+
+SVG wireframes apply only to graphical, screen-based interfaces. Never create them for CLI, API, CI/CD, repository automation, reports, chat/email output, or non-graphical developer tooling.
 
 SVG wireframes are the visual spec. They define precisely what the user sees — layout, components, text, colors, and states. Implementation must match element-by-element.
 

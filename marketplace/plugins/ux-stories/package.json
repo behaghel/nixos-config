@@ -1,7 +1,7 @@
 {
   "name": "ux-stories",
-  "version": "0.2.0",
-  "description": "User-story-driven UX development — write stories, spec with SVG wireframes, validate with BDD scenarios, deliver with BDD+TDD orchestration. Now with pi support.",
+  "version": "0.3.0",
+  "description": "User-story-driven graphical UX development with SVG wireframes and BDD+TDD orchestration for screen-based interfaces.",
   "keywords": ["pi-package", "ux", "stories", "bdd", "wireframes"],
   "pi": {
     "extensions": ["./pi/extension.ts"],

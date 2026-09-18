@@ -1,10 +1,16 @@
 # ux-stories
 
-User-story-driven UX development — write stories, spec with SVG wireframes, validate with BDD scenarios, deliver with BDD+TDD orchestration.
+User-story-driven graphical UX development — write stories, spec screens with SVG wireframes, validate with BDD scenarios, and deliver with BDD+TDD orchestration.
+
+## Scope
+
+This plugin is exclusively for graphical, screen-based interfaces such as web, mobile, and desktop UI.
+
+Do not use it for CLI, API, CI/CD, repository automation, reports, chat/email output, or non-graphical developer tooling. Specify those surfaces with `spec-driven` command/output or request/response examples and deliver them with `spec-tdd` executable tests. Gherkin is optional for non-graphical behavior; SVG wireframes are not appropriate.
 
 ## Philosophy
 
-Every pixel on screen traces back to a user story. Every user story is specced with wireframes. Every wireframe is validated by BDD scenarios. Every scenario is delivered through BDD+TDD.
+Every pixel on screen traces back to a user story. Every graphical user story is specced with wireframes. Every wireframe is validated by BDD scenarios. Every scenario is delivered through BDD+TDD.
 
 ```
 User Story (why does this matter?)
@@ -22,17 +28,17 @@ This plugin orchestrates the full UX delivery cycle, integrating with the plugin
 | Plugin | Role | How ux-stories interacts |
 |--------|------|------------------------|
 | `domain-tree` | Where things live | Stories live in `spec/{domain}/stories/`. Domain classification drives rigor. |
-| `spec-driven` | How to write specs | Story + wireframes are input to spec collection. For UX, wireframes ARE the spec. |
-| `spec-tdd` | How to build code | ux-stories owns BDD+TDD orchestration for UX work, replacing spec-tdd's generic iterations. |
-| `ux-stories` | The full UX flow | Story → wireframes → BDD scenarios → BDD+TDD delivery → visual verification |
+| `spec-driven` | How to write specs | Story + wireframes inform graphical UX specs; it directly owns non-graphical interface specs. |
+| `spec-tdd` | How to build code | ux-stories owns BDD+TDD for graphical UX; spec-tdd owns non-graphical delivery. |
+| `ux-stories` | The graphical UX flow | Story → wireframes → BDD scenarios → BDD+TDD delivery → visual verification |
 
-**ux-stories owns the orchestration for UX work.** For non-UX work (backend, infrastructure), spec-tdd's generic TDD remains the right tool.
+**ux-stories owns orchestration only for graphical UX work.** A surface being user-facing does not make it graphical UX.
 
 ## What's included
 
 | Component | Type | Description |
 |-----------|------|-------------|
-| Story Writer | Skill | Auto-triggers for UX work — ensures stories, wireframes, and scenarios exist |
+| Story Writer | Skill | Auto-triggers for graphical UX work — ensures stories, wireframes, and scenarios exist |
 | `/ux-stories:write` | Command | Write a user story with persona, goal, wireframe refs |
 | `/ux-stories:scenarios` | Command | Generate Gherkin BDD scenarios from story + wireframes |
 | `/ux-stories:deliver` | Command | Full BDD+TDD delivery cycle with visual verification |

@@ -1,6 +1,8 @@
-# User Story Format
+# Graphical UX Story Format
 
-Every UX change starts from a user story. The `.feature` file IS the story — it captures persona, goal, acceptance criteria (as scenarios), wireframe references (as tags), and context. There is no separate `story.md`.
+This format applies only to graphical, screen-based interfaces. Non-graphical surfaces use `spec-driven` and `spec-tdd` without mandatory Gherkin or SVG wireframes.
+
+Every graphical UX change starts from a user story. The `.feature` file IS the story — it captures persona, goal, acceptance criteria (as scenarios), wireframe references (as tags), and context. There is no separate `story.md`.
 
 ## Story file structure
 

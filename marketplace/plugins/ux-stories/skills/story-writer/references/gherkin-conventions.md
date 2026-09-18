@@ -1,4 +1,6 @@
-# Gherkin Conventions for UX Stories
+# Gherkin Conventions for Graphical UX Stories
+
+These conventions apply only to graphical, screen-based interfaces. Gherkin is optional for non-graphical surfaces, which belong to `spec-driven` and `spec-tdd` and do not require wireframes.
 
 The `.feature` file is the **single story artifact**. It captures persona, goal, context, acceptance criteria (as scenarios), and wireframe references (as tags). There is no separate `story.md`.
 
