@@ -239,6 +239,10 @@ let
     (lib.filterAttrs (_: t: t == "directory")
       (builtins.readDir ../templates));
 
+  # Specialized deployment templates may intentionally omit agent tooling.
+  # Keep exclusions explicit so new templates require marketplace wiring by default.
+  marketplaceExcludedTemplates = [ "mele-vite-app" ];
+
   validateTemplate = name:
     let
       devenvNix = ../templates + "/${name}/devenv.nix";
@@ -259,17 +263,29 @@ let
       refsOpencode = builtins.match ".*opencode.*" devenvContent != null;
       refsBundle = builtins.match ".*bundles\\.total-spec.*" devenvContent != null;
       yamlRefsMarketplace = builtins.match ".*agent-marketplace.*" yamlContent != null;
+      expectsMarketplace = !(builtins.elem name marketplaceExcludedTemplates);
+      marketplaceChecks =
+        if expectsMarketplace
+        then
+          assert' "template ${name}: devenv.yaml has agent-marketplace input" yamlRefsMarketplace
+          + assert' "template ${name}: devenv.nix references agent-marketplace" refsMarketplace
+          + assert' "template ${name}: devenv.nix uses lib.nix" refsLibNix
+          + assert' "template ${name}: devenv.nix enables claude.code" refsClaude
+          + assert' "template ${name}: devenv.nix enables opencode" refsOpencode
+          + assert' "template ${name}: devenv.nix uses explicit bundle (not auto-merge)" refsBundle
+        else
+          assert' "template ${name}: devenv.yaml omits agent-marketplace input" (!yamlRefsMarketplace)
+          + assert' "template ${name}: devenv.nix omits agent-marketplace wiring" (!refsMarketplace)
+          + assert' "template ${name}: devenv.nix omits marketplace bundles" (!refsBundle);
     in
     assert' "template ${name}: devenv.nix exists" hasDevenvNix
     + assert' "template ${name}: devenv.yaml exists" hasDevenvYaml
-    + assert' "template ${name}: devenv.yaml has agent-marketplace input" yamlRefsMarketplace
-    + assert' "template ${name}: devenv.nix references agent-marketplace" refsMarketplace
-    + assert' "template ${name}: devenv.nix uses lib.nix" refsLibNix
-    + assert' "template ${name}: devenv.nix enables claude.code" refsClaude
-    + assert' "template ${name}: devenv.nix enables opencode" refsOpencode
-    + assert' "template ${name}: devenv.nix uses explicit bundle (not auto-merge)" refsBundle;
+    + marketplaceChecks;
 
-  level3 = lib.concatMapStrings validateTemplate templateNames;
+  level3 =
+    assert' "marketplace exclusions name existing templates"
+      (lib.all (name: builtins.elem name templateNames) marketplaceExcludedTemplates)
+    + lib.concatMapStrings validateTemplate templateNames;
 
 in
 pkgs.runCommand "marketplace-tests" { } ''
