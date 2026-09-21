@@ -25,11 +25,13 @@ import { Type } from "typebox";
 import {
 	entryForResolution,
 	findAmbiguousCodeMappings,
+	findContextMapIssues,
 	flattenDomains,
 	parseDomainsYaml,
 	resolveDomainForFilePath,
 	specDirForEntry,
 	specLabelForEntry,
+	validateNormativeSpecContent,
 } from "./domain-core.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
@@ -116,10 +118,12 @@ async function specExistsForDomain(root: string, domains: Record<string, any>, d
 	if (!specDir) return false;
 	try {
 		await access(specDir);
-		// Check if there are .md files in the colocated spec directory.
-		const { readdir } = await import("fs/promises");
-		const files = await readdir(specDir);
-		return files.some((f: string) => f.endsWith(".md"));
+		const readme = await readFile(join(specDir, "README.md"), "utf-8");
+		const expectedDomain = [
+			domainName,
+			...(subdomain ? subdomain.split(" > ") : []),
+		].join("/");
+		return validateNormativeSpecContent(readme, expectedDomain, true).length === 0;
 	} catch {
 		return false;
 	}
@@ -225,7 +229,9 @@ The domain tree encodes three things:
 3. **How domains communicate** — the context map declaring integration patterns
 
 ### Core rules
-- **Colocated specs** — domain specs live next to code. The first \`code\` path is the default spec directory; \`README.md\` is the main domain spec.
+- **Colocated specs** — domain specs live next to code. The first \`code\` path is the default spec directory; \`README.md\` is the required main domain spec.
+- **Normative corpus** — \`README.md\` and sibling Markdown with \`domain\`/\`status\` frontmatter are normative. Plans, prompts, guides, and history without that frontmatter are not specs.
+- **Subsidiarity** — the most-specific matching child path owns a file. Parent/child overlap is valid; unrelated domains may not claim the same path.
 - **Spec-on-touch** — The first time you modify a domain, write its spec. Rigor scales with classification:
   - **core**: spec required before any code change (hard block)
   - **shared-kernel**: spec required, all consumers notified (hard block)
@@ -253,8 +259,8 @@ The domain tree encodes three things:
 | File | Role |
 |------|------|
 | \`domains.yaml\` | Domain tree manifest (source of truth) |
-| \`<domain code path>/*.md (README.md is the main domain spec)\` | Domain specs |
-| \`doc/ARCHITECTURE.md\` | Architecture coordination index |
+| \`<domain code path>/README.md\` | Main domain specification |
+| \`<domain code path>/*.md\` with normative frontmatter | Cohesive behavior and term specifications |
 
 For detailed reference, load the \`domain-navigator\` skill.
 `;
@@ -479,6 +485,42 @@ For detailed reference, load the \`domain-navigator\` skill.
 				results.push("  ✅ All declared paths exist");
 			}
 
+			results.push("");
+			results.push("### 📚 Normative documentation");
+			let documentationIssues = 0;
+			for (const node of nodes) {
+				const specDir = specDirForEntry(domainRoot, node.entry);
+				if (!specDir) continue;
+				let files: string[];
+				try {
+					files = await readdir(specDir);
+				} catch {
+					continue;
+				}
+				const markdownFiles = files.filter((file: string) => file.endsWith(".md"));
+				if (!markdownFiles.includes("README.md")) markdownFiles.unshift("README.md");
+				for (const file of markdownFiles) {
+					let content = "";
+					try {
+						content = await readFile(join(specDir, file), "utf-8");
+					} catch {
+						// Missing README.md is reported by the validator below.
+					}
+					for (const issue of validateNormativeSpecContent(
+						content,
+						node.path.join("/"),
+						file === "README.md",
+					)) {
+						results.push(`  ⚠ **${node.path.join(" > ")}** \`${file}\`: ${issue}`);
+						issues++;
+						documentationIssues++;
+					}
+				}
+			}
+			if (documentationIssues === 0) {
+				results.push("  ✅ README.md and normative frontmatter are consistent");
+			}
+
 			// Step 2: Classification consistency
 			results.push("");
 			results.push("### 🏷️ Classification check");
@@ -510,7 +552,33 @@ For detailed reference, load the \`domain-navigator\` skill.
 				if (domainsCache._contextMap) {
 					results.push("");
 					results.push("### 🔗 Context map");
-					results.push("  ℹ Context map entries declared. Run `/domain-tree:check` locally for full validation.");
+					const contextIssues = findContextMapIssues(domainsCache);
+					let contextSectionIssues = contextIssues.length;
+					for (const issue of contextIssues) {
+						results.push(`  ⚠ ${issue}`);
+						issues++;
+					}
+					for (const relationship of domainsCache._contextEntries || []) {
+						if (!relationship.contract) continue;
+						try {
+							await stat(join(domainRoot!, relationship.contract));
+							passed++;
+						} catch {
+							results.push(
+								`  ⚠ Context contract \`${relationship.contract}\` for **${relationship.provider}** does not exist.`,
+							);
+							issues++;
+							contextSectionIssues++;
+						}
+					}
+					if (contextSectionIssues === 0 && (domainsCache._contextEntries || []).length > 0) {
+						results.push("  ✅ Providers, consumers, patterns, and contracts are valid");
+					} else if ((domainsCache._contextEntries || []).length === 0) {
+						results.push(
+							"  ⚠ Context map uses a legacy shape; declare `provider`, `consumers`, `pattern`, and `contract`.",
+						);
+						issues++;
+					}
 				}
 			}
 
@@ -575,8 +643,23 @@ For detailed reference, load the \`domain-navigator\` skill.
 				const specDir = specDirForEntry(domainRoot, node.entry);
 				try {
 					const files = specDir ? await readdir(specDir) : [];
-					const mdFiles = files.filter((f: string) => f.endsWith(".md"));
-					specStatus = mdFiles.length > 0 ? `✅ ${mdFiles.length}` : "❌ none";
+					const mdFiles = files.filter((file: string) => file.endsWith(".md"));
+					let normativeCount = 0;
+					for (const file of mdFiles) {
+						const content = await readFile(join(specDir!, file), "utf-8");
+						const isReadme = file === "README.md";
+						if (!isReadme && !content.startsWith("---\n")) continue;
+						if (
+							validateNormativeSpecContent(
+								content,
+								node.path.join("/"),
+								isReadme,
+							).length === 0
+						) {
+							normativeCount++;
+						}
+					}
+					specStatus = normativeCount > 0 ? `✅ ${normativeCount}` : "❌ none";
 				} catch {
 					specStatus = "❌ none";
 				}
@@ -667,9 +750,9 @@ Please:
 1. Read domains.yaml
 2. For each domain, verify declared code paths exist
 3. Check for orphaned production code (not covered by any domain)
-4. Check classification consistency (every domain has a type)
-5. Check README.md quality (no duplication of domains.yaml info)
-${detailed ? "6. Check context map health (verify via paths exist, shared-kernel consumers)" : ""}
+4. Check classification consistency (every classified domain has a type)
+5. Check normative documentation integrity (README.md plus frontmatter-marked sibling specs)
+${detailed ? "6. Check semantic context-map health (providers, consumers, patterns, and canonical contracts)" : ""}
 
 Use domain_tree_check to help with the validation.
 

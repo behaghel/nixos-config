@@ -65,16 +65,14 @@ Ask the user for each non-obvious classification:
 
 Analyze how domains interact:
 
-1. Look for cross-service API calls (HTTP clients, gRPC stubs).
-2. Look for shared imports — modules importing from other domains.
-3. Look for event publishing/subscribing patterns.
-4. Look for shared type definitions.
-5. For each relationship found, propose a DDD integration pattern:
+1. Identify semantic contracts between domains; ordinary imports are not context-map relationships.
+2. Look for cross-service APIs, published events, shared kernels, and translation boundaries.
+3. For each semantic relationship found, identify its provider, consumers, canonical contract, and DDD integration pattern:
    - Shared imports of common types → `shared-kernel`
    - Service A calls Service B's API → `customer-supplier` or `conformist`
    - Service uses external standard (OpenID4VCI, OAuth) → `open-host-service` / `published-language`
    - Translation layer between domains → `anti-corruption-layer`
-6. Present the proposed context map and ask for confirmation.
+4. Present the proposed context map and ask for confirmation.
 
 ### Step 3: Present and refine
 
@@ -113,9 +111,8 @@ The `README.md` exists ONLY for information that `domains.yaml` cannot express:
 For **core** domains:
 ```markdown
 ---
-domain: <domain-name>
+domain: <fully-qualified/domain-name>
 status: draft
-last-reviewed: <today>
 ---
 
 # <Domain Name>
@@ -146,22 +143,26 @@ last-reviewed: <today>
 For **supporting/generic** domains, use a lighter skeleton (omit ubiquitous language and domain events sections):
 ```markdown
 ---
-domain: <domain-name>
+domain: <fully-qualified/domain-name>
 status: draft
-last-reviewed: <today>
 ---
 
 # <Domain Name>
 
-> See `domains.yaml` for description, classification, code paths, and context map.
+## Responsibilities
+
+<!-- TODO: define the behavior this domain owns. -->
+
+## Boundaries
+
+<!-- TODO: define what belongs elsewhere. -->
 ```
 
 For **shared-kernel** domains:
 ```markdown
 ---
-domain: <domain-name>
+domain: <fully-qualified/domain-name>
 status: draft
-last-reviewed: <today>
 ---
 
 # <Domain Name>

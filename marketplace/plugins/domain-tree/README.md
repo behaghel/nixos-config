@@ -10,7 +10,7 @@ The domain tree is a structural contract informed by Domain-Driven Design. It en
 2. **How much rigor each domain deserves** — core vs supporting vs generic classification
 3. **How domains communicate** — the context map declaring integration patterns
 
-`domains.yaml` at the project root is the source of truth for that contract. Domain markdown files live beside the code they govern; `README.md` is the main domain spec, and additional behavior specs can be sibling `*.md` files.
+`domains.yaml` at the project root is the source of truth for that contract. Domain markdown files live beside the code they govern; `README.md` is the required main domain spec, and sibling Markdown is normative only when it declares `domain` and `status` frontmatter.
 
 Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructure are domains too — anything with behavior worth specifying. A technical domain like security can be `core` if it's central to the product's value.
 
@@ -66,19 +66,19 @@ The `context-map` in `domains.yaml` declares how domains communicate:
 
 ```yaml
 context-map:
-  - from: issuance
-    to: wallet
+  - provider: issuance
+    consumers: [wallet]
     pattern: open-host-service
-    via: OpenID4VCI credential offer
-  - from: wallet
-    to: verification
+    contract: services/issuance-gateway/README.md
+  - provider: verification
+    consumers: [wallet]
     pattern: anti-corruption-layer
-    via: mobile/shared/.../verification/acl/
+    contract: services/verifier/presentation/README.md
 ```
 
 Supported patterns: `shared-kernel`, `customer-supplier`, `conformist`, `anti-corruption-layer`, `open-host-service`, `published-language`, `partnership`, `separate-ways`.
 
-The boundary-enforcer uses the context map to guide cross-domain changes — it knows whether to suggest "update the contract", "route through the ACL", or "notify all kernel consumers".
+The boundary-enforcer uses the context map to guide cross-domain changes. Context entries are reserved for semantic contracts, not ordinary imports; the provider owns the canonical contract and consumers follow the declared pattern.
 
 ## Quick start
 
@@ -88,7 +88,7 @@ The boundary-enforcer uses the context map to guide cross-domain changes — it 
 /domain-tree:init
 ```
 
-Scans your codebase, proposes domains with classifications, detects cross-domain relationships, and scaffolds colocated `README.md` specs in each domain's code directory. Works with what exists — coverage grows organically via spec-on-touch.
+Scans your codebase, proposes domains with classifications, detects semantic cross-domain contracts, and scaffolds colocated `README.md` specs in each domain's code directory. Parent/child overlap follows subsidiarity: the most-specific matching child owns a file.
 
 ### Day-to-day
 

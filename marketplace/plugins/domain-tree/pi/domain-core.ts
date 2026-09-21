@@ -8,7 +8,17 @@ type DomainEntry = {
 	subdomains?: Record<string, DomainEntry>;
 };
 
-export type Domains = Record<string, DomainEntry> & { _contextMap?: string };
+export type ContextMapEntry = {
+	provider: string;
+	consumers: string[];
+	pattern: string;
+	contract?: string;
+};
+
+export type Domains = Record<string, DomainEntry> & {
+	_contextMap?: string;
+	_contextEntries?: ContextMapEntry[];
+};
 
 export type DomainNode = {
 	path: string[];
@@ -77,6 +87,8 @@ export function parseDomainsYaml(content: string): Domains {
 	let inDomains = false;
 	let inContextMap = false;
 	let collectingCodeFor: DomainEntry | null = null;
+	let currentContextEntry: ContextMapEntry | null = null;
+	const contextEntries: ContextMapEntry[] = [];
 
 	const stack: Array<
 		| { kind: "domains"; indent: number; entries: Record<string, DomainEntry>; inheritedType?: string; path: string[] }
@@ -201,12 +213,38 @@ export function parseDomainsYaml(content: string): Domains {
 		}
 
 		if (inContextMap) {
-			// Context map is displayed as raw manifest text by the extension.
+			const providerMatch = trimmed.match(/^-\s+provider:\s*(\S+)$/);
+			if (providerMatch) {
+				currentContextEntry = {
+					provider: unquote(providerMatch[1]),
+					consumers: [],
+					pattern: "",
+				};
+				contextEntries.push(currentContextEntry);
+				continue;
+			}
+			if (!currentContextEntry) continue;
+
+			const consumersMatch = trimmed.match(/^consumers:\s*\[(.*)\]$/);
+			if (consumersMatch) {
+				currentContextEntry.consumers = splitInlineList(consumersMatch[1]);
+				continue;
+			}
+			const patternMatch = trimmed.match(/^pattern:\s*(\S+)$/);
+			if (patternMatch) {
+				currentContextEntry.pattern = unquote(patternMatch[1]);
+				continue;
+			}
+			const contractMatch = trimmed.match(/^contract:\s*(.+)$/);
+			if (contractMatch) {
+				currentContextEntry.contract = unquote(contractMatch[1]);
+			}
 		}
 	}
 
 	const contextMapMatch = content.match(/context-map:\s*\n((?:\s+.*\n?)*)/);
 	if (contextMapMatch) domains._contextMap = contextMapMatch[1];
+	if (contextEntries.length > 0) domains._contextEntries = contextEntries;
 	return domains;
 }
 
@@ -264,6 +302,13 @@ export function resolveDomainForFilePath(filePath: string, root: string, domains
 	return toResolution(candidates[0].node);
 }
 
+function isAncestorPath(ancestor: string[], descendant: string[]): boolean {
+	return (
+		ancestor.length < descendant.length &&
+		ancestor.every((part, index) => descendant[index] === part)
+	);
+}
+
 export function findAmbiguousCodeMappings(domains: Domains): string[] {
 	const byPath = new Map<string, DomainNode[]>();
 	for (const node of flattenDomains(domains)) {
@@ -274,9 +319,125 @@ export function findAmbiguousCodeMappings(domains: Domains): string[] {
 	}
 	const issues: string[] = [];
 	for (const [cp, nodes] of byPath.entries()) {
-		if (nodes.length <= 1) continue;
-		const labels = nodes.map((n) => n.path.join(" > ")).join(", ");
-		issues.push(`Code path \`${cp}/\` is declared by multiple domains: ${labels}. Use more-specific code paths or explicit spec paths to disambiguate specs.`);
+		const conflicting = new Set<DomainNode>();
+		for (let left = 0; left < nodes.length; left++) {
+			for (let right = left + 1; right < nodes.length; right++) {
+				const leftNode = nodes[left];
+				const rightNode = nodes[right];
+				if (
+					!isAncestorPath(leftNode.path, rightNode.path) &&
+					!isAncestorPath(rightNode.path, leftNode.path)
+				) {
+					conflicting.add(leftNode);
+					conflicting.add(rightNode);
+				}
+			}
+		}
+		if (conflicting.size === 0) continue;
+		const labels = [...conflicting]
+			.map((node) => node.path.join(" > "))
+			.join(", ");
+		issues.push(
+			`Code path \`${cp}/\` is declared by unrelated domains: ${labels}. Use distinct code paths or explicit spec paths to establish one semantic owner.`,
+		);
+	}
+	return issues;
+}
+
+const CONTEXT_PATTERNS = new Set([
+	"shared-kernel",
+	"customer-supplier",
+	"conformist",
+	"anti-corruption-layer",
+	"open-host-service",
+	"published-language",
+	"partnership",
+	"separate-ways",
+]);
+
+const NORMATIVE_FRONTMATTER_KEYS = new Set([
+	"domain",
+	"status",
+	"term",
+	"aliases",
+]);
+
+export function validateNormativeSpecContent(
+	content: string,
+	expectedDomain: string,
+	isReadme: boolean,
+): string[] {
+	const match = content.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+	if (!match) {
+		return isReadme
+			? ["README.md must declare normative frontmatter with `domain` and `status`."]
+			: [];
+	}
+
+	const metadata = new Map<string, string>();
+	for (const line of match[1].split("\n")) {
+		const field = line.match(/^([a-z][a-z-]*):\s*(.*)$/);
+		if (field) metadata.set(field[1], field[2].trim());
+	}
+
+	const issues: string[] = [];
+	for (const key of metadata.keys()) {
+		if (!NORMATIVE_FRONTMATTER_KEYS.has(key)) {
+			issues.push(`Unsupported normative frontmatter key \`${key}\`.`);
+		}
+	}
+	if (metadata.get("domain") !== expectedDomain) {
+		issues.push(
+			`Normative frontmatter domain must be \`${expectedDomain}\`.`,
+		);
+	}
+	const status = metadata.get("status");
+	if (!status) {
+		issues.push("Normative frontmatter must declare `status`.");
+	} else if (!["draft", "approved", "stale"].includes(status)) {
+		issues.push(
+			"Normative frontmatter `status` must be `draft`, `approved`, or `stale`.",
+		);
+	}
+	if (metadata.has("aliases") && !metadata.has("term")) {
+		issues.push("Normative frontmatter `aliases` requires a canonical `term`.");
+	}
+	return issues;
+}
+
+export function findContextMapIssues(domains: Domains): string[] {
+	const domainPaths = new Set(
+		flattenDomains(domains).map((node) => node.path.join("/")),
+	);
+	const issues: string[] = [];
+	for (const entry of domains._contextEntries || []) {
+		if (!domainPaths.has(entry.provider)) {
+			issues.push(
+				`Context provider \`${entry.provider}\` is not declared in the domain tree.`,
+			);
+		}
+		if (entry.consumers.length === 0) {
+			issues.push(
+				`Context relationship \`${entry.provider}\` has no consumers.`,
+			);
+		}
+		for (const consumer of entry.consumers) {
+			if (!domainPaths.has(consumer)) {
+				issues.push(
+					`Context consumer \`${consumer}\` is not declared in the domain tree.`,
+				);
+			}
+		}
+		if (!CONTEXT_PATTERNS.has(entry.pattern)) {
+			issues.push(
+				`Context relationship \`${entry.provider}\` uses unsupported pattern \`${entry.pattern}\`.`,
+			);
+		}
+		if (!entry.contract) {
+			issues.push(
+				`Context relationship \`${entry.provider}\` has no canonical contract path.`,
+			);
+		}
 	}
 	return issues;
 }

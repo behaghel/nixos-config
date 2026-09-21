@@ -1,11 +1,11 @@
 ---
-description: Visualize the domain tree with spec coverage, test coverage, and staleness indicators
+description: Visualize the domain tree with normative spec and test coverage
 allowed-tools: [Read, Glob, Grep, Bash]
 ---
 
 # Domain Map
 
-Shows the current state of the domain tree — what's specced, what's tested, what's stale.
+Shows the current state of the domain tree — what has normative specifications and executable coverage.
 
 ## Instructions
 
@@ -31,9 +31,6 @@ For each domain (and subdomain) in the tree:
    - Look for test files in or near the code paths (`*_test.go`, `*Test.kt`, `*.test.ts`)
    - Count test files
 
-4. **Staleness:**
-   - Compare `last-reviewed` dates in spec frontmatter against recent git commits in the code paths
-   - If code changed significantly after the last review, mark as potentially stale
 
 ### Step 3: Present the map
 
@@ -41,23 +38,23 @@ For each domain (and subdomain) in the tree:
 Domain Tree — <project name>
 Generated: <date>
 
-Domain                     Type        Specs  Status     Tests  Last Changed  Alert
-──────────────────────────────────────────────────────────────────────────────────────
+Domain                     Type        Specs  Status     Tests  Alert
+──────────────────────────────────────────────────────────────────────
 verification/              core
-  presentation                        2      approved   12     3 days ago
-  packs                               1      approved   8      1 week ago
-issuance                   core       3      approved   23     today         ⚠ spec may be stale
-registry                   supporting 1      draft      5      2 weeks ago
-receipts                   supporting 0      —          2      1 month ago   ○ needs spec
-common                     kernel     0      —          0      2 weeks ago   ● needs spec (shared)
+  presentation                        2      approved   12
+  packs                               1      approved   8
+issuance                   core       3      stale      23     ⚠ review required
+registry                   supporting 1      draft      5
+receipts                   supporting 0      —          2      ○ needs spec
+common                     kernel     0      —          0      ● needs spec (shared)
 wallet/                    core
-  onboarding                          1      draft      0      5 days ago    ○ needs tests
-  credentials                         2      approved   3      today
-  verification-flow                   0      —          0      3 days ago    ○ needs spec
-security                   core       1      approved   7      1 week ago
-ux                         supporting 0      —          0      2 weeks ago   ○ needs spec
-infra                      generic    0      —          0      1 month ago
-cicd                       generic    0      —          0      3 weeks ago
+  onboarding                          1      draft      0      ○ needs tests
+  credentials                         2      approved   3
+  verification-flow                   0      —          0      ○ needs spec
+security                   core       1      approved   7
+ux                         supporting 0      —          0      ○ needs spec
+infra                      generic    0      —          0
+cicd                       generic    0      —          0
 
 Context Map:
   issuance ──open-host──→ wallet        (OpenID4VCI)
@@ -76,9 +73,9 @@ Based on the map, suggest priorities weighted by domain type:
 
 1. **Core domains without specs** — highest priority. These are the competitive advantage and must be specced.
 2. **Shared kernel without specs** — high priority. Changes ripple everywhere.
-3. **Stale specs in core domains** — "Review `src/issuance/README.md` — core domain code changed since last review."
+3. **Specs explicitly marked stale in core domains** — review before implementation.
 4. **Active supporting domains without specs** — medium priority if recently active.
-5. **Undeclared context-map relationships** — if cross-domain imports exist without a declared relationship, flag them.
+5. **Broken semantic context-map contracts** — missing provider, consumer, pattern, or contract path.
 6. **Generic/dormant domains** — low priority for catchup.
 
 ## Rules

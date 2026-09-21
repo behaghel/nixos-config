@@ -4,11 +4,13 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   findAmbiguousCodeMappings,
+  findContextMapIssues,
   flattenDomains,
   parseDomainsYaml,
   resolveDomainForFilePath,
   specDirForEntry,
   entryForResolution,
+  validateNormativeSpecContent,
 } from "../marketplace/plugins/domain-tree/pi/domain-core.ts";
 
 const manifest = `
@@ -38,6 +40,12 @@ domains:
             type: core
             code: [src/business/noise-management/]
             spec: src/business/noise-management/email-triage/
+
+context-map:
+  - provider: business/noise-management
+    consumers: [business/time-management, business/noise-management/email-triage]
+    pattern: customer-supplier
+    contract: src/business/noise-management/README.md
 `;
 
 const root = await mkdtemp(join(tmpdir(), "domain-tree-nested-"));
@@ -83,6 +91,74 @@ try {
   assert.match(ambiguous, /src\/business\/noise-management/);
   assert.match(ambiguous, /surface-scanning/);
   assert.match(ambiguous, /email-triage/);
+  assert.doesNotMatch(ambiguous, /noise-management, business > noise-management >/);
+
+  assert.deepEqual(domains._contextEntries, [
+    {
+      provider: "business/noise-management",
+      consumers: [
+        "business/time-management",
+        "business/noise-management/email-triage",
+      ],
+      pattern: "customer-supplier",
+      contract: "src/business/noise-management/README.md",
+    },
+  ]);
+  assert.deepEqual(findContextMapIssues(domains), []);
+
+  const invalidContext = parseDomainsYaml(`${manifest}\n  - provider: business/missing\n    consumers: [business/also-missing]\n    pattern: invented\n`);
+  assert.deepEqual(findContextMapIssues(invalidContext), [
+    "Context provider `business/missing` is not declared in the domain tree.",
+    "Context consumer `business/also-missing` is not declared in the domain tree.",
+    "Context relationship `business/missing` uses unsupported pattern `invented`.",
+    "Context relationship `business/missing` has no canonical contract path.",
+  ]);
+
+  const parentChildOnly = parseDomainsYaml(`
+domains:
+  business:
+    type: core
+    code: [src/business/]
+    subdomains:
+      time-management:
+        type: core
+        code: [src/business/]
+        spec: src/business/time-management/
+`);
+  assert.deepEqual(findAmbiguousCodeMappings(parentChildOnly), []);
+
+  assert.deepEqual(
+    validateNormativeSpecContent(
+      "---\ndomain: business/time-management\nstatus: approved\n---\n# Time management\n",
+      "business/time-management",
+      true,
+    ),
+    [],
+  );
+  assert.deepEqual(
+    validateNormativeSpecContent(
+      "---\ndomain: business/time-management\nstatus: approved\nlast-reviewed: 2026-01-01\n---\n# Time management\n",
+      "business/time-management",
+      true,
+    ),
+    ["Unsupported normative frontmatter key `last-reviewed`."],
+  );
+  assert.deepEqual(
+    validateNormativeSpecContent(
+      "---\ndomain: business/time-management\nstatus: active\n---\n# Invalid status\n",
+      "business/time-management",
+      true,
+    ),
+    ["Normative frontmatter `status` must be `draft`, `approved`, or `stale`."],
+  );
+  assert.deepEqual(
+    validateNormativeSpecContent("# Missing metadata\n", "business/time-management", true),
+    ["README.md must declare normative frontmatter with `domain` and `status`."],
+  );
+  assert.deepEqual(
+    validateNormativeSpecContent("# Non-normative guide\n", "business/time-management", false),
+    [],
+  );
 } finally {
   await rm(root, { recursive: true, force: true });
 }

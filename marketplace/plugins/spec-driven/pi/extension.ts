@@ -22,6 +22,7 @@ import {
 	resolveDomainForFilePath,
 	specDirForEntry,
 	specLabelForEntry,
+	validateNormativeSpecContent,
 } from "../../domain-tree/pi/domain-core.ts";
 
 export default function specDrivenExtension(pi: ExtensionAPI) {
@@ -82,7 +83,7 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 	pi.registerTool({
 		name: "check_spec_coverage",
 		label: "Check Spec Coverage",
-		description: "Check if a spec exists and is up-to-date for a given domain or file path",
+		description: "Check if a valid normative spec exists for a given domain or file path",
 		promptSnippet: "Check if a spec exists for a domain",
 		parameters: Type.Object({
 			path: Type.String({
@@ -108,22 +109,40 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 				const rootSpecDir = entry ? specDirForEntry(cwd, entry) : null;
 				const specLabel = entry ? specLabelForEntry(entry) : null;
 
-				if (rootSpecDir && specLabel) {
+				if (rootSpecDir && specLabel && resolved) {
 					const files = await readdir(rootSpecDir);
-					const mdFiles = files.filter((f: string) => f.endsWith(".md"));
-					if (mdFiles.length > 0) {
+					const expectedDomain = [
+						resolved.domain,
+						...(resolved.subdomain ? resolved.subdomain.split(" > ") : []),
+					].join("/");
+					const normativeFiles: string[] = [];
+					const invalidFiles: string[] = [];
+					for (const file of files.filter((name: string) => name.endsWith(".md"))) {
+						const specContent = await readFile(join(rootSpecDir, file), "utf-8");
+						const isReadme = file === "README.md";
+						if (!isReadme && !specContent.startsWith("---\n")) continue;
+						const validationIssues = validateNormativeSpecContent(
+							specContent,
+							expectedDomain,
+							isReadme,
+						);
+						if (validationIssues.length === 0) normativeFiles.push(file);
+						else invalidFiles.push(`${file}: ${validationIssues.join(" ")}`);
+					}
+					if (normativeFiles.length > 0 && normativeFiles.includes("README.md")) {
 						return {
 							content: [{
 								type: "text",
-								text: `**${params.path}** has ${mdFiles.length} spec file(s):\n` +
-									mdFiles.map((f: string) => `  - \`${specLabel}${f}\``).join("\n"),
+								text: `**${params.path}** has ${normativeFiles.length} normative spec file(s):\n` +
+									normativeFiles.map((file: string) => `  - \`${specLabel}${file}\``).join("\n") +
+									(invalidFiles.length > 0 ? `\nInvalid normative files:\n${invalidFiles.map((issue) => `  - ${issue}`).join("\n")}` : ""),
 							}],
-							details: { path: params.path, files: mdFiles.length, specDir: specLabel },
+							details: { path: params.path, files: normativeFiles.length, specDir: specLabel, invalidFiles },
 						};
 					}
 					return {
-						content: [{ type: "text", text: `**${params.path}** spec directory exists at \`${specLabel}\` but contains no markdown files.` }],
-						details: { path: params.path, files: 0, specDir: specLabel },
+						content: [{ type: "text", text: `**${params.path}** has no valid normative README.md at \`${specLabel}\`.` }],
+						details: { path: params.path, files: normativeFiles.length, specDir: specLabel, invalidFiles },
 					};
 				}
 
