@@ -229,6 +229,8 @@ let
       node --check ${lib.escapeShellArg (toString path)}
     '') piExtensionPaths}
 
+    node ${lib.escapeShellArg (toString ./domain-tree-nested.test.mjs)}
+
     echo ok > "$out"
   '';
 

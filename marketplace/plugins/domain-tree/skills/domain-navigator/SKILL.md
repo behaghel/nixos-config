@@ -31,7 +31,7 @@ Load `references/conventions.md` when making decisions about file placement or d
 
 When the user describes work or you're about to modify code:
 
-1. Match the target file(s) against `code` paths in the manifest.
+1. Match the target file(s) against `code` paths in the manifest; the most-specific child path wins.
 2. Identify the governing domain, subdomain, and **domain type** (core/supporting/generic/shared-kernel).
 3. Locate the corresponding colocated spec path (by default, the first `code` path; `spec` may override it).
 4. Report: "This is in the **[domain] > [subdomain]** namespace (type: **[type]**). Spec at `[code path]/README.md`. Code at `[code paths]`."
@@ -53,7 +53,7 @@ When creating new files:
 When editing production code:
 
 1. Resolve the governing domain and its `type`.
-2. Check if a spec exists in the domain's colocated spec path (`README.md` or any sibling `.md` file).
+2. Check for the domain's normative `README.md`; sibling Markdown is normative only when it declares `domain` and `status` frontmatter.
 3. Apply rigor based on domain type:
    - **core** — Hard block. "No spec exists for **[domain]** (core). This domain requires a spec before any code change."
    - **supporting** — Warning. "No spec exists for **[domain]** yet. Consider writing one before this change."
@@ -69,7 +69,7 @@ When editing production code:
 When work spans multiple domains:
 
 1. Identify all affected domains.
-2. Consult the `context-map` in `domains.yaml` for the declared relationship.
+2. Consult semantic `context-map` entries (`provider`, `consumers`, `pattern`, and canonical `contract`) for the declared relationship.
 3. If a relationship exists:
    - Report the pattern: "This crosses **[domain A]** → **[domain B]** (pattern: **[pattern]**)."
    - Guide based on pattern:
@@ -94,6 +94,7 @@ When editing code in a `shared-kernel` domain:
 
 - Do NOT create files outside the domain tree without flagging it.
 - Do NOT let domain boundaries drift silently — every new code path should map to a domain.
+- Allow parent/child overlap under subsidiarity; reject unrelated domains claiming the same path.
 - Do NOT treat `domains.yaml` as documentation — it is a structural contract.
 - Do NOT enforce domains on non-production files (tests, scripts, CI) unless they have their own technical domain.
 - Do NOT allow cross-domain changes without consulting the context map.

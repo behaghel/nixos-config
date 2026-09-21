@@ -39,11 +39,10 @@ domains:
 
 # Cross-context relationships
 context-map:
-  - from: <domain-name>
-    to: <domain-name>
+  - provider: <fully-qualified/domain-name>
+    consumers: [<fully-qualified/consumer-name>]
     pattern: <relationship-pattern>
-    via: <description or path>
-    notes: optional clarification
+    contract: <canonical spec path>
 ```
 
 ## Domain classification
@@ -66,7 +65,7 @@ Every domain has a `type` that determines how much modeling rigor it deserves. T
 
 ## Context map
 
-The `context-map` section declares how domains communicate. Each entry is a directed relationship.
+The `context-map` section declares semantic contracts between domains. Each entry names one provider, one or more consumers, an integration pattern, and the canonical contract. Ordinary imports do not require context-map entries.
 
 ### Relationship patterns
 
@@ -83,14 +82,15 @@ The `context-map` section declares how domains communicate. Each entry is a dire
 
 ### How the context map drives behavior
 
-- **boundary-enforcer**: When a cross-domain change is detected, consult the context map. If the relationship is `customer-supplier`, the upstream domain's spec is the contract — check it. If there's an `anti-corruption-layer`, changes should go through the ACL, not bypass it.
-- **domain-tree:check**: Validate that declared relationships still hold — ACL code paths exist, shared kernel types are still shared, published languages are still conformant.
+- **boundary-enforcer**: When a cross-domain change is detected, consult the context map. The provider owns the canonical `contract`; consumers follow the declared pattern.
+- **domain-tree:check**: Validate that providers and consumers exist, patterns are supported, and canonical contract paths resolve.
 - **spec-driven collection**: When speccing a domain that consumes another, the context map tells you which integration pattern to follow — and therefore what to spec.
 
 ## Path rules
 
-- `code` paths are relative to project root, always end with `/`
-- Specs live next to code. The first `code` path is the default spec directory; `README.md` is the main domain spec.
+- `code` paths are relative to project root, always end with `/`.
+- The most-specific matching child path owns a file. Parent/child overlap is valid; unrelated domains cannot claim the same path.
+- Specs live next to code. The first `code` path is the default spec directory; `README.md` is the required main domain spec.
 - `spec` is optional and only overrides the inferred spec directory when specs cannot live in the first `code` path.
 - A domain is either a **leaf** (has `code`) or a **branch** (has `subdomains`)
 - Branch domains may also have `code` + `spec` for domain-level concerns (shared types, domain events)
@@ -202,39 +202,25 @@ domains:
     code: [.github/workflows/, scripts/]
 
 context-map:
-  - from: issuance
-    to: wallet
+  - provider: issuance
+    consumers: [wallet]
     pattern: open-host-service
-    via: OpenID4VCI credential offer → wallet deep link
-    notes: issuance exposes OID4VCI; wallet is a conformist consumer
+    contract: services/issuance-gateway/README.md
 
-  - from: wallet
-    to: verification
+  - provider: verification
+    consumers: [wallet]
     pattern: anti-corruption-layer
-    via: mobile/shared/.../verification/acl/
-    notes: wallet translates verification domain concepts to its own UX model
+    contract: services/verifier/presentation/README.md
 
-  - from: verification
-    to: registry
+  - provider: registry
+    consumers: [verification]
     pattern: customer-supplier
-    via: GET /policy/manifest
-    notes: verification consumes policies; registry serves them
+    contract: services/registry/README.md
 
-  - from: issuance
-    to: common
+  - provider: common
+    consumers: [issuance, verification]
     pattern: shared-kernel
-    via: services/common/credential/ types
-    notes: credential value objects shared between issuance and verification
-
-  - from: verification
-    to: common
-    pattern: shared-kernel
-    via: services/common/credential/ types
-
-  - from: receipts
-    to: verification
-    pattern: customer-supplier
-    via: verification publishes consent events → receipts logs them
+    contract: services/common/README.md
 ```
 
 ## Lifecycle

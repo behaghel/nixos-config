@@ -54,7 +54,7 @@ For each domain's `code-paths`:
 
 1. Flag **individual files** (not directories) as **refactoring signal** — "Domain **[name]** lists individual file `[path]`. Consider refactoring into a subdirectory that matches the domain boundary."
 2. Flag **many subdirectories of the same parent** — if 3+ paths share the same parent directory, suggest listing the parent instead: "Domain **[name]** lists [N] paths under `[parent/]` — consider using the parent directory."
-3. Flag **overlapping paths** — if two domains claim paths in the same directory, report as **boundary violation**.
+3. Apply **subsidiarity** to overlapping paths — parent/child overlap is valid and the most-specific child wins. Report only unrelated domains claiming the same path as a **boundary violation**.
 
 Also check for stale `governs:` frontmatter in spec files — if found, report as **deprecated** — "`governs:` in `[file]` is deprecated. Code ownership is declared via `code-paths` in `domains.yaml`."
 
@@ -68,35 +68,38 @@ Also check for **spec files outside the domain tree** — scan `docs/` for files
 
 ### Step 6: Check context map health
 
-1. For each `context-map` entry:
-   - Verify both `from` and `to` domains exist in the tree.
-   - For `anti-corruption-layer` patterns: check the `via` code path exists.
-   - For `shared-kernel` patterns: verify the kernel domain has `type: shared-kernel`.
-2. Scan for **undeclared relationships**:
-   - Look for cross-domain imports (Go imports, Kotlin imports) not covered by any context-map entry.
-   - Report as **undeclared coupling**: "**[domain A]** imports from **[domain B]** but no relationship is declared."
+1. For each semantic `context-map` entry:
+   - Verify the `provider` and every entry in `consumers` exist in the tree.
+   - Verify `pattern` is supported.
+   - Verify the canonical `contract` path exists.
+   - For `shared-kernel` patterns: verify the provider has `type: shared-kernel`.
+2. Scan for **undeclared semantic contracts**:
+   - Look for cross-domain APIs, events, shared models, or translation boundaries not covered by a context-map entry.
+   - Do not require context-map entries for ordinary imports.
+   - Report genuine undeclared coupling with the provider and consumers that need an explicit contract.
 3. For `shared-kernel` domains:
    - Verify all consumers listed in context-map entries.
    - Check that each consumer has contract tests for shared types.
 
 ### Step 7: Check classification consistency
 
-1. Verify every domain has a `type` field.
+1. Verify every classified domain has a `type` field.
 2. Flag core domains without specs as **high-risk gaps**.
 3. Flag shared-kernel domains without consumer contract tests.
 
 ### Step 7b: Check README.md quality
 
-For each domain `README.md` file in a colocated spec directory:
+For each domain's colocated specification directory:
 
-1. Check frontmatter does NOT contain `type:` (classification lives in domains.yaml).
-2. Check frontmatter does NOT contain `consumers:` (consumer lists live in domains.yaml).
-3. Check body does NOT contain a "Context Map Relationships" section (context map lives in domains.yaml).
-4. Check body does NOT repeat the domain description from domains.yaml verbatim.
-5. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
-6. Check if the README.md has substantive content beyond the title and reference line (ubiquitous language, invariants, domain events). If it only contains a heading and a reference line, report as **empty README.md** — "**[domain]** README.md adds no content beyond the reference line. Consider deleting it."
-
-`README.md` is optional. Do NOT flag domains that lack one — only flag ones that exist but add nothing.
+1. Require `README.md` with `domain` and `status` frontmatter matching the fully qualified domain path.
+2. Treat sibling Markdown as normative only when it has frontmatter; prompts, guides, plans, and history without frontmatter are non-normative.
+3. Allow only minimal normative keys: `domain`, `status`, plus `term` and optional `aliases` on canonical term pages.
+4. Check frontmatter does NOT contain `type:` (classification lives in domains.yaml).
+5. Check frontmatter does NOT contain `consumers:` (consumer lists live in domains.yaml).
+6. Check body does NOT contain a "Context Map Relationships" section (context map lives in domains.yaml).
+7. Check body does NOT repeat the domain description from domains.yaml verbatim.
+8. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
+9. Check that README.md has substantive content beyond the title and reference line.
 
 ### Step 8: Check OpenAPI completeness (backend domains only)
 

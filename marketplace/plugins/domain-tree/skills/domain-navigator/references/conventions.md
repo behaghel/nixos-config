@@ -123,15 +123,14 @@ Every spec file should have YAML frontmatter:
 ---
 domain: issuance
 status: draft | approved | stale
-last-reviewed: 2026-04-12
 ---
 ```
 
 - `domain` — must match a domain in `domains.yaml`
 - `status` — lifecycle state (`draft` → `approved` → `stale` when code outpaces spec)
-- `last-reviewed` — when a human last verified accuracy
+- canonical term pages additionally declare `term` and may declare `aliases`
 
-Do NOT use `governs:` in spec frontmatter. Code ownership is already declared via `code-paths` in `domains.yaml` — maintaining a second mapping in each spec file creates drift.
+Keep normative metadata minimal. Do NOT use `last-reviewed`, delivery state, or `governs:`. Code ownership is already declared in `domains.yaml`; Git preserves review and delivery history.
 
 ### Domain-level spec
 
@@ -146,12 +145,7 @@ src/issuance/
 └── ...code...
 ```
 
-`README.md` is **optional**. Only create one when the domain has content worth capturing:
-- Ubiquitous language (key terms and their meanings in this domain)
-- Cross-cutting invariants and key concepts
-- Domain events
-
-Do NOT create an `README.md` that is just a title and a reference line — that adds nothing. Domains without ubiquitous language, invariants, or events do not need one.
+`README.md` is the required domain overview. Keep it concise and substantive: ubiquitous language, responsibilities, invariants, boundaries, or domain events. Do not create an overview that only repeats manifest metadata.
 
 `README.md` does NOT duplicate information already in `domains.yaml`:
 - Description
@@ -168,13 +162,13 @@ Do NOT create an `README.md` that is just a title and a reference line — that 
 
 1. **Individual files listed**: If a domain lists `ui/FooScreen.kt`, `ui/BarScreen.kt` instead of `ui/foo/`, the code likely needs refactoring into subdirectories that match the domain boundary.
 2. **Many subdirectories of the same parent**: If a domain lists `ui/mapper/`, `ui/model/`, `ui/components/` — the parent `ui/` probably belongs to the domain. List the parent, not each child.
-3. **Overlapping paths**: If two domains claim files in the same directory, the directory mixes concerns — refactor into separate directories.
+3. **Overlapping paths**: Parent/child overlap is valid and the most-specific matching child owns the file. If unrelated domains claim the same path, establish one semantic owner or refactor into distinct directories.
 
 When `/domain-tree:check` detects these patterns, it should recommend the refactoring rather than silently accepting the file-level mappings.
 
 ### Spec files live next to code, not in docs/
 
-All behavioral specifications must live under the domain's colocated spec directory (normally the first `code` path). If a spec-like document exists in `docs/` (e.g., `docs/VERIFICATION_PROTOCOL.md`), it should be moved next to the appropriate domain's code. `docs/` is for guides, plans, and non-normative documentation — not for specs that govern code.
+All behavioral specifications must live under the domain's colocated spec directory (normally the first `code` path). `README.md` and sibling Markdown with `domain`/`status` frontmatter form the normative corpus. Prompts, agent instructions, guides, plans, and historical documents without that frontmatter are non-normative. If a spec-like document exists in `docs/`, move it next to the owning domain's code; keep only non-normative material in `docs/`.
 
 ## When to create a new domain
 

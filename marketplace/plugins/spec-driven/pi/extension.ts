@@ -14,8 +14,16 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { dirname, join, resolve, basename } from "path";
 import { Type } from "typebox";
+import {
+	entryForResolution,
+	flattenDomains,
+	parseDomainsYaml,
+	resolveDomainForFilePath,
+	specDirForEntry,
+	specLabelForEntry,
+	validateNormativeSpecContent,
+} from "../../domain-tree/pi/domain-core.ts";
 
 export default function specDrivenExtension(pi: ExtensionAPI) {
 	const specExpertise = `
@@ -75,7 +83,7 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 	pi.registerTool({
 		name: "check_spec_coverage",
 		label: "Check Spec Coverage",
-		description: "Check if a spec exists and is up-to-date for a given domain or file path",
+		description: "Check if a valid normative spec exists for a given domain or file path",
 		promptSnippet: "Check if a spec exists for a domain",
 		parameters: Type.Object({
 			path: Type.String({
@@ -83,9 +91,72 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 			}),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const { readdir, stat } = await import("fs/promises");
-			const { join, resolve, dirname } = await import("path");
+			const { readFile, readdir, stat } = await import("fs/promises");
+			const { join } = await import("path");
 			const cwd = process.cwd();
+
+			try {
+				const content = await readFile(join(cwd, "domains.yaml"), "utf-8");
+				const domains = parseDomainsYaml(content);
+				const requested = params.path.replace(/\s*>\s*/g, " > ");
+				const directNode = flattenDomains(domains).find((node) =>
+					node.path.join(" > ") === requested || node.path[node.path.length - 1] === requested
+				);
+				const resolved = directNode
+					? { domain: directNode.path[0], subdomain: directNode.path.length > 1 ? directNode.path.slice(1).join(" > ") : null, type: directNode.type }
+					: resolveDomainForFilePath(params.path, cwd, domains);
+				const entry = resolved ? entryForResolution(domains, resolved) : null;
+				const rootSpecDir = entry ? specDirForEntry(cwd, entry) : null;
+				const specLabel = entry ? specLabelForEntry(entry) : null;
+
+				if (rootSpecDir && specLabel && resolved) {
+					const files = await readdir(rootSpecDir);
+					const expectedDomain = [
+						resolved.domain,
+						...(resolved.subdomain ? resolved.subdomain.split(" > ") : []),
+					].join("/");
+					const normativeFiles: string[] = [];
+					const invalidFiles: string[] = [];
+					for (const file of files.filter((name: string) => name.endsWith(".md"))) {
+						const specContent = await readFile(join(rootSpecDir, file), "utf-8");
+						const isReadme = file === "README.md";
+						if (!isReadme && !specContent.startsWith("---\n")) continue;
+						const validationIssues = validateNormativeSpecContent(
+							specContent,
+							expectedDomain,
+							isReadme,
+						);
+						if (validationIssues.length === 0) normativeFiles.push(file);
+						else invalidFiles.push(`${file}: ${validationIssues.join(" ")}`);
+					}
+					if (normativeFiles.length > 0 && normativeFiles.includes("README.md")) {
+						return {
+							content: [{
+								type: "text",
+								text: `**${params.path}** has ${normativeFiles.length} normative spec file(s):\n` +
+									normativeFiles.map((file: string) => `  - \`${specLabel}${file}\``).join("\n") +
+									(invalidFiles.length > 0 ? `\nInvalid normative files:\n${invalidFiles.map((issue) => `  - ${issue}`).join("\n")}` : ""),
+							}],
+							details: { path: params.path, files: normativeFiles.length, specDir: specLabel, invalidFiles },
+						};
+					}
+					return {
+						content: [{ type: "text", text: `**${params.path}** has no valid normative README.md at \`${specLabel}\`.` }],
+						details: { path: params.path, files: normativeFiles.length, specDir: specLabel, invalidFiles },
+					};
+				}
+
+				return {
+					content: [{
+						type: "text",
+						text: `No spec found for **${params.path}**. Available domains:\n` +
+							flattenDomains(domains).map((node) => `  - \`${node.path.join(" > ")}\``).join("\n"),
+					}],
+					details: { path: params.path, found: false },
+				};
+			} catch {
+				// Fall through to legacy spec/ layout below.
+			}
 
 			// Check if spec/domains.yaml exists first
 			const specDir = join(cwd, "spec");
