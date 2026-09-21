@@ -14,8 +14,15 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
-import { dirname, join, resolve, basename } from "path";
 import { Type } from "typebox";
+import {
+	entryForResolution,
+	flattenDomains,
+	parseDomainsYaml,
+	resolveDomainForFilePath,
+	specDirForEntry,
+	specLabelForEntry,
+} from "../../domain-tree/pi/domain-core.ts";
 
 export default function specDrivenExtension(pi: ExtensionAPI) {
 	const specExpertise = `
@@ -83,9 +90,54 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 			}),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const { readdir, stat } = await import("fs/promises");
-			const { join, resolve, dirname } = await import("path");
+			const { readFile, readdir, stat } = await import("fs/promises");
+			const { join } = await import("path");
 			const cwd = process.cwd();
+
+			try {
+				const content = await readFile(join(cwd, "domains.yaml"), "utf-8");
+				const domains = parseDomainsYaml(content);
+				const requested = params.path.replace(/\s*>\s*/g, " > ");
+				const directNode = flattenDomains(domains).find((node) =>
+					node.path.join(" > ") === requested || node.path[node.path.length - 1] === requested
+				);
+				const resolved = directNode
+					? { domain: directNode.path[0], subdomain: directNode.path.length > 1 ? directNode.path.slice(1).join(" > ") : null, type: directNode.type }
+					: resolveDomainForFilePath(params.path, cwd, domains);
+				const entry = resolved ? entryForResolution(domains, resolved) : null;
+				const rootSpecDir = entry ? specDirForEntry(cwd, entry) : null;
+				const specLabel = entry ? specLabelForEntry(entry) : null;
+
+				if (rootSpecDir && specLabel) {
+					const files = await readdir(rootSpecDir);
+					const mdFiles = files.filter((f: string) => f.endsWith(".md"));
+					if (mdFiles.length > 0) {
+						return {
+							content: [{
+								type: "text",
+								text: `**${params.path}** has ${mdFiles.length} spec file(s):\n` +
+									mdFiles.map((f: string) => `  - \`${specLabel}${f}\``).join("\n"),
+							}],
+							details: { path: params.path, files: mdFiles.length, specDir: specLabel },
+						};
+					}
+					return {
+						content: [{ type: "text", text: `**${params.path}** spec directory exists at \`${specLabel}\` but contains no markdown files.` }],
+						details: { path: params.path, files: 0, specDir: specLabel },
+					};
+				}
+
+				return {
+					content: [{
+						type: "text",
+						text: `No spec found for **${params.path}**. Available domains:\n` +
+							flattenDomains(domains).map((node) => `  - \`${node.path.join(" > ")}\``).join("\n"),
+					}],
+					details: { path: params.path, found: false },
+				};
+			} catch {
+				// Fall through to legacy spec/ layout below.
+			}
 
 			// Check if spec/domains.yaml exists first
 			const specDir = join(cwd, "spec");

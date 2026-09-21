@@ -20,8 +20,17 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync } from "fs";
 import { readFile, access } from "fs/promises";
-import { join, resolve, basename, dirname, relative } from "path";
+import { join, resolve, basename, dirname } from "path";
 import { Type } from "typebox";
+import {
+	entryForResolution,
+	findAmbiguousCodeMappings,
+	flattenDomains,
+	parseDomainsYaml,
+	resolveDomainForFilePath,
+	specDirForEntry,
+	specLabelForEntry,
+} from "./domain-core.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -64,24 +73,6 @@ function isLegacyManifest(root: string): boolean {
 	return !pathExists(join(root, DOMAIN_MANIFEST)) && pathExists(join(root, LEGACY_DOMAIN_MANIFEST));
 }
 
-function normalizeDomainDir(pathValue: string): string {
-	return pathValue.replace(/\/\*$/, "").replace(/\/+$/, "");
-}
-
-function specDirForEntry(root: string, entry: any): string | null {
-	if (entry.spec) return join(root, normalizeDomainDir(entry.spec));
-	const codePaths = entry.code || [];
-	if (codePaths.length === 0) return null;
-	return join(root, normalizeDomainDir(codePaths[0]));
-}
-
-function specLabelForEntry(entry: any): string | null {
-	if (entry.spec) return `${normalizeDomainDir(entry.spec)}/`;
-	const codePaths = entry.code || [];
-	if (codePaths.length === 0) return null;
-	return `${normalizeDomainDir(codePaths[0])}/`;
-}
-
 /** Strip YAML frontmatter (--- ... ---) from markdown content. */
 function stripFrontmatter(content: string): string {
 	const lines = content.split("\n");
@@ -107,180 +98,7 @@ function stripFrontmatter(content: string): string {
 async function tryLoadDomains(root: string): Promise<Record<string, any> | null> {
 	try {
 		const content = await readFile(join(root, manifestRelPath(root)), "utf-8");
-		// Simple YAML-like parse for the domains section (no full YAML parser dependency).
-		// Keep this parser intentionally conservative: only keys under an explicit
-		// `subdomains:` block are subdomains. Domain metadata keys such as
-		// `language:` are not structural children and must not be treated as
-		// `<domain> > language`.
-		const domains: Record<string, any> = {};
-		const lines = content.split("\n");
-		let currentDomain: string | null = null;
-		let currentSubdomain: string | null = null;
-		let inDomains = false;
-		let inContextMap = false;
-		let inSubdomainsBlock = false;
-		let collectingCodeFor: { domain: string; subdomain: string | null } | null = null;
-
-		const indentation = (line: string) => line.match(/^ */)?.[0].length ?? 0;
-		const unquote = (value: string) => value.trim().replace(/^'(.*)'$/, "$1").replace(/^"(.*)"$/, "$1");
-		const splitInlineList = (value: string) => value.split(",").map(unquote).filter(Boolean);
-		const codeTarget = (indent: number): { domain: string; subdomain: string | null } | null => {
-			if (!currentDomain) return null;
-			if (inSubdomainsBlock && currentSubdomain && indent >= 8) {
-				return { domain: currentDomain, subdomain: currentSubdomain };
-			}
-			return { domain: currentDomain, subdomain: null };
-		};
-		const setCode = (target: { domain: string; subdomain: string | null }, paths: string[]) => {
-			if (target.subdomain) {
-				domains[target.domain].subdomains[target.subdomain].code = paths;
-			} else {
-				domains[target.domain].code = paths;
-			}
-		};
-		const appendCode = (target: { domain: string; subdomain: string | null }, pathValue: string) => {
-			if (target.subdomain) {
-				const sub = domains[target.domain].subdomains[target.subdomain];
-				sub.code = [...(sub.code || []), pathValue];
-			} else {
-				const domain = domains[target.domain];
-				domain.code = [...(domain.code || []), pathValue];
-			}
-		};
-		const setType = (target: { domain: string; subdomain: string | null }, type: string) => {
-			if (target.subdomain) {
-				domains[target.domain].subdomains[target.subdomain].type = type;
-			} else {
-				domains[target.domain].type = type;
-			}
-		};
-		const setSpec = (target: { domain: string; subdomain: string | null }, specPath: string) => {
-			if (target.subdomain) {
-				domains[target.domain].subdomains[target.subdomain].spec = specPath;
-			} else {
-				domains[target.domain].spec = specPath;
-			}
-		};
-
-		for (const line of lines) {
-			const trimmed = line.trim();
-			const indent = indentation(line);
-
-			if (trimmed === "domains:") {
-				inDomains = true;
-				inContextMap = false;
-				continue;
-			}
-			if (trimmed === "context-map:") {
-				inDomains = false;
-				inContextMap = true;
-				inSubdomainsBlock = false;
-				currentSubdomain = null;
-				collectingCodeFor = null;
-				continue;
-			}
-			if (trimmed.startsWith("project:") || trimmed === "") {
-				continue;
-			}
-
-			if (inDomains) {
-				// Top-level domain key: exactly two spaces under `domains:`.
-				const keyOnlyMatch = trimmed.match(/^(\w[\w-]*):$/);
-				if (keyOnlyMatch && indent === 2) {
-					currentDomain = keyOnlyMatch[1];
-					currentSubdomain = null;
-					inSubdomainsBlock = false;
-					collectingCodeFor = null;
-					domains[currentDomain] = { name: currentDomain, type: "supporting" };
-					continue;
-				}
-
-				if (!currentDomain) continue;
-
-				// Domain-level metadata key. Only `subdomains:` opens structural children.
-				if (indent === 4 && keyOnlyMatch) {
-					currentSubdomain = null;
-					collectingCodeFor = null;
-					inSubdomainsBlock = trimmed === "subdomains:";
-					continue;
-				}
-
-				// Subdomain key: exactly six spaces under an explicit `subdomains:` block.
-				if (inSubdomainsBlock && keyOnlyMatch && indent === 6) {
-					const domainName = currentDomain;
-					const subdomainName = keyOnlyMatch[1];
-					currentSubdomain = subdomainName;
-					collectingCodeFor = null;
-					if (!domains[domainName].subdomains) {
-						domains[domainName].subdomains = {};
-					}
-					domains[domainName].subdomains[subdomainName] = { name: subdomainName };
-					continue;
-				}
-
-				// Leaving the subdomain section for another domain-level field.
-				if (indent <= 4 && trimmed !== "subdomains:") {
-					currentSubdomain = null;
-					inSubdomainsBlock = false;
-				}
-
-				// type field
-				const typeMatch = trimmed.match(/^type:\s*(core|supporting|generic|shared-kernel)/);
-				if (typeMatch) {
-					const target = codeTarget(indent);
-					if (target) setType(target, typeMatch[1]);
-					continue;
-				}
-
-				// spec field (optional override; otherwise inferred from the first code path)
-				const specMatch = trimmed.match(/^spec:\s*(.+)$/);
-				if (specMatch) {
-					const target = codeTarget(indent);
-					if (target) setSpec(target, unquote(specMatch[1]));
-					continue;
-				}
-
-				// code field (inline list)
-				const codeInlineMatch = trimmed.match(/^code:\s*\[(.*)\]/);
-				if (codeInlineMatch) {
-					const target = codeTarget(indent);
-					if (target) setCode(target, splitInlineList(codeInlineMatch[1]));
-					collectingCodeFor = null;
-					continue;
-				}
-
-				// code field (multiline list)
-				if (trimmed === "code:") {
-					collectingCodeFor = codeTarget(indent);
-					if (collectingCodeFor) setCode(collectingCodeFor, []);
-					continue;
-				}
-
-				const codePathMatch = trimmed.match(/^-\s+(.+)$/);
-				if (codePathMatch && collectingCodeFor) {
-					appendCode(collectingCodeFor, unquote(codePathMatch[1]));
-					continue;
-				}
-			}
-
-			if (inContextMap) {
-				// Collect context map entries (from/to/pattern)
-				const fromMatch = trimmed.match(/^from:\s*(\S+)/);
-				const toMatch = trimmed.match(/^to:\s*(\S+)/);
-				const patternMatch = trimmed.match(/^pattern:\s*(\S+)/);
-				if (fromMatch || toMatch || patternMatch) {
-					// Simple tracking - just note that relationships exist
-				}
-			}
-		}
-
-		// Also extract context-map roughly
-		const contextMapMatch = content.match(/context-map:\s*\n((?:\s+.*\n)*)/);
-		if (contextMapMatch) {
-			domains._contextMap = contextMapMatch[1];
-		}
-
-		return domains;
+		return parseDomainsYaml(content);
 	} catch {
 		return null;
 	}
@@ -288,41 +106,12 @@ async function tryLoadDomains(root: string): Promise<Record<string, any> | null>
 
 /** Determine which domain a file path belongs to from the domain manifest. */
 async function resolveDomainForFile(filePath: string, root: string, domains: Record<string, any>): Promise<{ domain: string; subdomain: string | null; type: string } | null> {
-	const absPath = resolve(root, filePath);
-	const relPath = relative(root, absPath);
-
-	for (const [domainName, domain] of Object.entries(domains)) {
-		if (domainName.startsWith("_")) continue;
-
-		// Check subdomains first
-		if (domain.subdomains) {
-			for (const [subName, subdomain] of Object.entries(domain.subdomains) as [string, any][]) {
-				const codePaths = subdomain.code || [];
-				for (const cp of codePaths) {
-					const cpNorm = cp.replace(/\/+$/, "");
-					if (relPath === cpNorm || relPath.startsWith(cpNorm + "/") || relPath.startsWith(cpNorm.replace(/\/\*$/, ""))) {
-						return { domain: domainName, subdomain: subName, type: subdomain.type || domain.type || "supporting" };
-					}
-				}
-			}
-		}
-
-		// Check domain-level code paths
-		const codePaths = domain.code || [];
-		for (const cp of codePaths) {
-			const cpNorm = cp.replace(/\/+$/, "");
-			if (relPath === cpNorm || relPath.startsWith(cpNorm + "/")) {
-				return { domain: domainName, subdomain: null, type: domain.type || "supporting" };
-			}
-		}
-	}
-
-	return null;
+	return resolveDomainForFilePath(filePath, root, domains);
 }
 
 /** Check if a spec exists for a given domain. */
 async function specExistsForDomain(root: string, domains: Record<string, any>, domainName: string, subdomain: string | null): Promise<boolean> {
-	const entry = subdomain ? domains[domainName]?.subdomains?.[subdomain] : domains[domainName];
+	const entry = entryForResolution(domains, { domain: domainName, subdomain, type: "supporting" });
 	const specDir = entry ? specDirForEntry(root, entry) : null;
 	if (!specDir) return false;
 	try {
@@ -582,9 +371,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 				"shared-kernel": "🔵",
 			};
 
-			const specEntry = resolved.subdomain
-				? domainsCache[resolved.domain]?.subdomains?.[resolved.subdomain]
-				: domainsCache[resolved.domain];
+			const specEntry = entryForResolution(domainsCache, resolved);
 			const specDir = specEntry ? specLabelForEntry(specEntry) || "(no spec path; add a code path or spec override)" : "(unknown)";
 
 			return {
@@ -660,52 +447,30 @@ For detailed reference, load the \`domain-navigator\` skill.
 
 			// Step 1: Check declared paths exist
 			results.push("### 📁 Mappings: manifest → codebase");
-			for (const [domainName, domain] of Object.entries(domainsCache)) {
-				if (domainName.startsWith("_")) continue;
-
-				const checkPaths = async (paths: string[], label: string) => {
-					for (const cp of paths || []) {
-						const cpNorm = cp.replace(/\/+$/, "");
-						const fullPath = join(domainRoot!, cpNorm);
-						try {
-							await stat(fullPath);
-							passed++;
-						} catch {
-							results.push(`  ⚠ Domain **${domainName}**${label} declares \`${cp}\` but it doesn't exist`);
-							issues++;
-						}
+			const nodes = flattenDomains(domainsCache);
+			for (const node of nodes) {
+				const label = node.path.join(" > ");
+				for (const cp of node.entry.code || []) {
+					const cpNorm = cp.replace(/\/+$/, "");
+					const fullPath = join(domainRoot!, cpNorm);
+					try {
+						await stat(fullPath);
+						passed++;
+					} catch {
+						results.push(`  ⚠ Domain **${label}** declares \`${cp}\` but it doesn't exist`);
+						issues++;
 					}
-				};
+				}
 
-				await checkPaths(domain.code || [], "");
-				// Check colocated spec dir
-				const specDir = specDirForEntry(domainRoot, domain);
-				const specLabel = specLabelForEntry(domain);
+				const specDir = specDirForEntry(domainRoot, node.entry);
+				const specLabel = specLabelForEntry(node.entry);
 				if (specDir && specLabel) {
 					try {
 						await stat(specDir);
 						passed++;
 					} catch {
-						results.push(`  ⚠ Domain **${domainName}** has no spec directory at \`${specLabel}\``);
+						results.push(`  ⚠ Domain **${label}** has no spec directory at \`${specLabel}\``);
 						issues++;
-					}
-				}
-
-				// Check subdomains
-				if (domain.subdomains) {
-					for (const [subName, sub] of Object.entries(domain.subdomains) as [string, any][]) {
-						await checkPaths(sub.code || [], ` > ${subName}`);
-						const subSpecDir = specDirForEntry(domainRoot, sub);
-						const subSpecLabel = specLabelForEntry(sub);
-						if (subSpecDir && subSpecLabel) {
-							try {
-								await stat(subSpecDir);
-								passed++;
-							} catch {
-								results.push(`  ⚠ Domain **${domainName} > ${subName}** has no spec directory at \`${subSpecLabel}\``);
-								issues++;
-							}
-						}
 					}
 				}
 			}
@@ -717,10 +482,10 @@ For detailed reference, load the \`domain-navigator\` skill.
 			// Step 2: Classification consistency
 			results.push("");
 			results.push("### 🏷️ Classification check");
-			for (const [domainName, domain] of Object.entries(domainsCache)) {
-				if (domainName.startsWith("_")) continue;
-				if (!domain.type) {
-					results.push(`  ⚠ Domain **${domainName}** has no type field`);
+			for (const node of nodes) {
+				const label = node.path.join(" > ");
+				if (!node.entry.type && node.path.length === 1) {
+					results.push(`  ⚠ Domain **${label}** has no type field`);
 					issues++;
 				} else {
 					passed++;
@@ -730,11 +495,23 @@ For detailed reference, load the \`domain-navigator\` skill.
 				results.push("  ✅ All domains have a type");
 			}
 
-			// Step 3: Context map (if detailed)
-			if (params.detailed && domainsCache._contextMap) {
-				results.push("");
-				results.push("### 🔗 Context map");
-				results.push("  ℹ Context map entries declared. Run `/domain-tree:check` locally for full validation.");
+			// Step 3: Detailed checks
+			if (params.detailed) {
+				const ambiguousMappings = findAmbiguousCodeMappings(domainsCache);
+				if (ambiguousMappings.length > 0) {
+					results.push("");
+					results.push("### 🧭 Mapping ambiguity");
+					for (const issue of ambiguousMappings) {
+						results.push(`  ⚠ ${issue}`);
+						issues++;
+					}
+				}
+
+				if (domainsCache._contextMap) {
+					results.push("");
+					results.push("### 🔗 Context map");
+					results.push("  ℹ Context map entries declared. Run `/domain-tree:check` locally for full validation.");
+				}
 			}
 
 			// Summary
@@ -788,48 +565,23 @@ For detailed reference, load the \`domain-navigator\` skill.
 			rows.push(`| Domain | Type | Specs | Status |`);
 			rows.push(`|--------|------|-------|--------|`);
 
-			for (const [domainName, domain] of Object.entries(domainsCache)) {
-				if (domainName.startsWith("_")) continue;
-
-				const type = domain.type || "supporting";
+			for (const node of flattenDomains(domainsCache)) {
+				const type = node.type || "supporting";
 				const emoji = typeEmoji[type] || "🟡";
 				const typeLabel = `${emoji} ${type}`;
+				const label = node.path.length === 1 ? `**${node.path[0]}**` : node.path.join(" > ");
 
-				// Count spec files
-				let specCount = 0;
 				let specStatus = "❌ none";
-
-				if (domain.subdomains) {
-					// Check subdomains
-					const subRows: string[] = [];
-					for (const [subName, sub] of Object.entries(domain.subdomains) as [string, any][]) {
-						const subSpecDir = specDirForEntry(domainRoot, sub);
-						try {
-							const files = subSpecDir ? await readdir(subSpecDir) : [];
-							const mdFiles = files.filter((f: string) => f.endsWith(".md"));
-							const subSpecCount = mdFiles.length;
-							specCount += subSpecCount;
-							const subStatus = subSpecCount > 0 ? `✅ ${subSpecCount}` : "❌ none";
-							subRows.push(`| ${domainName} > ${subName} | | ${subStatus} | |`);
-						} catch {
-							subRows.push(`| ${domainName} > ${subName} | | ❌ none | |`);
-						}
-					}
-					specStatus = specCount > 1 ? `✅ ${specCount}` : specCount === 1 ? "✅ 1" : "❌ none";
-					rows.push(`| **${domainName}** | ${typeLabel} | ${specStatus} | |`);
-					rows.push(...subRows);
-				} else {
-					const specDir = specDirForEntry(domainRoot, domain);
-					try {
-						const files = specDir ? await readdir(specDir) : [];
-						const mdFiles = files.filter((f: string) => f.endsWith(".md"));
-						specCount = mdFiles.length;
-						specStatus = specCount > 0 ? `✅ ${specCount}` : "❌ none";
-					} catch {
-						specStatus = "❌ none";
-					}
-					rows.push(`| **${domainName}** | ${typeLabel} | ${specStatus} | |`);
+				const specDir = specDirForEntry(domainRoot, node.entry);
+				try {
+					const files = specDir ? await readdir(specDir) : [];
+					const mdFiles = files.filter((f: string) => f.endsWith(".md"));
+					specStatus = mdFiles.length > 0 ? `✅ ${mdFiles.length}` : "❌ none";
+				} catch {
+					specStatus = "❌ none";
 				}
+
+				rows.push(`| ${label} | ${typeLabel} | ${specStatus} | |`);
 			}
 
 			// Context map section
