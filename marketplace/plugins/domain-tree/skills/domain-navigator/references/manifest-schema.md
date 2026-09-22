@@ -12,6 +12,10 @@ project:
   name: my-project
   description: One-line project description
 
+# Optional project-level normative corpus for requirements that cannot
+# be assigned to one domain by subsidiarity.
+system-specs: [doc/system/]
+
 # Structural groups and domains
 domains:
   <group-name>:
@@ -54,6 +58,25 @@ context-map:
 A `kind: group` entry provides namespace and presentation structure only. Its `domains` may contain domains or nested groups. Groups are not bounded contexts: they have no classification, lifecycle, owners, language, code ownership, specification, subdomains, or context-map relationships. The only allowed group fields are `kind`, `description`, and `domains`. Fully qualified domain names retain their group path, such as `business/time-management`.
 
 Entries without `kind: group` remain domains. Domain nesting uses `subdomains`, not `domains`. A domain must declare `code` or an explicit `spec`; a node with only children is invalid and should normally become a group.
+
+## Normative corpora
+
+Domain specifications are the default. They contain durable, present-tense behavior, ubiquitous language, boundaries, invariants, and semantic contracts owned by one domain.
+
+`system-specs` may declare Markdown files or directories. Directories are scanned recursively. Every included file is normative and must use only this frontmatter:
+
+```yaml
+---
+system: my-project
+status: draft | approved | stale
+---
+```
+
+The `system` value must equal `project.name`, and every system spec must contain at least one uppercase RFC 2119 keyword: `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, or `MAY`. System specs cannot own ubiquitous terms; they link to domain-owned canonical pages. Use system specs only for stable requirements that subsidiarity cannot assign to one domain.
+
+Iteration specs are temporary delivery artifacts. They remain outside domain spec directories and declared `system-specs`, carry no normative frontmatter, and are deleted when no longer useful.
+
+Normative domain and system specs reject project-management sections such as roadmaps, rollout or migration plans, progress, delivery status, milestones, and verification plans. They state durable behavior rather than legacy comparisons or temporary implementation concerns.
 
 ## Domain classification
 

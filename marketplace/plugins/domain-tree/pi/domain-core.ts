@@ -30,6 +30,8 @@ export type ContextMapEntry = {
 export type Domains = Record<string, DomainTreeEntry> & {
 	_contextMap?: string;
 	_contextEntries?: ContextMapEntry[];
+	_project?: { name?: string; description?: string };
+	_systemSpecs?: string[];
 };
 
 export type DomainNode = {
@@ -478,8 +480,45 @@ export function parseDomainManifest(content: string): DomainManifestResult {
 	}
 	validateDomainEntries(manifest.domains, "domains", diagnostics, true);
 	validateStringList(manifest["system-specs"], "system-specs", diagnostics);
+	if (Array.isArray(manifest["system-specs"])) {
+		for (const [index, systemSpecPath] of manifest["system-specs"].entries()) {
+			if (
+				typeof systemSpecPath === "string" &&
+				(systemSpecPath.startsWith("/") ||
+					systemSpecPath.startsWith("\\") ||
+					/^[A-Za-z]:[\\/]/.test(systemSpecPath) ||
+					systemSpecPath.split(/[\\/]/).includes(".."))
+			) {
+				diagnostics.push({
+					path: `system-specs[${index}]`,
+					message: "System-spec paths must stay within the project root.",
+				});
+			}
+		}
+	}
+	if (
+		Array.isArray(manifest["system-specs"]) &&
+		manifest["system-specs"].length > 0 &&
+		!(isRecord(manifest.project) && typeof manifest.project.name === "string" && manifest.project.name.length > 0)
+	) {
+		diagnostics.push({
+			path: "project.name",
+			message: "A project name is required when `system-specs` are declared.",
+		});
+	}
 
 	const domains = parseDomainEntries(manifest.domains) as Domains;
+	if (isRecord(manifest.project)) {
+		domains._project = {
+			name: typeof manifest.project.name === "string" ? manifest.project.name : undefined,
+			description: typeof manifest.project.description === "string"
+				? manifest.project.description
+				: undefined,
+		};
+	}
+	if (Array.isArray(manifest["system-specs"])) {
+		domains._systemSpecs = stringArray(manifest["system-specs"]) || [];
+	}
 	const domainPaths = new Set(
 		flattenDomains(domains).map((node) => node.path.join("/")),
 	);
@@ -642,25 +681,74 @@ const NORMATIVE_FRONTMATTER_KEYS = new Set([
 	"term",
 	"aliases",
 ]);
+const SYSTEM_FRONTMATTER_KEYS = new Set(["system", "status"]);
+const FORBIDDEN_NORMATIVE_SECTIONS = new Set([
+	"roadmap",
+	"rollout",
+	"progress",
+	"migration plan",
+	"implementation plan",
+	"delivery status",
+	"verification plan",
+	"milestones",
+	"deadlines",
+	"assignees",
+]);
+
+function parseFrontmatter(content: string): {
+	metadata: Map<string, string>;
+	body: string;
+} | null {
+	const match = content.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
+	if (!match) return null;
+	const metadata = new Map<string, string>();
+	for (const line of match[1].split("\n")) {
+		const field = line.match(/^([a-z][a-z-]*):\s*(.*)$/);
+		if (field) metadata.set(field[1], field[2].trim());
+	}
+	return { metadata, body: content.slice(match[0].length) };
+}
+
+function validateTimelessNormativeBody(body: string): string[] {
+	const issues: string[] = [];
+	for (const line of body.split("\n")) {
+		const heading = line.match(/^#{1,6}\s+(.+?)\s*#*$/)?.[1]?.trim();
+		if (heading && FORBIDDEN_NORMATIVE_SECTIONS.has(heading.toLowerCase())) {
+			issues.push(
+				`Normative specifications must not contain a \`${heading}\` section.`,
+			);
+		}
+	}
+	return issues;
+}
+
+function validateNormativeStatus(
+	metadata: Map<string, string>,
+	label: string,
+): string[] {
+	const status = metadata.get("status");
+	if (!status) return [`${label} frontmatter must declare \`status\`.`];
+	if (!["draft", "approved", "stale"].includes(status)) {
+		return [
+			`${label} frontmatter \`status\` must be \`draft\`, \`approved\`, or \`stale\`.`,
+		];
+	}
+	return [];
+}
 
 export function validateNormativeSpecContent(
 	content: string,
 	expectedDomain: string,
 	isReadme: boolean,
 ): string[] {
-	const match = content.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
-	if (!match) {
+	const parsed = parseFrontmatter(content);
+	if (!parsed) {
 		return isReadme
 			? ["README.md must declare normative frontmatter with `domain` and `status`."]
 			: [];
 	}
 
-	const metadata = new Map<string, string>();
-	for (const line of match[1].split("\n")) {
-		const field = line.match(/^([a-z][a-z-]*):\s*(.*)$/);
-		if (field) metadata.set(field[1], field[2].trim());
-	}
-
+	const { metadata, body } = parsed;
 	const issues: string[] = [];
 	for (const key of metadata.keys()) {
 		if (!NORMATIVE_FRONTMATTER_KEYS.has(key)) {
@@ -672,17 +760,39 @@ export function validateNormativeSpecContent(
 			`Normative frontmatter domain must be \`${expectedDomain}\`.`,
 		);
 	}
-	const status = metadata.get("status");
-	if (!status) {
-		issues.push("Normative frontmatter must declare `status`.");
-	} else if (!["draft", "approved", "stale"].includes(status)) {
-		issues.push(
-			"Normative frontmatter `status` must be `draft`, `approved`, or `stale`.",
-		);
-	}
+	issues.push(...validateNormativeStatus(metadata, "Normative"));
 	if (metadata.has("aliases") && !metadata.has("term")) {
 		issues.push("Normative frontmatter `aliases` requires a canonical `term`.");
 	}
+	issues.push(...validateTimelessNormativeBody(body));
+	return issues;
+}
+
+export function validateSystemSpecContent(
+	content: string,
+	expectedSystem: string,
+): string[] {
+	const parsed = parseFrontmatter(content);
+	if (!parsed) {
+		return ["System specifications must declare `system` and `status` frontmatter."];
+	}
+	const { metadata, body } = parsed;
+	const issues: string[] = [];
+	for (const key of metadata.keys()) {
+		if (!SYSTEM_FRONTMATTER_KEYS.has(key)) {
+			issues.push(`Unsupported system-spec frontmatter key \`${key}\`.`);
+		}
+	}
+	if (metadata.get("system") !== expectedSystem) {
+		issues.push(`System frontmatter must identify \`${expectedSystem}\`.`);
+	}
+	issues.push(...validateNormativeStatus(metadata, "System"));
+	if (!/\b(?:MUST(?: NOT)?|SHOULD(?: NOT)?|MAY)\b/.test(body)) {
+		issues.push(
+			"System specifications must contain at least one RFC 2119 requirement keyword.",
+		);
+	}
+	issues.push(...validateTimelessNormativeBody(body));
 	return issues;
 }
 

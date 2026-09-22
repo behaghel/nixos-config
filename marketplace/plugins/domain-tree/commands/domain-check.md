@@ -101,6 +101,19 @@ For each domain's colocated specification directory:
 5. Check frontmatter does NOT contain `consumers:` (consumer lists live in domains.yaml).
 6. Check body does NOT contain a "Context Map Relationships" section (context map lives in domains.yaml).
 7. Check body does NOT repeat the domain description from domains.yaml verbatim.
+8. Reject project-management sections: roadmaps, rollout or migration plans, progress, implementation plans, delivery status, verification plans, milestones, deadlines, and assignees. Reject delivery-phase tracking and completion percentages during semantic review without banning legitimate domain lifecycle language.
+9. Require durable present-tense behavior rather than legacy comparisons, transitional commentary, or temporary workarounds.
+
+### Step 7c: Check system specifications
+
+For every file or recursively scanned directory declared in `system-specs`:
+
+1. Require Markdown files with only `system` and `status` frontmatter.
+2. Require `system` to equal `project.name`.
+3. Require at least one uppercase RFC 2119 keyword: `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, or `MAY`.
+4. Reject `term` and `aliases`; ubiquitous language remains domain-owned.
+5. Apply the same timelessness and project-management exclusions as domain specs.
+6. Ignore iteration documents outside declared domain and system corpora.
 8. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
 9. Check that README.md has substantive content beyond the title and reference line.
 

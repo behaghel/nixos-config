@@ -127,6 +127,14 @@ The first `/domain-tree:check` on a legacy tree reports a migration section. The
 4. Remove old `spec:` fields or update them to explicit colocated paths.
 5. Delete the old `spec/` tree once empty.
 
+## Specification corpora
+
+Domain specifications are the default. They define durable behavior, ubiquitous language, boundaries, invariants, and semantic contracts at the narrowest capable owner.
+
+Use `system-specs` only for stable, project-wide requirements that subsidiarity cannot assign to one domain. System specs use `system`/`status` frontmatter and RFC 2119 requirements. Temporary iteration specs remain non-normative and outside both corpora.
+
+Apply specification DRY: define each concept, invariant, or contract once, then link to its canonical owner and describe only local consequences. Normative specs reject roadmaps, rollout or migration plans, progress, delivery metadata, verification plans, legacy comparisons, and other circumstantial concerns.
+
 ## The spec-on-touch convention
 
 > The first time you modify a domain, write its spec.

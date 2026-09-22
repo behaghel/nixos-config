@@ -19,8 +19,8 @@
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { existsSync } from "fs";
-import { readFile, access } from "fs/promises";
-import { join, resolve, basename, dirname } from "path";
+import { readFile, access, readdir, stat } from "fs/promises";
+import { join, resolve, relative, basename, dirname } from "path";
 import { Type } from "typebox";
 import {
 	entryForResolution,
@@ -32,6 +32,7 @@ import {
 	specDirForEntry,
 	specLabelForEntry,
 	validateNormativeSpecContent,
+	validateSystemSpecContent,
 } from "./domain-core.ts";
 import type { ManifestDiagnostic } from "./domain-core.ts";
 
@@ -123,6 +124,29 @@ function formatManifestDiagnostics(diagnostics: ManifestDiagnostic[]): string {
 			: "";
 		return `- \`${diagnostic.path}\`: ${diagnostic.message}${location}`;
 	}).join("\n");
+}
+
+async function collectMarkdownFiles(absolutePath: string): Promise<string[]> {
+	const pathStat = await stat(absolutePath);
+	if (pathStat.isFile()) {
+		if (!absolutePath.endsWith(".md")) {
+			throw new Error("System-spec files must use the `.md` extension.");
+		}
+		return [absolutePath];
+	}
+	if (!pathStat.isDirectory()) {
+		throw new Error("System-spec paths must identify a Markdown file or directory.");
+	}
+	const markdownPaths: string[] = [];
+	for (const entry of await readdir(absolutePath, { withFileTypes: true })) {
+		const childPath = join(absolutePath, entry.name);
+		if (entry.isDirectory()) {
+			markdownPaths.push(...await collectMarkdownFiles(childPath));
+		} else if (entry.isFile() && entry.name.endsWith(".md")) {
+			markdownPaths.push(childPath);
+		}
+	}
+	return markdownPaths;
 }
 
 /** Determine which domain a file path belongs to from the domain manifest. */
@@ -270,7 +294,9 @@ The domain tree encodes three things:
 ### Core rules
 - **Structural groups** — entries with \`kind: group\` organize nested \`domains\` but own no code, specs, classification, or context contracts.
 - **Colocated specs** — domain specs live next to code. The first \`code\` path is the default spec directory; \`README.md\` is the required main domain spec.
-- **Normative corpus** — \`README.md\` and sibling Markdown with \`domain\`/\`status\` frontmatter are normative. Plans, prompts, guides, and history without that frontmatter are not specs.
+- **Normative corpora** — Domain specs are the default. Declared \`system-specs\` hold only durable RFC 2119 requirements that cannot belong to one domain. Iteration specs are temporary and non-normative.
+- **Specification DRY** — Define each concept, invariant, or contract once at its narrowest owner; other specs link to it and state only local consequences.
+- **Timeless specifications** — Normative specs contain present-tense durable behavior, never roadmaps, rollout or migration plans, progress, delivery metadata, verification plans, legacy comparisons, or temporary workarounds.
 - **Subsidiarity** — the most-specific matching child path owns a file. Parent/child overlap is valid; unrelated domains may not claim the same path.
 - **Spec-on-touch** — The first time you modify a domain, write its spec. Rigor scales with classification:
   - **core**: spec required before any code change (hard block)
@@ -473,7 +499,6 @@ For detailed reference, load the \`domain-navigator\` skill.
 				};
 			}
 
-			const { readdir, stat } = await import("fs/promises");
 			const results: string[] = [];
 			let issues = 0;
 			let passed = 0;
@@ -565,6 +590,55 @@ For detailed reference, load the \`domain-navigator\` skill.
 			}
 			if (documentationIssues === 0) {
 				results.push("  ✅ README.md and normative frontmatter are consistent");
+			}
+
+			const systemSpecPaths = domainsCache._systemSpecs || [];
+			if (systemSpecPaths.length > 0) {
+				results.push("");
+				results.push("### 📜 System specifications");
+				const systemName = domainsCache._project?.name || "";
+				const markdownPaths = new Set<string>();
+				let systemIssues = 0;
+
+				for (const declaredPath of systemSpecPaths) {
+					const absolutePath = resolve(domainRoot, declaredPath);
+					const relativePath = relative(domainRoot, absolutePath);
+					if (relativePath === ".." || relativePath.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+						results.push(`  ⚠ System-spec path \`${declaredPath}\` escapes the project root.`);
+						issues++;
+						systemIssues++;
+						continue;
+					}
+					try {
+						for (const markdownPath of await collectMarkdownFiles(absolutePath)) {
+							markdownPaths.add(markdownPath);
+						}
+					} catch (error) {
+						results.push(
+							`  ⚠ System-spec path \`${declaredPath}\`: ${error instanceof Error ? error.message : String(error)}`,
+						);
+						issues++;
+						systemIssues++;
+					}
+				}
+
+				if (markdownPaths.size === 0) {
+					results.push("  ⚠ Declared system-spec paths contain no Markdown files.");
+					issues++;
+					systemIssues++;
+				}
+				for (const absolutePath of [...markdownPaths].sort()) {
+					const label = relative(domainRoot, absolutePath);
+					const content = await readFile(absolutePath, "utf-8");
+					for (const issue of validateSystemSpecContent(content, systemName)) {
+						results.push(`  ⚠ \`${label}\`: ${issue}`);
+						issues++;
+						systemIssues++;
+					}
+				}
+				if (markdownPaths.size > 0 && systemIssues === 0) {
+					results.push(`  ✅ ${markdownPaths.size} system specification(s) are valid`);
+				}
 			}
 
 			// Step 2: Classification consistency
@@ -667,7 +741,6 @@ For detailed reference, load the \`domain-navigator\` skill.
 				};
 			}
 
-			const { readdir } = await import("fs/promises");
 			const typeEmoji: Record<string, string> = {
 				core: "🔴",
 				supporting: "🟡",
@@ -714,6 +787,38 @@ For detailed reference, load the \`domain-navigator\` skill.
 				}
 
 				rows.push(`| ${label} | ${typeLabel} | ${specStatus} | |`);
+			}
+
+			const systemSpecPaths = domainsCache._systemSpecs || [];
+			if (systemSpecPaths.length > 0) {
+				const systemFiles = new Set<string>();
+				for (const declaredPath of systemSpecPaths) {
+					try {
+						for (const markdownPath of await collectMarkdownFiles(
+							resolve(domainRoot, declaredPath),
+						)) {
+							systemFiles.add(markdownPath);
+						}
+					} catch {
+						// The health check reports path diagnostics; the map shows zero coverage.
+					}
+				}
+				let validSystemSpecs = 0;
+				for (const file of systemFiles) {
+					const content = await readFile(file, "utf-8");
+					if (
+						validateSystemSpecContent(
+							content,
+							domainsCache._project?.name || "",
+						).length === 0
+					) {
+						validSystemSpecs++;
+					}
+				}
+				rows.push("");
+				rows.push(
+					`**System specifications:** ${validSystemSpecs}/${systemFiles.size} valid`,
+				);
 			}
 
 			// Context map section

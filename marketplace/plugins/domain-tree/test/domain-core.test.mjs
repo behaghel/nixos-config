@@ -14,6 +14,7 @@ import {
   specDirForEntry,
   entryForResolution,
   validateNormativeSpecContent,
+  validateSystemSpecContent,
 } from "../pi/domain-core.ts";
 
 const manifest = `
@@ -201,6 +202,7 @@ context-map:
 project:
   name: invalid-project
   unexpected: true
+system-specs: [../outside/]
 domains:
   business:
     kind: group
@@ -222,6 +224,10 @@ context-map:
   assert.match(
     invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
     /project\.unexpected/,
+  );
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
+    /system-specs\[0\]/,
   );
   assert.match(
     invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
@@ -296,6 +302,33 @@ context-map:
     validateNormativeSpecContent("# Non-normative guide\n", "business/time-management", false),
     [],
   );
+  assert.deepEqual(
+    validateNormativeSpecContent(
+      "---\ndomain: business/time-management\nstatus: approved\n---\n# Time management\n\n## Roadmap\n\nShip later.\n",
+      "business/time-management",
+      false,
+    ),
+    ["Normative specifications must not contain a `Roadmap` section."],
+  );
+  assert.deepEqual(
+    validateSystemSpecContent(
+      "---\nsystem: grouped-project\nstatus: approved\n---\n# Safety\n\nThe system MUST fail closed.\n",
+      "grouped-project",
+    ),
+    [],
+  );
+  assert.deepEqual(
+    validateSystemSpecContent(
+      "---\nsystem: another-project\nstatus: approved\nterm: Unsafe term\n---\n# Safety\n\n## Verification Plan\n\nCheck it later.\n",
+      "grouped-project",
+    ),
+    [
+      "Unsupported system-spec frontmatter key `term`.",
+      "System frontmatter must identify `grouped-project`.",
+      "System specifications must contain at least one RFC 2119 requirement keyword.",
+      "Normative specifications must not contain a `Verification Plan` section.",
+    ],
+  );
 
   await writeFile(join(root, "domains.yaml"), `
 domains:
@@ -356,6 +389,58 @@ domains:
   const promptResult = await beforeAgentStart({ systemPrompt: "base" });
   assert.match(promptResult.systemPrompt, /Invalid Domain Manifest/);
   assert.match(promptResult.systemPrompt, /domains\.legacy-group/);
+
+  await mkdir(join(root, "src/operations"), { recursive: true });
+  await mkdir(join(root, "doc/system/security"), { recursive: true });
+  await mkdir(join(root, "doc/iterations"), { recursive: true });
+  await writeFile(
+    join(root, "src/operations/README.md"),
+    "---\ndomain: business/operations\nstatus: approved\n---\n# Operations\n\n## Roadmap\n\nTemporary delivery detail.\n",
+  );
+  await writeFile(
+    join(root, "doc/system/security/safety.md"),
+    "---\nsystem: grouped-project\nstatus: approved\n---\n# Safety\n\nThe system MUST fail closed.\n",
+  );
+  await writeFile(
+    join(root, "doc/system/delivery.md"),
+    "---\nsystem: grouped-project\nstatus: approved\n---\n# Delivery notes\n\nNo durable requirement.\n",
+  );
+  await writeFile(
+    join(root, "doc/iterations/current.md"),
+    "# Iteration\n\n## Roadmap\n\nThis non-normative plan is allowed.\n",
+  );
+  await writeFile(join(root, "domains.yaml"), `
+project:
+  name: grouped-project
+system-specs: [doc/system/]
+domains:
+  business:
+    kind: group
+    domains:
+      operations:
+        type: core
+        code: [src/operations/]
+`);
+  const corpusResult = await registeredTools.get("domain_tree_check").execute(
+    "corpus-call",
+    {},
+    undefined,
+    undefined,
+    context,
+  );
+  assert.match(corpusResult.content[0].text, /README\.md.*Roadmap/s);
+  assert.match(corpusResult.content[0].text, /doc\/system\/delivery\.md/);
+  assert.match(corpusResult.content[0].text, /RFC 2119/);
+  assert.doesNotMatch(corpusResult.content[0].text, /doc\/iterations/);
+
+  const corpusMap = await registeredTools.get("domain_tree_map").execute(
+    "corpus-map",
+    {},
+    undefined,
+    undefined,
+    context,
+  );
+  assert.match(corpusMap.content[0].text, /System specifications:\*\* 1\/2 valid/);
 } finally {
   await rm(root, { recursive: true, force: true });
 }
