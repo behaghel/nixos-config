@@ -229,6 +229,7 @@ The domain tree encodes three things:
 3. **How domains communicate** — the context map declaring integration patterns
 
 ### Core rules
+- **Structural groups** — entries with \`kind: group\` organize nested \`domains\` but own no code, specs, classification, or context contracts.
 - **Colocated specs** — domain specs live next to code. The first \`code\` path is the default spec directory; \`README.md\` is the required main domain spec.
 - **Normative corpus** — \`README.md\` and sibling Markdown with \`domain\`/\`status\` frontmatter are normative. Plans, prompts, guides, and history without that frontmatter are not specs.
 - **Subsidiarity** — the most-specific matching child path owns a file. Parent/child overlap is valid; unrelated domains may not claim the same path.

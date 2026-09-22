@@ -18,6 +18,7 @@ Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructur
 
 | Concept | How we use it |
 |---------|--------------|
+| **Structural group** | `kind: group` provides namespace and navigation without pretending to be a bounded context |
 | **Subdomain classification** | `type: core/supporting/generic` on each domain — drives spec rigor and review requirements |
 | **Bounded context** | Each domain IS a bounded context with its own ubiquitous language |
 | **Context map** | `context-map:` section declaring cross-domain relationships and integration patterns |
@@ -48,6 +49,22 @@ Install any combination. They complement each other but don't depend on each oth
 | `/domain-tree:map` | Command | Coverage dashboard with domain types and context map visualization |
 | `/domain-tree:check` | Command | Structural health check including context map and classification validation |
 | `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
+
+## Structural groups
+
+Use explicit groups when names such as `business`, `foundation`, or `technical` organize bounded contexts but do not own behavior themselves:
+
+```yaml
+domains:
+  business:
+    kind: group
+    domains:
+      time-management:
+        type: core
+        code: [src/business/time-management/]
+```
+
+Groups may nest. They do not own code, require specifications, receive classifications, or participate in context-map relationships. Their names remain part of each child domain's fully qualified identity.
 
 ## Domain classification
 

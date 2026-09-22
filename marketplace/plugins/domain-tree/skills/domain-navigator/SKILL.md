@@ -25,7 +25,7 @@ Load `references/conventions.md` when making decisions about file placement or d
 
 1. Read `domains.yaml` at the project root.
 2. If it doesn't exist, tell the user: "No domain tree found. Run `/domain-tree:init` to create one."
-3. Parse the tree into a mental model of domains, subdomains, code paths, and spec paths.
+3. Parse explicit `kind: group` entries as structural namespaces, then build a model of bounded-context domains, subdomains, code paths, and spec paths. Groups are not domains and own no code or specifications.
 
 ### 2. Resolve domain from context
 

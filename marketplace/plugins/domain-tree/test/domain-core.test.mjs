@@ -11,7 +11,7 @@ import {
   specDirForEntry,
   entryForResolution,
   validateNormativeSpecContent,
-} from "../marketplace/plugins/domain-tree/pi/domain-core.ts";
+} from "../pi/domain-core.ts";
 
 const manifest = `
 domains:
@@ -126,6 +126,71 @@ domains:
         spec: src/business/time-management/
 `);
   assert.deepEqual(findAmbiguousCodeMappings(parentChildOnly), []);
+
+  const grouped = parseDomainsYaml(`
+project:
+  name: grouped-project
+domains:
+  business:
+    kind: group
+    description: >-
+      Business capabilities grouped for navigation.
+    domains:
+      operations:
+        kind: group
+        domains:
+          time-management:
+            description: "Allocation of attention over time"
+            type: core
+            code: [src/business/time-management/]
+  foundation:
+    kind: group
+    domains:
+      persistence:
+        type: supporting
+        code:
+          - src/foundation/persistence/
+context-map:
+  - provider: foundation/persistence
+    consumers: [business]
+    pattern: customer-supplier
+    contract: src/foundation/persistence/README.md
+`);
+  assert.deepEqual(
+    flattenDomains(grouped).map((node) => node.path.join("/")),
+    ["business/operations/time-management", "foundation/persistence"],
+  );
+  assert.deepEqual(
+    resolveDomainForFilePath(
+      "src/business/time-management/calendar.ts",
+      root,
+      grouped,
+    ),
+    {
+      domain: "business",
+      subdomain: "operations > time-management",
+      type: "core",
+    },
+  );
+  assert.equal(
+    entryForResolution(grouped, {
+      domain: "foundation",
+      subdomain: "persistence",
+      type: "supporting",
+    })?.name,
+    "persistence",
+  );
+  assert.equal(
+    entryForResolution(grouped, {
+      domain: "business",
+      subdomain: "operations > time-management",
+      type: "core",
+    })?.description,
+    "Allocation of attention over time",
+  );
+  assert.deepEqual(findContextMapIssues(grouped), [
+    "Context consumer `business` is not declared in the domain tree.",
+  ]);
 
   assert.deepEqual(
     validateNormativeSpecContent(

@@ -12,30 +12,34 @@ project:
   name: my-project
   description: One-line project description
 
-# The domain tree
+# Structural groups and domains
 domains:
-  <domain-name>:
-    description: What this domain is responsible for
-    type: core | supporting | generic | shared-kernel  # default: supporting
-    status: active | deprecated | planned              # default: active
-    owners: [team-or-person]                           # optional
-    language:                                          # optional: ubiquitous language
-      - term: Cachet
-        meaning: A privacy-preserving trust badge issued after credential verification
+  <group-name>:
+    kind: group
+    description: Optional navigation context
+    domains:
+      <domain-name>:
+        description: What this domain is responsible for
+        type: core | supporting | generic | shared-kernel  # default: supporting
+        status: active | deprecated | planned              # default: active
+        owners: [team-or-person]                           # optional
+        language:                                          # optional: ubiquitous language
+          - term: Cachet
+            meaning: A privacy-preserving trust badge issued after credential verification
 
-    # Code paths (leaf domain). Specs live in the first code path by default.
-    code: [path/to/code/, another/path/]
-    # Optional override when specs cannot live in the first code path:
-    spec: path/to/code/
+        # Specs live in the first code path by default.
+        code: [path/to/code/, another/path/]
+        # Optional override when specs cannot live in the first code path:
+        spec: path/to/code/
 
-    # OR subdomains (branch domain)
-    subdomains:
-      <subdomain-name>:
-        description: ...
-        type: core | supporting | generic    # inherits from parent if omitted
-        code: [path/to/code/]
-        # Optional override; otherwise specs live in path/to/code/.
-        # subdomains can nest further
+        # Bounded contexts may contain narrower bounded contexts.
+        subdomains:
+          <subdomain-name>:
+            description: ...
+            type: core | supporting | generic    # inherits from parent if omitted
+            code: [path/to/code/]
+            # Optional override; otherwise specs live in path/to/code/.
+            # subdomains can nest further
 
 # Cross-context relationships
 context-map:
@@ -44,6 +48,12 @@ context-map:
     pattern: <relationship-pattern>
     contract: <canonical spec path>
 ```
+
+## Structural groups
+
+A `kind: group` entry provides namespace and presentation structure only. Its `domains` may contain domains or nested groups. Groups are not bounded contexts: they have no classification, code ownership, specification, or context-map relationships. Fully qualified domain names retain their group path, such as `business/time-management`.
+
+Entries without `kind: group` remain domains. Domain nesting uses `subdomains`, not `domains`.
 
 ## Domain classification
 
@@ -92,8 +102,10 @@ The `context-map` section declares semantic contracts between domains. Each entr
 - The most-specific matching child path owns a file. Parent/child overlap is valid; unrelated domains cannot claim the same path.
 - Specs live next to code. The first `code` path is the default spec directory; `README.md` is the required main domain spec.
 - `spec` is optional and only overrides the inferred spec directory when specs cannot live in the first `code` path.
-- A domain is either a **leaf** (has `code`) or a **branch** (has `subdomains`)
-- Branch domains may also have `code` + `spec` for domain-level concerns (shared types, domain events)
+- Groups use `domains`; bounded contexts use `subdomains`.
+- Groups never own code or specifications and are excluded from domain coverage counts.
+- A domain is either a **leaf** (has `code`) or a **branch** (has `subdomains`).
+- Branch domains may also have `code` + `spec` for domain-level concerns (shared types, domain events).
 
 ## Domain types
 

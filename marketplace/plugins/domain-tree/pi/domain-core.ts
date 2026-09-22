@@ -1,12 +1,24 @@
 import { join, relative, resolve } from "path";
+import { parse } from "yaml";
 
-type DomainEntry = {
+export type DomainEntry = {
 	name: string;
+	description?: string;
 	type?: string;
+	status?: string;
 	code?: string[];
 	spec?: string;
 	subdomains?: Record<string, DomainEntry>;
 };
+
+export type DomainGroup = {
+	name: string;
+	kind: "group";
+	description?: string;
+	domains: Record<string, DomainTreeEntry>;
+};
+
+export type DomainTreeEntry = DomainEntry | DomainGroup;
 
 export type ContextMapEntry = {
 	provider: string;
@@ -15,7 +27,7 @@ export type ContextMapEntry = {
 	contract?: string;
 };
 
-export type Domains = Record<string, DomainEntry> & {
+export type Domains = Record<string, DomainTreeEntry> & {
 	_contextMap?: string;
 	_contextEntries?: ContextMapEntry[];
 };
@@ -48,18 +60,6 @@ export function specDirForEntry(root: string, entry: DomainEntry): string | null
 	return label ? join(root, label) : null;
 }
 
-function unquote(value: string): string {
-	return value.trim().replace(/^'(.*)'$/, "$1").replace(/^"(.*)"$/, "$1");
-}
-
-function splitInlineList(value: string): string[] {
-	return value.split(",").map(unquote).filter(Boolean);
-}
-
-function indentation(line: string): number {
-	return line.match(/^ */)?.[0].length ?? 0;
-}
-
 function pathMatches(relPath: string, manifestPath: string): boolean {
 	const norm = normalizeDomainDir(manifestPath);
 	if (norm.endsWith("/*")) {
@@ -81,165 +81,67 @@ function toResolution(node: DomainNode): DomainResolution {
 	};
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function stringArray(value: unknown): string[] | undefined {
+	if (!Array.isArray(value)) return undefined;
+	return value.filter((item): item is string => typeof item === "string");
+}
+
+function parseDomainEntries(value: unknown): Record<string, DomainTreeEntry> {
+	if (!isRecord(value)) return {};
+	const entries: Record<string, DomainTreeEntry> = {};
+	for (const [name, rawEntry] of Object.entries(value)) {
+		if (!isRecord(rawEntry)) continue;
+		if (rawEntry.kind === "group") {
+			entries[name] = {
+				name,
+				kind: "group",
+				description: typeof rawEntry.description === "string"
+					? rawEntry.description
+					: undefined,
+				domains: parseDomainEntries(rawEntry.domains),
+			};
+			continue;
+		}
+
+		entries[name] = {
+			name,
+			description: typeof rawEntry.description === "string"
+				? rawEntry.description
+				: undefined,
+			type: typeof rawEntry.type === "string" ? rawEntry.type : undefined,
+			status: typeof rawEntry.status === "string" ? rawEntry.status : undefined,
+			code: stringArray(rawEntry.code),
+			spec: typeof rawEntry.spec === "string" ? rawEntry.spec : undefined,
+			subdomains: parseDomainEntries(rawEntry.subdomains) as Record<string, DomainEntry>,
+		};
+	}
+	return entries;
+}
+
+function isDomainGroup(entry: DomainTreeEntry): entry is DomainGroup {
+	return "kind" in entry && entry.kind === "group";
+}
+
 export function parseDomainsYaml(content: string): Domains {
-	const domains: Domains = {};
-	const lines = content.split("\n");
-	let inDomains = false;
-	let inContextMap = false;
-	let collectingCodeFor: DomainEntry | null = null;
-	let currentContextEntry: ContextMapEntry | null = null;
+	const manifest = parse(content);
+	const root = isRecord(manifest) ? manifest : {};
+	const domains = parseDomainEntries(root.domains) as Domains;
+	const rawContextMap = Array.isArray(root["context-map"])
+		? root["context-map"]
+		: [];
 	const contextEntries: ContextMapEntry[] = [];
-
-	const stack: Array<
-		| { kind: "domains"; indent: number; entries: Record<string, DomainEntry>; inheritedType?: string; path: string[] }
-		| { kind: "subdomains"; indent: number; entries: Record<string, DomainEntry>; inheritedType?: string; path: string[] }
-		| { kind: "domain"; indent: number; entry: DomainEntry; inheritedType?: string; path: string[] }
-	> = [];
-
-	const nearestDomain = (indent: number) => {
-		for (let i = stack.length - 1; i >= 0; i--) {
-			const frame = stack[i];
-			if (frame.kind === "domain" && frame.indent < indent) return frame;
-		}
-		return null;
-	};
-
-	const nearestContainer = (indent: number) => {
-		for (let i = stack.length - 1; i >= 0; i--) {
-			const frame = stack[i];
-			if ((frame.kind === "domains" || frame.kind === "subdomains") && frame.indent < indent) return frame;
-		}
-		return null;
-	};
-
-	for (const line of lines) {
-		const trimmed = line.trim();
-		const indent = indentation(line);
-		if (trimmed === "domains:") {
-			inDomains = true;
-			inContextMap = false;
-			collectingCodeFor = null;
-			stack.length = 0;
-			stack.push({ kind: "domains", indent: 0, entries: domains, path: [] });
-			continue;
-		}
-		if (trimmed === "context-map:") {
-			inDomains = false;
-			inContextMap = true;
-			collectingCodeFor = null;
-			stack.length = 0;
-			continue;
-		}
-		if (trimmed === "" || trimmed.startsWith("#") || trimmed.startsWith("project:")) continue;
-
-		if (inDomains) {
-			if (!trimmed.startsWith("- ")) {
-				while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-					stack.pop();
-				}
-				collectingCodeFor = null;
-			}
-
-			const keyOnlyMatch = trimmed.match(/^(\w[\w-]*):$/);
-			if (keyOnlyMatch) {
-				if (trimmed === "code:") {
-					const domainFrame = nearestDomain(indent + 1);
-					if (domainFrame) {
-						domainFrame.entry.code = [];
-						collectingCodeFor = domainFrame.entry;
-					}
-					continue;
-				}
-
-				if (trimmed === "subdomains:") {
-					const parent = nearestDomain(indent);
-					if (parent) {
-						parent.entry.subdomains = parent.entry.subdomains || {};
-						stack.push({
-							kind: "subdomains",
-							indent,
-							entries: parent.entry.subdomains,
-							inheritedType: parent.entry.type || parent.inheritedType,
-							path: parent.path,
-						});
-					}
-					continue;
-				}
-
-				if (["language", "owners"].includes(keyOnlyMatch[1])) continue;
-
-				const container = nearestContainer(indent);
-				if (container) {
-					const name = keyOnlyMatch[1];
-					const entry: DomainEntry = { name };
-					container.entries[name] = entry;
-					stack.push({
-						kind: "domain",
-						indent,
-						entry,
-						inheritedType: container.inheritedType,
-						path: [...container.path, name],
-					});
-					continue;
-				}
-			}
-
-			const domainFrame = nearestDomain(indent + 1);
-			if (!domainFrame) continue;
-
-			const typeMatch = trimmed.match(/^type:\s*(core|supporting|generic|shared-kernel)/);
-			if (typeMatch) {
-				domainFrame.entry.type = typeMatch[1];
-				continue;
-			}
-
-			const specMatch = trimmed.match(/^spec:\s*(.+)$/);
-			if (specMatch) {
-				domainFrame.entry.spec = unquote(specMatch[1]);
-				continue;
-			}
-
-			const codeInlineMatch = trimmed.match(/^code:\s*\[(.*)\]/);
-			if (codeInlineMatch) {
-				domainFrame.entry.code = splitInlineList(codeInlineMatch[1]);
-				continue;
-			}
-
-			const codePathMatch = trimmed.match(/^-\s+(.+)$/);
-			if (codePathMatch && collectingCodeFor) {
-				collectingCodeFor.code = [...(collectingCodeFor.code || []), unquote(codePathMatch[1])];
-				continue;
-			}
-		}
-
-		if (inContextMap) {
-			const providerMatch = trimmed.match(/^-\s+provider:\s*(\S+)$/);
-			if (providerMatch) {
-				currentContextEntry = {
-					provider: unquote(providerMatch[1]),
-					consumers: [],
-					pattern: "",
-				};
-				contextEntries.push(currentContextEntry);
-				continue;
-			}
-			if (!currentContextEntry) continue;
-
-			const consumersMatch = trimmed.match(/^consumers:\s*\[(.*)\]$/);
-			if (consumersMatch) {
-				currentContextEntry.consumers = splitInlineList(consumersMatch[1]);
-				continue;
-			}
-			const patternMatch = trimmed.match(/^pattern:\s*(\S+)$/);
-			if (patternMatch) {
-				currentContextEntry.pattern = unquote(patternMatch[1]);
-				continue;
-			}
-			const contractMatch = trimmed.match(/^contract:\s*(.+)$/);
-			if (contractMatch) {
-				currentContextEntry.contract = unquote(contractMatch[1]);
-			}
-		}
+	for (const rawEntry of rawContextMap) {
+		if (!isRecord(rawEntry)) continue;
+		contextEntries.push({
+			provider: typeof rawEntry.provider === "string" ? rawEntry.provider : "",
+			consumers: stringArray(rawEntry.consumers) || [],
+			pattern: typeof rawEntry.pattern === "string" ? rawEntry.pattern : "",
+			contract: typeof rawEntry.contract === "string" ? rawEntry.contract : undefined,
+		});
 	}
 
 	const contextMapMatch = content.match(/context-map:\s*\n((?:\s+.*\n?)*)/);
@@ -250,11 +152,19 @@ export function parseDomainsYaml(content: string): Domains {
 
 export function flattenDomains(domains: Domains): DomainNode[] {
 	const nodes: DomainNode[] = [];
-	const walk = (entries: Record<string, DomainEntry>, parentPath: string[], inheritedType = "supporting") => {
+	const walk = (
+		entries: Record<string, DomainTreeEntry>,
+		parentPath: string[],
+		inheritedType = "supporting",
+	) => {
 		for (const [name, entry] of Object.entries(entries)) {
 			if (name.startsWith("_")) continue;
-			const type = entry.type || inheritedType;
 			const path = [...parentPath, name];
+			if (isDomainGroup(entry)) {
+				walk(entry.domains, path, inheritedType);
+				continue;
+			}
+			const type = entry.type || inheritedType;
 			nodes.push({ path, entry, type });
 			if (entry.subdomains) walk(entry.subdomains, path, type);
 		}
@@ -264,11 +174,13 @@ export function flattenDomains(domains: Domains): DomainNode[] {
 }
 
 export function entryForPath(domains: Domains, path: string[]): DomainEntry | null {
-	let entry: DomainEntry | undefined = domains[path[0]];
+	let entry: DomainTreeEntry | undefined = domains[path[0]];
 	for (const part of path.slice(1)) {
-		entry = entry?.subdomains?.[part];
+		entry = entry && isDomainGroup(entry)
+			? entry.domains[part]
+			: entry?.subdomains?.[part];
 	}
-	return entry || null;
+	return entry && !isDomainGroup(entry) ? entry : null;
 }
 
 export function entryForResolution(domains: Domains, resolved: DomainResolution): DomainEntry | null {

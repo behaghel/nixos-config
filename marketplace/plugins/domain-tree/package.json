@@ -4,6 +4,9 @@
   "description": "Domain-driven codebase structure with root domains.yaml, colocated README.md specs, DDD-informed subdomain classification, context mapping, and shared kernel management. Now with pi support.",
   "type": "module",
   "keywords": ["pi-package", "domain-driven-design", "spec", "ddd", "architecture"],
+  "dependencies": {
+    "yaml": "^2.9.1"
+  },
   "pi": {
     "extensions": ["./pi/extension.ts"],
     "skills": ["./skills"]
