@@ -1,15 +1,41 @@
 ---
 name: spec-verifier
-description: "Audit development specs for completeness and quality. Use when validating a spec, checking requirements, reviewing acceptance criteria, or when the user says 'is this spec complete', 'validate my spec', 'review the requirements', 'check this spec', or 'is this ready for implementation'."
+description: "Audit domain, system, iteration, and standalone development specs against their corpus-specific quality rules. Use when validating a spec, checking requirements, reviewing acceptance criteria, or when the user asks whether a spec is complete or ready."
 ---
 
 # Spec Verification
 
 ## Purpose
 
-Verify that a spec is complete enough for an AI agent to implement correctly without human code review. This is the upstream quality gate — catching gaps here prevents wrong implementations downstream.
+Verify a specification against the rules of its corpus. Catching gaps here prevents both incorrect implementation and pollution of durable domain knowledge.
 
-## Verification Dimensions
+## Classify before verifying
+
+When `domains.yaml` exists:
+
+- `domain` frontmatter → **domain specification**.
+- `system` frontmatter → **system specification**.
+- Neither → **iteration specification**.
+
+Without a manifest, use conventional development-spec verification.
+
+### Domain specification checks
+
+- Belongs to the narrowest capable domain and matches its fully qualified name.
+- States durable, present-tense responsibilities, boundaries, language, behavior, invariants, or semantic contracts.
+- Defines concepts once and links to canonical owners with relative Markdown links.
+- Contains no project scope, implementation sequencing, delivery criteria, rollout, migration, progress, deadlines, legacy comparisons, temporary workarounds, or verification plans.
+- Uses only allowed normative frontmatter.
+
+### System specification checks
+
+- The requirement cannot be assigned to one domain by subsidiarity.
+- `system` matches `project.name`; status is valid.
+- Requirements use RFC 2119 language.
+- Domain-owned terms and contracts are linked rather than redefined.
+- Contains no project-management, legacy, transitional, or temporary delivery concerns.
+
+## Iteration and standalone verification dimensions
 
 ### 1. Completeness
 
@@ -64,11 +90,12 @@ Red flags:
 
 ## Output Format
 
-When reviewing a spec, work through each dimension and produce a report:
+State the detected mode first, then report only dimensions appropriate to that mode:
 
 ```
 ## Spec Verification Report
 
+### Mode: [DOMAIN | SYSTEM | ITERATION | STANDALONE]
 ### Verdict: [READY | NEEDS WORK | INCOMPLETE]
 
 ### Completeness: [section gaps]

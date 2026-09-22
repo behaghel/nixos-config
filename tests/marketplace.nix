@@ -229,12 +229,14 @@ let
       node --check ${lib.escapeShellArg (toString path)}
     '') piExtensionPaths}
 
+    node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
+
     echo ok > "$out"
   '';
 
   domainTreeBehaviorCheck = pkgs.buildNpmPackage {
     pname = "domain-tree-behavior-check";
-    version = "0.3.0";
+    version = "0.4.0";
     src = marketplaceDir + "/plugins/domain-tree";
     npmDeps = pkgs.importNpmLock {
       npmRoot = marketplaceDir + "/plugins/domain-tree";

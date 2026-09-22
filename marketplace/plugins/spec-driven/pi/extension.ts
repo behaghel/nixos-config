@@ -14,31 +14,71 @@
  */
 
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { existsSync } from "fs";
+import { readFile } from "fs/promises";
+import { dirname, join, resolve } from "path";
 import { Type } from "typebox";
 import {
-	entryForResolution,
-	flattenDomains,
-	parseDomainManifest,
-	resolveDomainForFilePath,
-	specDirForEntry,
-	specLabelForEntry,
-	validateNormativeSpecContent,
-} from "../../domain-tree/pi/domain-core.ts";
+	buildSpecCollectionPrompt,
+	buildSpecVerificationPrompt,
+	classifySpecContent,
+	selectSpecMode,
+} from "./spec-modes.ts";
+
+function findDomainManifestRoot(start: string): string | null {
+	let current = resolve(start);
+	while (true) {
+		if (existsSync(join(current, "domains.yaml"))) return current;
+		const parent = dirname(current);
+		if (parent === current) return null;
+		current = parent;
+	}
+}
+
+async function loadDomainCore() {
+	return import("../../domain-tree/pi/domain-core.ts");
+}
+
+async function domainManifestState(start: string): Promise<{
+	root: string | null;
+	valid: boolean;
+	error?: string;
+}> {
+	const root = findDomainManifestRoot(start);
+	if (!root) return { root: null, valid: false };
+	try {
+		const { parseDomainManifest } = await loadDomainCore();
+		const result = parseDomainManifest(
+			await readFile(join(root, "domains.yaml"), "utf-8"),
+		);
+		if (result.domains) return { root, valid: true };
+		return {
+			root,
+			valid: false,
+			error: "domains.yaml is invalid:\n" + result.diagnostics
+				.map((diagnostic) => `- ${diagnostic.path}: ${diagnostic.message}`)
+				.join("\n"),
+		};
+	} catch (error) {
+		return {
+			root,
+			valid: false,
+			error: error instanceof Error ? error.message : String(error),
+		};
+	}
+}
 
 export default function specDrivenExtension(pi: ExtensionAPI) {
 	const specExpertise = `
 ## Spec-Driven Development
 
-This project supports spec-driven development. Before writing code, collect a spec:
+This project supports three specification modes when a domain manifest is present:
 
-1. **Problem** — Why does this exist?
-2. **Context** — What code and patterns are relevant?
-3. **Decisions** — What architectural choices?
-4. **Criteria** — What does "done" look like?
-5. **Scope** — What can be touched?
-6. **Verification** — How to prove each criterion?
+1. **Domain specification (default)** — durable, present-tense domain truth at the narrowest semantic owner.
+2. **Iteration specification** — temporary, non-normative delivery scope, acceptance criteria, and verification.
+3. **System specification** — durable RFC 2119 requirements that subsidiarity cannot assign to one domain.
 
-A spec is a verifiable contract. If the spec is right, code review becomes optional.
+Without \`domains.yaml\`, collect the conventional six-phase development specification. Never put iteration concerns into normative domain or system corpora.
 
 **Key commands:** /spec-collect, /spec-verify
 **Skills:** spec-collector, spec-verifier
@@ -52,14 +92,22 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 
 	// Register commands
 	pi.registerCommand("spec-collect", {
-		description: "Collect a development spec through structured conversation",
-		handler: async (_args, ctx) => {
-			ctx.ui.notify("Starting spec collection. I'll guide you through the 6 phases.", "info");
+		description: "Collect a domain, iteration, or system specification",
+		handler: async (args, ctx) => {
+			const manifest = await domainManifestState(ctx.cwd);
+			if (manifest.root && !manifest.valid) {
+				ctx.ui.notify(manifest.error || "domains.yaml is invalid.", "error");
+				return;
+			}
+			const selection = selectSpecMode(args, manifest.valid);
+			if (selection.error) {
+				ctx.ui.notify(selection.error, "error");
+				return;
+			}
+			ctx.ui.notify(`Starting ${selection.mode} specification collection.`, "info");
 			pi.sendUserMessage(
-				"Let's collect a spec. Follow the spec-driven collection process: " +
-				"Phase 1 (Problem), Phase 2 (Context - read the codebase), " +
-				"Phase 3 (Decisions), Phase 4 (Criteria), Phase 5 (Scope), Phase 6 (Verification). " +
-				"Use the spec-collector skill for detailed guidance."
+				buildSpecCollectionPrompt(selection) +
+				"\n\nUse the spec-collector skill for detailed guidance.",
 			);
 		},
 	});
@@ -67,14 +115,30 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 	pi.registerCommand("spec-verify", {
 		description: "Verify a spec for completeness and quality",
 		handler: async (args, ctx) => {
-			if (!args.trim()) {
+			const specPath = args.trim();
+			if (!specPath) {
 				ctx.ui.notify("Usage: /spec-verify <path-to-spec.md>", "info");
 				return;
 			}
+			const manifest = await domainManifestState(ctx.cwd);
+			if (manifest.root && !manifest.valid) {
+				ctx.ui.notify(manifest.error || "domains.yaml is invalid.", "error");
+				return;
+			}
+			let content: string;
+			try {
+				content = await readFile(resolve(ctx.cwd, specPath), "utf-8");
+			} catch (error) {
+				ctx.ui.notify(
+					`Cannot read ${specPath}: ${error instanceof Error ? error.message : String(error)}`,
+					"error",
+				);
+				return;
+			}
+			const mode = classifySpecContent(content, manifest.valid);
 			pi.sendUserMessage(
-				`Verify the spec at ${args.trim()} for completeness and quality. ` +
-				"Check all 7 required sections, criteria quality, scope precision, and verification plan coverage. " +
-				"Use the spec-verifier skill for the full checklist."
+				buildSpecVerificationPrompt(mode, specPath) +
+				" Use the spec-verifier skill for the full checklist.",
 			);
 		},
 	});
@@ -91,12 +155,22 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 			}),
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, _ctx) {
-			const { readFile, readdir, stat } = await import("fs/promises");
-			const { join } = await import("path");
+			const { readdir, stat } = await import("fs/promises");
 			const cwd = process.cwd();
+			const domainRoot = findDomainManifestRoot(cwd);
 
 			try {
-				const content = await readFile(join(cwd, "domains.yaml"), "utf-8");
+				if (!domainRoot) throw new Error("No domain manifest");
+				const {
+					entryForResolution,
+					flattenDomains,
+					parseDomainManifest,
+					resolveDomainForFilePath,
+					specDirForEntry,
+					specLabelForEntry,
+					validateNormativeSpecContent,
+				} = await loadDomainCore();
+				const content = await readFile(join(domainRoot, "domains.yaml"), "utf-8");
 				const manifest = parseDomainManifest(content);
 				if (!manifest.domains) {
 					return {
@@ -117,9 +191,9 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 				);
 				const resolved = directNode
 					? { domain: directNode.path[0], subdomain: directNode.path.length > 1 ? directNode.path.slice(1).join(" > ") : null, type: directNode.type }
-					: resolveDomainForFilePath(params.path, cwd, domains);
+					: resolveDomainForFilePath(params.path, domainRoot, domains);
 				const entry = resolved ? entryForResolution(domains, resolved) : null;
-				const rootSpecDir = entry ? specDirForEntry(cwd, entry) : null;
+				const rootSpecDir = entry ? specDirForEntry(domainRoot, entry) : null;
 				const specLabel = entry ? specLabelForEntry(entry) : null;
 
 				if (rootSpecDir && specLabel && resolved) {
@@ -167,8 +241,18 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 					}],
 					details: { path: params.path, found: false },
 				};
-			} catch {
-				// Fall through to legacy spec/ layout below.
+			} catch (error) {
+				if (domainRoot) {
+					return {
+						content: [{
+							type: "text",
+							text: "Domain-aware spec coverage is unavailable: " +
+								(error instanceof Error ? error.message : String(error)),
+						}],
+						details: { path: params.path, found: false },
+					};
+				}
+				// Fall through to legacy spec/ layout below when no domain manifest exists.
 			}
 
 			// Check if spec/domains.yaml exists first

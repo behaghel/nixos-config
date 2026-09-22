@@ -1,16 +1,28 @@
 ---
 description: Interactive spec collection — walks through the 6-phase framework to produce a verifiable spec from a feature idea
-argument-hint: [feature-description]
+argument-hint: [--mode domain|iteration|system] [subject]
 allowed-tools: [Read, Glob, Grep, Bash]
 ---
 
 # Collect Spec
 
-Walks through the 6-phase collection framework to produce a complete, verifiable spec.
+Collects the appropriate specification without mixing durable domain knowledge and temporary delivery concerns.
 
 ## Instructions
 
 When this command is invoked:
+
+1. Search upward for `domains.yaml`.
+2. If present, default to a durable domain specification at the narrowest owning domain.
+3. Use iteration mode only for temporary delivery scope, acceptance criteria, and verification.
+4. Use system mode only for durable RFC 2119 requirements that subsidiarity cannot assign to one domain.
+5. Honor an explicit `--mode domain|iteration|system` request.
+
+For domain mode, update the normative domain corpus with present-tense responsibilities, boundaries, ubiquitous language, behavior, invariants, and contracts. Exclude problem history, project management, implementation sequencing, rollout, migration, progress, legacy comparisons, temporary workarounds, and verification plans.
+
+For system mode, write under `system-specs` with `system`/`status` frontmatter, RFC 2119 requirements, and links to domain-owned terms. Apply the same timelessness exclusions.
+
+For iteration mode, or when no domain manifest exists, use the following six-phase process:
 
 ### Phase 1: Problem Space
 
@@ -91,7 +103,9 @@ When this command is invoked:
 
 ## Rules
 
-- Do NOT skip phases — each phase surfaces information the next phase needs
+- Do NOT apply the six-phase iteration template to normative domain or system specs
+- Do NOT put iteration artifacts in domain directories or declared system-spec paths
+- Do NOT skip phases in iteration or standalone mode — each phase surfaces information the next phase needs
 - Do NOT fill in criteria the user should author — propose, then ask for confirmation
 - Do NOT assume decisions — surface them, present options, ask for rulings
 - Keep the conversation moving — if a phase has no open questions, summarize and advance
