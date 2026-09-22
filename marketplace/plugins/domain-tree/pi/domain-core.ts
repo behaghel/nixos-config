@@ -1,4 +1,5 @@
-import { join, relative, resolve } from "path";
+import { access, readFile } from "fs/promises";
+import { dirname, extname, join, relative, resolve } from "path";
 import { LineCounter, parseDocument } from "yaml";
 
 export type DomainEntry = {
@@ -696,16 +697,16 @@ const FORBIDDEN_NORMATIVE_SECTIONS = new Set([
 ]);
 
 function parseFrontmatter(content: string): {
-	metadata: Map<string, string>;
+	metadata: Map<string, unknown>;
 	body: string;
 } | null {
 	const match = content.match(/^---\n([\s\S]*?)\n---(?:\n|$)/);
 	if (!match) return null;
-	const metadata = new Map<string, string>();
-	for (const line of match[1].split("\n")) {
-		const field = line.match(/^([a-z][a-z-]*):\s*(.*)$/);
-		if (field) metadata.set(field[1], field[2].trim());
-	}
+	const document = parseDocument(match[1]);
+	const value = document.errors.length === 0 ? document.toJS() : null;
+	const metadata = new Map<string, unknown>(
+		isRecord(value) ? Object.entries(value) : [],
+	);
 	return { metadata, body: content.slice(match[0].length) };
 }
 
@@ -723,12 +724,15 @@ function validateTimelessNormativeBody(body: string): string[] {
 }
 
 function validateNormativeStatus(
-	metadata: Map<string, string>,
+	metadata: Map<string, unknown>,
 	label: string,
 ): string[] {
 	const status = metadata.get("status");
 	if (!status) return [`${label} frontmatter must declare \`status\`.`];
-	if (!["draft", "approved", "stale"].includes(status)) {
+	if (
+		typeof status !== "string" ||
+		!["draft", "approved", "stale"].includes(status)
+	) {
 		return [
 			`${label} frontmatter \`status\` must be \`draft\`, \`approved\`, or \`stale\`.`,
 		];
@@ -761,8 +765,19 @@ export function validateNormativeSpecContent(
 		);
 	}
 	issues.push(...validateNormativeStatus(metadata, "Normative"));
-	if (metadata.has("aliases") && !metadata.has("term")) {
+	const term = metadata.get("term");
+	const aliases = metadata.get("aliases");
+	if (term !== undefined && !(typeof term === "string" && term.trim().length > 0)) {
+		issues.push("Normative frontmatter `term` must be a non-empty string.");
+	}
+	if (aliases !== undefined && term === undefined) {
 		issues.push("Normative frontmatter `aliases` requires a canonical `term`.");
+	}
+	if (
+		aliases !== undefined &&
+		(!Array.isArray(aliases) || aliases.some((alias) => typeof alias !== "string"))
+	) {
+		issues.push("Normative frontmatter `aliases` must be a list of strings.");
 	}
 	issues.push(...validateTimelessNormativeBody(body));
 	return issues;
@@ -794,6 +809,220 @@ export function validateSystemSpecContent(
 	}
 	issues.push(...validateTimelessNormativeBody(body));
 	return issues;
+}
+
+export type WikiDocument = {
+	path: string;
+	content: string;
+	domain?: string;
+	system?: string;
+};
+
+export type WikiDiagnostic = {
+	path: string;
+	message: string;
+};
+
+export type TermOwner = {
+	canonicalTerm: string;
+	aliases: string[];
+	domain: string;
+	path: string;
+};
+
+export type TermIndex = {
+	owners: TermOwner[];
+	byLabel: Map<string, { owner: TermOwner; matchedAlias: string | null }>;
+	diagnostics: WikiDiagnostic[];
+};
+
+function normalizeTerm(value: string): string {
+	return value.normalize("NFKC").trim().toLocaleLowerCase("en-US");
+}
+
+export function buildTermIndex(documents: WikiDocument[]): TermIndex {
+	const owners: TermOwner[] = [];
+	const byLabel = new Map<
+		string,
+		{ owner: TermOwner; matchedAlias: string | null }
+	>();
+	const diagnostics: WikiDiagnostic[] = [];
+	for (const document of documents) {
+		if (!document.domain) continue;
+		const parsed = parseFrontmatter(document.content);
+		const term = parsed?.metadata.get("term");
+		if (!(typeof term === "string" && term.trim().length > 0)) continue;
+		const rawAliases = parsed?.metadata.get("aliases");
+		const aliases = Array.isArray(rawAliases)
+			? rawAliases.filter((alias): alias is string => typeof alias === "string")
+			: [];
+		const owner: TermOwner = {
+			canonicalTerm: term,
+			aliases,
+			domain: document.domain,
+			path: document.path,
+		};
+		owners.push(owner);
+		for (const label of [term, ...aliases]) {
+			const normalized = normalizeTerm(label);
+			const existing = byLabel.get(normalized);
+			if (existing && existing.owner.path !== owner.path) {
+				diagnostics.push({
+					path: document.path,
+					message: `Ubiquitous-language label \`${label}\` is already owned by \`${existing.owner.path}\`.`,
+				});
+				continue;
+			}
+			if (!existing) {
+				byLabel.set(normalized, {
+					owner,
+					matchedAlias: normalizeTerm(label) === normalizeTerm(term)
+						? null
+						: label,
+				});
+			}
+		}
+	}
+	return { owners, byLabel, diagnostics };
+}
+
+export function resolveTerm(
+	index: TermIndex,
+	query: string,
+): {
+	canonicalTerm: string;
+	matchedAlias: string | null;
+	domain: string;
+	path: string;
+} | null {
+	const match = index.byLabel.get(normalizeTerm(query));
+	if (!match) return null;
+	return {
+		canonicalTerm: match.owner.canonicalTerm,
+		matchedAlias: match.matchedAlias,
+		domain: match.owner.domain,
+		path: match.owner.path,
+	};
+}
+
+function markdownWithoutFencedCode(content: string): string {
+	let inFence = false;
+	return content.split("\n").map((line) => {
+		if (/^\s*(```|~~~)/.test(line)) {
+			inFence = !inFence;
+			return "";
+		}
+		return inFence ? "" : line;
+	}).join("\n");
+}
+
+function markdownHeadingAnchors(content: string): Set<string> {
+	const anchors = new Set<string>();
+	const occurrences = new Map<string, number>();
+	for (const line of markdownWithoutFencedCode(content).split("\n")) {
+		const heading = line.match(/^#{1,6}\s+(.+?)\s*#*$/)?.[1]?.trim();
+		if (!heading) continue;
+		const base = heading
+			.toLocaleLowerCase("en-US")
+			.replace(/<[^>]+>/g, "")
+			.replace(/[^\p{L}\p{N}\s_-]/gu, "")
+			.replace(/\s+/g, "-");
+		const count = occurrences.get(base) || 0;
+		occurrences.set(base, count + 1);
+		anchors.add(count === 0 ? base : `${base}-${count}`);
+	}
+	return anchors;
+}
+
+function isExternalLink(target: string): boolean {
+	return target.startsWith("//") || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(target);
+}
+
+export async function validateSpecificationWiki(
+	root: string,
+	documents: WikiDocument[],
+): Promise<WikiDiagnostic[]> {
+	const index = buildTermIndex(documents);
+	const diagnostics = [...index.diagnostics];
+	const documentByPath = new Map(
+		documents.map((document) => [resolve(root, document.path), document]),
+	);
+	for (const document of documents) {
+		const sourcePath = resolve(root, document.path);
+		const parsed = parseFrontmatter(document.content);
+		const body = markdownWithoutFencedCode(parsed?.body || document.content);
+		for (const match of body.matchAll(/(?<!!)\[([^\]]+)\]\(([^)]+)\)/g)) {
+			const linkText = match[1].trim();
+			let target = match[2].trim().replace(/^<|>$/g, "");
+			target = target.match(/^(?:<[^>]+>|\S+)/)?.[0]?.replace(/^<|>$/g, "") || target;
+			if (isExternalLink(target)) continue;
+			if (target.startsWith("/")) {
+				diagnostics.push({
+					path: document.path,
+					message: `Specification link \`${target}\` must be relative.`,
+				});
+				continue;
+			}
+			const hashIndex = target.indexOf("#");
+			const rawTargetPath = hashIndex >= 0 ? target.slice(0, hashIndex) : target;
+			const rawFragment = hashIndex >= 0 ? target.slice(hashIndex + 1) : "";
+			let targetPath: string;
+			let fragment: string;
+			try {
+				targetPath = decodeURIComponent(rawTargetPath);
+				fragment = decodeURIComponent(rawFragment);
+			} catch {
+				diagnostics.push({
+					path: document.path,
+					message: `Specification link \`${target}\` contains invalid URL encoding.`,
+				});
+				continue;
+			}
+			const targetAbsolutePath = targetPath
+				? resolve(dirname(sourcePath), targetPath)
+				: sourcePath;
+			const relativeTarget = relative(root, targetAbsolutePath);
+			if (relativeTarget === ".." || relativeTarget.startsWith("../") || relativeTarget.startsWith("..\\")) {
+				diagnostics.push({
+					path: document.path,
+					message: `Specification link \`${target}\` escapes the project root.`,
+				});
+				continue;
+			}
+			try {
+				await access(targetAbsolutePath);
+			} catch {
+				diagnostics.push({
+					path: document.path,
+					message: `Specification link target \`${target}\` does not exist.`,
+				});
+				continue;
+			}
+
+			const termMatch = index.byLabel.get(normalizeTerm(linkText));
+			if (
+				termMatch &&
+				resolve(root, termMatch.owner.path) !== targetAbsolutePath
+			) {
+				diagnostics.push({
+					path: document.path,
+					message: `Term link \`${linkText}\` must target its canonical page \`${termMatch.owner.path}\`.`,
+				});
+			}
+
+			if (fragment && extname(targetAbsolutePath).toLowerCase() === ".md") {
+				const targetContent = documentByPath.get(targetAbsolutePath)?.content ||
+					await readFile(targetAbsolutePath, "utf-8");
+				if (!markdownHeadingAnchors(targetContent).has(fragment.toLowerCase())) {
+					diagnostics.push({
+						path: document.path,
+						message: `Markdown heading anchor \`#${fragment}\` does not exist in \`${relativeTarget}\`.`,
+					});
+				}
+			}
+		}
+	}
+	return diagnostics;
 }
 
 export function findContextMapIssues(domains: Domains): string[] {

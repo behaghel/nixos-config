@@ -159,6 +159,10 @@ Define each concept, invariant, or contract once at its narrowest semantic owner
 
 Use a declared system spec only for a durable RFC 2119 requirement that cannot be assigned to one domain by subsidiarity. Keep temporary acceptance criteria, implementation scope, sequencing, rollout, migration, progress, and verification plans in non-normative iteration artifacts outside both corpora. Normative specs describe current durable behavior in the present tense; they do not preserve legacy or transitional commentary.
 
+### Specification wiki links
+
+Use standard relative Markdown links, never a separate wikilink syntax. Canonical term pages declare `term` and optional `aliases`; canonical terms and aliases form one case-insensitive repository-wide namespace with one semantic owner per label. A term-labelled link must target that owner. Link meaningful first occurrences, not every repetition. Relative targets must exist, and fragments on Markdown targets must resolve to real heading anchors. External URLs are allowed but are outside repository-integrity checks.
+
 ## Code-paths rules
 
 `code-paths` in `domains.yaml` should be **directories, not individual files**. A code-path means "everything under this directory belongs to this domain."

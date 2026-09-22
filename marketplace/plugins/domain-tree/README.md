@@ -46,8 +46,9 @@ Install any combination. They complement each other but don't depend on each oth
 |-----------|------|-------------|
 | Domain Navigator | Skill | Auto-resolves domains, enforces placement, classification-aware spec-on-touch |
 | `/domain-tree:init` | Command | Bootstrap tree with classification and context map from existing codebase |
-| `/domain-tree:map` | Command | Coverage dashboard with domain types and context map visualization |
-| `/domain-tree:check` | Command | Structural health check including context map and classification validation |
+| `/domain-tree:map` | Command | Coverage dashboard with domain types, wiki terms, and context map visualization |
+| `/domain-tree:check` | Command | Structural, normative-wiki, context-map, and classification validation |
+| `domain_tree_resolve_term` | Tool | Exact canonical-term and alias lookup with domain ownership |
 | `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
 
 ## Structural groups
@@ -134,6 +135,8 @@ Domain specifications are the default. They define durable behavior, ubiquitous 
 Use `system-specs` only for stable, project-wide requirements that subsidiarity cannot assign to one domain. System specs use `system`/`status` frontmatter and RFC 2119 requirements. Temporary iteration specs remain non-normative and outside both corpora.
 
 Apply specification DRY: define each concept, invariant, or contract once, then link to its canonical owner and describe only local consequences. Normative specs reject roadmaps, rollout or migration plans, progress, delivery metadata, verification plans, legacy comparisons, and other circumstantial concerns.
+
+The normative corpus forms a portable Markdown wiki. Canonical term pages declare `term` and optional `aliases`; each case-insensitive label has exactly one repository-wide owner. Relative links must resolve, Markdown fragments must identify real heading anchors, and links labelled with a canonical term or alias must target its owning page. Link meaningful first occurrences rather than every repetition. Use `domain_tree_resolve_term` for exact canonical or alias lookup.
 
 ## The spec-on-touch convention
 

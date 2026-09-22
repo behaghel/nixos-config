@@ -5,15 +5,18 @@ import { tmpdir } from "node:os";
 import domainTreeExtension from "../pi/extension.ts";
 import {
   DomainManifestError,
+  buildTermIndex,
   findAmbiguousCodeMappings,
   findContextMapIssues,
   flattenDomains,
   parseDomainManifest,
   parseDomainsYaml,
   resolveDomainForFilePath,
+  resolveTerm,
   specDirForEntry,
   entryForResolution,
   validateNormativeSpecContent,
+  validateSpecificationWiki,
   validateSystemSpecContent,
 } from "../pi/domain-core.ts";
 
@@ -329,6 +332,64 @@ context-map:
       "Normative specifications must not contain a `Verification Plan` section.",
     ],
   );
+  assert.deepEqual(
+    validateNormativeSpecContent(
+      "---\ndomain: business/time-management\nstatus: approved\nterm: Event\naliases: events\n---\n# Event\n",
+      "business/time-management",
+      false,
+    ),
+    ["Normative frontmatter `aliases` must be a list of strings."],
+  );
+
+  const wikiDocuments = [
+    {
+      path: "src/noise/blip.md",
+      domain: "business/noise",
+      content: "---\ndomain: business/noise\nstatus: approved\nterm: Blip\naliases: [blips]\n---\n# Blip\n",
+    },
+    {
+      path: "src/operator/operator.md",
+      domain: "business/operator",
+      content: "---\ndomain: business/operator\nstatus: approved\nterm: Operator\naliases: [operator]\n---\n# Operator\n",
+    },
+  ];
+  const termIndex = buildTermIndex(wikiDocuments);
+  assert.deepEqual(termIndex.diagnostics, []);
+  assert.deepEqual(resolveTerm(termIndex, "BLIPS"), {
+    canonicalTerm: "Blip",
+    matchedAlias: "blips",
+    domain: "business/noise",
+    path: "src/noise/blip.md",
+  });
+  const duplicateTerms = buildTermIndex([
+    ...wikiDocuments,
+    {
+      path: "src/other/blips.md",
+      domain: "business/other",
+      content: "---\ndomain: business/other\nstatus: approved\nterm: blips\n---\n# Other blips\n",
+    },
+  ]);
+  assert.match(duplicateTerms.diagnostics[0].message, /already owned by/);
+
+  await mkdir(join(root, "wiki"), { recursive: true });
+  await writeFile(join(root, "wiki/blip.md"), "# Blip\n\n## Invariants\n");
+  await writeFile(join(root, "wiki/wrong.md"), "# Wrong\n");
+  const wikiIssues = await validateSpecificationWiki(root, [
+    {
+      path: "wiki/source.md",
+      domain: "business/source",
+      content: "---\ndomain: business/source\nstatus: approved\n---\n# Source\n\n[Blip](wrong.md), [details](blip.md#missing), [gone](missing.md), and [external](https://example.com).\n",
+    },
+    {
+      path: "wiki/blip.md",
+      domain: "business/noise",
+      content: wikiDocuments[0].content,
+    },
+  ]);
+  assert.equal(wikiIssues.length, 3);
+  assert.match(wikiIssues.map((issue) => issue.message).join("\n"), /canonical page/);
+  assert.match(wikiIssues.map((issue) => issue.message).join("\n"), /heading anchor/);
+  assert.match(wikiIssues.map((issue) => issue.message).join("\n"), /does not exist/);
 
   await writeFile(join(root, "domains.yaml"), `
 domains:
@@ -398,6 +459,10 @@ domains:
     "---\ndomain: business/operations\nstatus: approved\n---\n# Operations\n\n## Roadmap\n\nTemporary delivery detail.\n",
   );
   await writeFile(
+    join(root, "src/operations/blip.md"),
+    "---\ndomain: business/operations\nstatus: approved\nterm: Blip\naliases: [blips]\n---\n# Blip\n",
+  );
+  await writeFile(
     join(root, "doc/system/security/safety.md"),
     "---\nsystem: grouped-project\nstatus: approved\n---\n# Safety\n\nThe system MUST fail closed.\n",
   );
@@ -441,6 +506,18 @@ domains:
     context,
   );
   assert.match(corpusMap.content[0].text, /System specifications:\*\* 1\/2 valid/);
+  assert.match(corpusMap.content[0].text, /Specification wiki:\*\* 1 canonical term/);
+
+  const resolvedTerm = await registeredTools.get("domain_tree_resolve_term").execute(
+    "term-call",
+    { term: "blips" },
+    undefined,
+    undefined,
+    context,
+  );
+  assert.match(resolvedTerm.content[0].text, /Blip/);
+  assert.match(resolvedTerm.content[0].text, /business\/operations/);
+  assert.equal(resolvedTerm.details.path, "src/operations/blip.md");
 } finally {
   await rm(root, { recursive: true, force: true });
 }

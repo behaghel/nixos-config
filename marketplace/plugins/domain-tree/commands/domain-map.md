@@ -31,6 +31,10 @@ For each domain (and subdomain) in the tree:
    - Look for test files in or near the code paths (`*_test.go`, `*Test.kt`, `*.test.ts`)
    - Count test files
 
+4. **Specification wiki:**
+   - Count canonical term pages across domain corpora.
+   - Report term or alias ownership conflicts; detailed link diagnostics belong in `/domain-tree:check`.
+
 
 ### Step 3: Present the map
 

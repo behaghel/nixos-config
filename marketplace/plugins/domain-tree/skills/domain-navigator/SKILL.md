@@ -50,7 +50,7 @@ When creating new files:
 
 ### 4. Spec-on-touch (classification-aware)
 
-Default to a domain specification containing durable, present-tense domain truth. Define each concept, invariant, or contract once at its narrowest owner and link to it elsewhere. Use a declared system spec only for a stable RFC 2119 requirement that cannot belong to one domain. Keep temporary scope, acceptance criteria, sequencing, rollout, migration, progress, and verification plans in non-normative iteration artifacts outside both corpora.
+Default to a domain specification containing durable, present-tense domain truth. Define each concept, invariant, or contract once at its narrowest owner and link to it elsewhere. Use standard relative Markdown links and resolve canonical terms or aliases with `domain_tree_resolve_term`; link meaningful first occurrences to the one repository-wide owner. Use a declared system spec only for a stable RFC 2119 requirement that cannot belong to one domain. Keep temporary scope, acceptance criteria, sequencing, rollout, migration, progress, and verification plans in non-normative iteration artifacts outside both corpora.
 
 When editing production code:
 

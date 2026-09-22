@@ -103,6 +103,8 @@ For each domain's colocated specification directory:
 7. Check body does NOT repeat the domain description from domains.yaml verbatim.
 8. Reject project-management sections: roadmaps, rollout or migration plans, progress, implementation plans, delivery status, verification plans, milestones, deadlines, and assignees. Reject delivery-phase tracking and completion percentages during semantic review without banning legitimate domain lifecycle language.
 9. Require durable present-tense behavior rather than legacy comparisons, transitional commentary, or temporary workarounds.
+10. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
+11. Check that README.md has substantive content beyond the title and reference line.
 
 ### Step 7c: Check system specifications
 
@@ -114,8 +116,15 @@ For every file or recursively scanned directory declared in `system-specs`:
 4. Reject `term` and `aliases`; ubiquitous language remains domain-owned.
 5. Apply the same timelessness and project-management exclusions as domain specs.
 6. Ignore iteration documents outside declared domain and system corpora.
-8. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
-9. Check that README.md has substantive content beyond the title and reference line.
+
+### Step 7d: Check specification wiki integrity
+
+1. Build one case-insensitive index from canonical `term` and `aliases` frontmatter on domain-owned pages.
+2. Reject labels owned by more than one page, including alias-to-term and alias-to-alias collisions across domains.
+3. Validate relative links originating from normative domain and system Markdown; external URLs are outside this check.
+4. Require every local target to exist and every Markdown fragment to identify a real heading anchor.
+5. When link text exactly matches a canonical term or alias, require the link to target its canonical owner.
+6. Treat meaningful first-occurrence linking as semantic guidance, not a lexical hard failure.
 
 ### Step 8: Check OpenAPI completeness (backend domains only)
 

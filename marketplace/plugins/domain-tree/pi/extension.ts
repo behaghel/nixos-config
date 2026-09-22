@@ -8,7 +8,7 @@
  * What this extension provides:
  *   • Auto-detects domain-tree projects (domains.yaml)
  *   • Injects domain-navigator expertise into the system prompt
- *   • Registers custom tools: domain_tree_resolve, domain_tree_check, domain_tree_map
+ *   • Registers ownership, term-resolution, health-check, and coverage tools
  *   • Registers commands: /domain-tree:init, /domain-tree:check, /domain-tree:map
  *   • Monitors tool calls for spec-on-touch enforcement and cross-domain violations
  *
@@ -23,18 +23,21 @@ import { readFile, access, readdir, stat } from "fs/promises";
 import { join, resolve, relative, basename, dirname } from "path";
 import { Type } from "typebox";
 import {
+	buildTermIndex,
 	entryForResolution,
 	findAmbiguousCodeMappings,
 	findContextMapIssues,
 	flattenDomains,
 	parseDomainManifest,
 	resolveDomainForFilePath,
+	resolveTerm,
 	specDirForEntry,
 	specLabelForEntry,
 	validateNormativeSpecContent,
+	validateSpecificationWiki,
 	validateSystemSpecContent,
 } from "./domain-core.ts";
-import type { ManifestDiagnostic } from "./domain-core.ts";
+import type { ManifestDiagnostic, WikiDocument } from "./domain-core.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -147,6 +150,33 @@ async function collectMarkdownFiles(absolutePath: string): Promise<string[]> {
 		}
 	}
 	return markdownPaths;
+}
+
+async function collectDomainWikiDocuments(
+	root: string,
+	domains: Record<string, any>,
+): Promise<WikiDocument[]> {
+	const documents: WikiDocument[] = [];
+	for (const node of flattenDomains(domains)) {
+		const specDir = specDirForEntry(root, node.entry);
+		if (!specDir) continue;
+		let files: string[];
+		try {
+			files = await readdir(specDir);
+		} catch {
+			continue;
+		}
+		for (const file of files.filter((name) => name.endsWith(".md"))) {
+			const content = await readFile(join(specDir, file), "utf-8");
+			if (file !== "README.md" && !content.startsWith("---\n")) continue;
+			documents.push({
+				path: relative(root, join(specDir, file)),
+				content,
+				domain: node.path.join("/"),
+			});
+		}
+	}
+	return documents;
 }
 
 /** Determine which domain a file path belongs to from the domain manifest. */
@@ -296,6 +326,7 @@ The domain tree encodes three things:
 - **Colocated specs** — domain specs live next to code. The first \`code\` path is the default spec directory; \`README.md\` is the required main domain spec.
 - **Normative corpora** — Domain specs are the default. Declared \`system-specs\` hold only durable RFC 2119 requirements that cannot belong to one domain. Iteration specs are temporary and non-normative.
 - **Specification DRY** — Define each concept, invariant, or contract once at its narrowest owner; other specs link to it and state only local consequences.
+- **Specification wiki** — Use relative Markdown links. Canonical terms and aliases have one repository-wide owner; use \`domain_tree_resolve_term\` and link meaningful first occurrences to that page.
 - **Timeless specifications** — Normative specs contain present-tense durable behavior, never roadmaps, rollout or migration plans, progress, delivery metadata, verification plans, legacy comparisons, or temporary workarounds.
 - **Subsidiarity** — the most-specific matching child path owns a file. Parent/child overlap is valid; unrelated domains may not claim the same path.
 - **Spec-on-touch** — The first time you modify a domain, write its spec. Rigor scales with classification:
@@ -311,6 +342,7 @@ The domain tree encodes three things:
 | Action | Tool |
 |--------|------|
 | Resolve which domain owns a file | \`domain_tree_resolve\` |
+| Resolve canonical term or alias ownership | \`domain_tree_resolve_term\` |
 | Validate domain tree structure | \`domain_tree_check\` |
 | Show domain coverage dashboard | \`domain_tree_map\` |
 
@@ -468,6 +500,67 @@ For detailed reference, load the \`domain-navigator\` skill.
 		},
 	});
 
+	// Tool: domain_tree_resolve_term — resolve canonical ubiquitous-language ownership
+	pi.registerTool({
+		name: "domain_tree_resolve_term",
+		label: "Domain Tree Resolve Term",
+		description:
+			"Resolve an exact canonical ubiquitous-language term or alias to its owning domain and normative page.",
+		promptSnippet: "Resolve a canonical domain term or alias",
+		promptGuidelines: [
+			"Use domain_tree_resolve_term before linking a ubiquitous-language term across domain specifications.",
+		],
+		parameters: Type.Object({
+			term: Type.String({ description: "Canonical term or alias to resolve" }),
+		}),
+		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+			await ensureDomainRoot(ctx);
+			if (domainRoot && manifestDiagnostics.length > 0) {
+				return invalidManifestResult();
+			}
+			if (!domainRoot || !domainsCache) {
+				return {
+					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
+				};
+			}
+
+			const documents = await collectDomainWikiDocuments(domainRoot, domainsCache);
+			const index = buildTermIndex(documents);
+			if (index.diagnostics.length > 0) {
+				return {
+					content: [{
+						type: "text",
+						text: "The ubiquitous-language index is ambiguous:\n\n" +
+							index.diagnostics.map((issue) => `- \`${issue.path}\`: ${issue.message}`).join("\n"),
+					}],
+					details: { resolved: false, diagnostics: index.diagnostics },
+				};
+			}
+
+			const resolved = resolveTerm(index, params.term);
+			if (!resolved) {
+				return {
+					content: [{
+						type: "text",
+						text: `No canonical ubiquitous-language term or alias matches **${params.term}**.`,
+					}],
+					details: { resolved: false, term: params.term },
+				};
+			}
+
+			return {
+				content: [{
+					type: "text",
+					text: `**${params.term}** resolves to **${resolved.canonicalTerm}**\n` +
+						`   Domain: \`${resolved.domain}\`\n` +
+						`   Canonical page: \`${resolved.path}\`` +
+						(resolved.matchedAlias ? `\n   Matched alias: \`${resolved.matchedAlias}\`` : ""),
+				}],
+				details: { resolved: true, ...resolved },
+			};
+		},
+	});
+
 	// Tool: domain_tree_check — validate domain tree structure vs codebase
 	pi.registerTool({
 		name: "domain_tree_check",
@@ -559,6 +652,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 			results.push("");
 			results.push("### 📚 Normative documentation");
 			let documentationIssues = 0;
+			const wikiDocuments: WikiDocument[] = [];
 			for (const node of nodes) {
 				const specDir = specDirForEntry(domainRoot, node.entry);
 				if (!specDir) continue;
@@ -576,6 +670,13 @@ For detailed reference, load the \`domain-navigator\` skill.
 						content = await readFile(join(specDir, file), "utf-8");
 					} catch {
 						// Missing README.md is reported by the validator below.
+					}
+					if (file === "README.md" || content.startsWith("---\n")) {
+						wikiDocuments.push({
+							path: relative(domainRoot, join(specDir, file)),
+							content,
+							domain: node.path.join("/"),
+						});
 					}
 					for (const issue of validateNormativeSpecContent(
 						content,
@@ -630,6 +731,7 @@ For detailed reference, load the \`domain-navigator\` skill.
 				for (const absolutePath of [...markdownPaths].sort()) {
 					const label = relative(domainRoot, absolutePath);
 					const content = await readFile(absolutePath, "utf-8");
+					wikiDocuments.push({ path: label, content, system: systemName });
 					for (const issue of validateSystemSpecContent(content, systemName)) {
 						results.push(`  ⚠ \`${label}\`: ${issue}`);
 						issues++;
@@ -639,6 +741,23 @@ For detailed reference, load the \`domain-navigator\` skill.
 				if (markdownPaths.size > 0 && systemIssues === 0) {
 					results.push(`  ✅ ${markdownPaths.size} system specification(s) are valid`);
 				}
+			}
+
+			results.push("");
+			results.push("### 🔤 Specification wiki");
+			const wikiIssues = await validateSpecificationWiki(
+				domainRoot,
+				wikiDocuments,
+			);
+			for (const issue of wikiIssues) {
+				results.push(`  ⚠ \`${issue.path}\`: ${issue.message}`);
+				issues++;
+			}
+			if (wikiIssues.length === 0) {
+				const termCount = buildTermIndex(wikiDocuments).owners.length;
+				results.push(
+					`  ✅ Links are valid and ${termCount} canonical term(s) have unique owners`,
+				);
 			}
 
 			// Step 2: Classification consistency
@@ -821,6 +940,14 @@ For detailed reference, load the \`domain-navigator\` skill.
 				);
 			}
 
+			const termIndex = buildTermIndex(
+				await collectDomainWikiDocuments(domainRoot, domainsCache),
+			);
+			rows.push("");
+			rows.push(
+				`**Specification wiki:** ${termIndex.owners.length} canonical term(s), ${termIndex.diagnostics.length} ownership conflict(s)`,
+			);
+
 			// Context map section
 			if (domainsCache._contextMap) {
 				rows.push("");
@@ -972,7 +1099,7 @@ Use domain_tree_map to help generate the report.`;
 			}
 			ctx.ui.notify(
 				`🌳 Domain-driven project detected at ${domainRoot}. ` +
-				`Tools: domain_tree_resolve, domain_tree_check, domain_tree_map. ` +
+				`Tools: domain_tree_resolve, domain_tree_resolve_term, domain_tree_check, domain_tree_map. ` +
 				`Commands: /domain-tree:init, /domain-tree:check, /domain-tree:map. ` +
 				`Skill: domain-navigator.`,
 				"info",

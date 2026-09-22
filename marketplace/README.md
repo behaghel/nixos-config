@@ -317,7 +317,7 @@ Each plugin contributes:
 | Plugin | Extensions | Skills | Commands |
 |--------|-----------|--------|----------|
 | **devenv-workflow** | Auto-detect, tool monitoring, 3 custom tools | `devenv-project` | `/devenv-init`, `/devenv-add`, `/devenv-diagnose` |
-| **domain-tree** | Auto-detect, spec-on-touch enforcement, 3 custom tools | `domain-navigator` | `/domain-tree:init`, `/domain-tree:check`, `/domain-tree:map` |
+| **domain-tree** | Auto-detect, spec-on-touch enforcement, 4 custom tools including canonical-term lookup | `domain-navigator` | `/domain-tree:init`, `/domain-tree:check`, `/domain-tree:map` |
 | **spec-driven** | Expertise injection, spec coverage tool | `spec-collector`, `spec-verifier` | `/spec-collect`, `/spec-verify` |
 | **spec-tdd** | Expertise injection | `tdd-planner` | `/tdd-plan`, `/tdd-iterate` |
 | **ux-stories** | Expertise injection | `story-writer` | `/story-write`, `/story-scenarios`, `/story-deliver` |

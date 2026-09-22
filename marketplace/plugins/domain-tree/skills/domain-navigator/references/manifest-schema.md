@@ -76,6 +76,8 @@ The `system` value must equal `project.name`, and every system spec must contain
 
 Iteration specs are temporary delivery artifacts. They remain outside domain spec directories and declared `system-specs`, carry no normative frontmatter, and are deleted when no longer useful.
 
+Together, normative files form a standard relative-Markdown wiki. Canonical term pages declare `term` and optional `aliases`. Every case-insensitive canonical term or alias has one repository-wide owner. Relative targets and Markdown heading anchors must resolve; term-labelled links must target the canonical owner. Meaningful first-occurrence linking remains a semantic authoring rule rather than a noisy lexical hard check.
+
 Normative domain and system specs reject project-management sections such as roadmaps, rollout or migration plans, progress, delivery status, milestones, and verification plans. They state durable behavior rather than legacy comparisons or temporary implementation concerns.
 
 ## Domain classification
