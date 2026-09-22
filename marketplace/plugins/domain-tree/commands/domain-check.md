@@ -13,6 +13,9 @@ Validates the structural contract between `domains.yaml` and the actual codebase
 
 1. Read `domains.yaml`.
 2. If it doesn't exist: "No domain tree found. Run `/domain-tree:init` to create one."
+3. Validate the complete manifest before using it. Report every path-aware schema diagnostic, including YAML line and column where available.
+4. If any diagnostic exists, stop: ownership resolution, maps, and coverage must not use a partial tree.
+5. For a structural-only node with children but no `code` or `spec`, recommend either explicit `kind: group` plus `domains`, or a real domain specification anchor. Never rewrite it automatically.
 
 ### Step 1b: Legacy migration prompt
 
@@ -98,8 +101,30 @@ For each domain's colocated specification directory:
 5. Check frontmatter does NOT contain `consumers:` (consumer lists live in domains.yaml).
 6. Check body does NOT contain a "Context Map Relationships" section (context map lives in domains.yaml).
 7. Check body does NOT repeat the domain description from domains.yaml verbatim.
-8. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
-9. Check that README.md has substantive content beyond the title and reference line.
+8. Reject project-management sections: roadmaps, rollout or migration plans, progress, implementation plans, delivery status, verification plans, milestones, deadlines, and assignees. Reject delivery-phase tracking and completion percentages during semantic review without banning legitimate domain lifecycle language.
+9. Require durable present-tense behavior rather than legacy comparisons, transitional commentary, or temporary workarounds.
+10. Report **README.md duplication** for any violations — "**[domain]** README.md duplicates information from domains.yaml: [field/section]."
+11. Check that README.md has substantive content beyond the title and reference line.
+
+### Step 7c: Check system specifications
+
+For every file or recursively scanned directory declared in `system-specs`:
+
+1. Require Markdown files with only `system` and `status` frontmatter.
+2. Require `system` to equal `project.name`.
+3. Require at least one uppercase RFC 2119 keyword: `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, or `MAY`.
+4. Reject `term` and `aliases`; ubiquitous language remains domain-owned.
+5. Apply the same timelessness and project-management exclusions as domain specs.
+6. Ignore iteration documents outside declared domain and system corpora.
+
+### Step 7d: Check specification wiki integrity
+
+1. Build one case-insensitive index from canonical `term` and `aliases` frontmatter on domain-owned pages.
+2. Reject labels owned by more than one page, including alias-to-term and alias-to-alias collisions across domains.
+3. Validate relative links originating from normative domain and system Markdown; external URLs are outside this check.
+4. Require every local target to exist and every Markdown fragment to identify a real heading anchor.
+5. When link text exactly matches a canonical term or alias, require the link to target its canonical owner.
+6. Treat meaningful first-occurrence linking as semantic guidance, not a lexical hard failure.
 
 ### Step 8: Check OpenAPI completeness (backend domains only)
 

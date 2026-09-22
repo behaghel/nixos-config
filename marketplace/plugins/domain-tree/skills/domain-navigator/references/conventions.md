@@ -113,7 +113,7 @@ If a cross-domain change doesn't fit any declared relationship, the context map 
 
 - One spec per bounded concern: `src/issuance/credential-flow.md`
 - Use the behavior name, not the implementation name: `verification-request.md` not `verify-handler.md`
-- Plans live next to their spec: `src/issuance/credential-flow.plan.md`
+- Keep iteration plans outside domain and system corpora; delete them when no longer operationally useful.
 
 ### Frontmatter
 
@@ -140,7 +140,6 @@ A domain MAY have a `README.md` at its code root:
 src/issuance/
 ├── README.md             ← main domain spec: ubiquitous language, invariants, domain events
 ├── credential-flow.md    ← specific behavior spec
-├── credential-flow.plan.md
 ├── webhook-handling.md
 └── ...code...
 ```
@@ -153,6 +152,16 @@ src/issuance/
 - Code paths
 - Context map relationships
 - Consumer lists
+
+### Specification DRY
+
+Define each concept, invariant, or contract once at its narrowest semantic owner. Other specifications link to that canonical definition and describe only their local use, constraints, or consequences. Domain specifications are the default normative artifact.
+
+Use a declared system spec only for a durable RFC 2119 requirement that cannot be assigned to one domain by subsidiarity. Keep temporary acceptance criteria, implementation scope, sequencing, rollout, migration, progress, and verification plans in non-normative iteration artifacts outside both corpora. Normative specs describe current durable behavior in the present tense; they do not preserve legacy or transitional commentary.
+
+### Specification wiki links
+
+Use standard relative Markdown links, never a separate wikilink syntax. Canonical term pages declare `term` and optional `aliases`; canonical terms and aliases form one case-insensitive repository-wide namespace with one semantic owner per label. A term-labelled link must target that owner. Link meaningful first occurrences, not every repetition. Relative targets must exist, and fragments on Markdown targets must resolve to real heading anchors. External URLs are allowed but are outside repository-integrity checks.
 
 ## Code-paths rules
 

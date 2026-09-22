@@ -6,7 +6,9 @@ Spec-driven development toolkit — move the human checkpoint upstream from code
 
 The spec is the source of truth. Code is its artifact. When an AI agent implements a well-collected spec, you don't need to review the code — you review the spec, and the verification plan proves correctness.
 
-This plugin helps you collect the right information, structure it into a verifiable contract, and validate it before implementation begins.
+This plugin helps you collect the right information, structure it into the correct corpus, and validate it before implementation begins.
+
+When `domains.yaml` exists, domain specifications are the default. Temporary acceptance and verification work becomes a non-normative iteration spec; only durable requirements irreducible to one domain become RFC 2119 system specs. This keeps delivery concerns out of the domain wiki.
 
 ## What's Included
 
@@ -21,7 +23,8 @@ This plugin helps you collect the right information, structure it into a verifia
 
 | Command | Description |
 |---------|-------------|
-| `/spec-driven:collect-spec` | Interactive 6-phase spec collection — walks you from idea to verifiable contract |
+| `/spec-collect` | Domain-first collection with explicit iteration and system modes |
+| `/spec-verify` | Corpus-aware verification for an existing specification |
 
 ### Agents
 
@@ -29,9 +32,20 @@ This plugin helps you collect the right information, structure it into a verifia
 |-------|-------------|
 | spec-challenger | Adversarial review — finds gaps, unstated assumptions, and untestable criteria |
 
-## The Collection Process
+## Specification modes
 
-The `collect-spec` command walks through 6 phases:
+| Mode | Use |
+|------|-----|
+| Domain (default with `domains.yaml`) | Durable present-tense domain behavior, language, invariants, and contracts |
+| Iteration | Temporary problem, decisions, acceptance criteria, scope, and verification |
+| System | Durable RFC 2119 requirements that no domain can own |
+| Standalone | Conventional development spec when no domain manifest exists |
+
+Select explicitly with `/spec-collect --mode domain|iteration|system`; otherwise domain mode is selected whenever a manifest exists.
+
+## Iteration collection process
+
+Iteration and standalone development collection walk through 6 phases:
 
 1. **Problem** — Why does this work need to exist?
 2. **Context** — What code, patterns, and systems are relevant? (agent reads the codebase)
@@ -42,9 +56,9 @@ The `collect-spec` command walks through 6 phases:
 
 Each phase builds on the previous. The agent reads the codebase between phases to ask informed questions rather than relying on the human to provide all context.
 
-## Output
+## Iteration output
 
-A structured spec that serves as a verifiable contract:
+A structured temporary delivery contract:
 
 - **Problem** — why the work exists
 - **Context** — relevant codebase and systems
@@ -57,7 +71,7 @@ A structured spec that serves as a verifiable contract:
 ## Workflow
 
 ```
-1. /spec-driven:collect-spec "add JWT refresh tokens"
+1. /spec-collect --mode iteration "add JWT refresh tokens"
 2. Walk through the 6 phases interactively
 3. Spec challenger finds gaps → refine
 4. Spec verifier confirms completeness → approve
@@ -72,7 +86,7 @@ A structured spec that serves as a verifiable contract:
 /plugin install spec-driven
 
 # Collect a spec interactively
-/spec-driven:collect-spec "add user authentication"
+/spec-collect --mode iteration "add user authentication"
 
 # Or describe what you need — the skill activates automatically
 "I need to add rate limiting to the API"

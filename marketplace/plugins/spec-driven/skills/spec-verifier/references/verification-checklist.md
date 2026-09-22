@@ -1,6 +1,8 @@
 # Verification Checklist
 
-Detailed checklist for auditing spec completeness. Work through each section in order.
+Detailed checklist for temporary iteration and conventional standalone development specs. Work through each section in order.
+
+Do not apply this delivery checklist to normative domain or system specs. For those, use the corpus-specific durability, subsidiarity, DRY, frontmatter, wiki-link, RFC 2119, and timelessness checks in the parent skill.
 
 ## Problem Statement
 

@@ -18,6 +18,7 @@ Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructur
 
 | Concept | How we use it |
 |---------|--------------|
+| **Structural group** | `kind: group` provides namespace and navigation without pretending to be a bounded context |
 | **Subdomain classification** | `type: core/supporting/generic` on each domain — drives spec rigor and review requirements |
 | **Bounded context** | Each domain IS a bounded context with its own ubiquitous language |
 | **Context map** | `context-map:` section declaring cross-domain relationships and integration patterns |
@@ -45,9 +46,28 @@ Install any combination. They complement each other but don't depend on each oth
 |-----------|------|-------------|
 | Domain Navigator | Skill | Auto-resolves domains, enforces placement, classification-aware spec-on-touch |
 | `/domain-tree:init` | Command | Bootstrap tree with classification and context map from existing codebase |
-| `/domain-tree:map` | Command | Coverage dashboard with domain types and context map visualization |
-| `/domain-tree:check` | Command | Structural health check including context map and classification validation |
+| `/domain-tree:map` | Command | Coverage dashboard with domain types, wiki terms, and context map visualization |
+| `/domain-tree:check` | Command | Structural, normative-wiki, context-map, and classification validation |
+| `domain_tree_resolve_term` | Tool | Exact canonical-term and alias lookup with domain ownership |
 | `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
+
+## Structural groups
+
+Use explicit groups when names such as `business`, `foundation`, or `technical` organize bounded contexts but do not own behavior themselves:
+
+```yaml
+domains:
+  business:
+    kind: group
+    domains:
+      time-management:
+        type: core
+        code: [src/business/time-management/]
+```
+
+Groups may nest. They do not own code, require specifications, receive classifications, or participate in context-map relationships. Their names remain part of each child domain's fully qualified identity.
+
+`domains.yaml` is validated strictly. Groups, domains, and context-map relationships reject unknown or malformed fields. Every real domain must provide a specification anchor through `code` or `spec`. Invalid manifests fail closed: ownership resolution, coverage maps, and spec checks remain unavailable until `/domain-tree:check` diagnostics are fixed. Legacy structural nodes are reported with manual migration guidance and are never rewritten automatically.
 
 ## Domain classification
 
@@ -107,6 +127,16 @@ The first `/domain-tree:check` on a legacy tree reports a migration section. The
 3. Move other domain `*.md` specs into that same code directory.
 4. Remove old `spec:` fields or update them to explicit colocated paths.
 5. Delete the old `spec/` tree once empty.
+
+## Specification corpora
+
+Domain specifications are the default. They define durable behavior, ubiquitous language, boundaries, invariants, and semantic contracts at the narrowest capable owner.
+
+Use `system-specs` only for stable, project-wide requirements that subsidiarity cannot assign to one domain. System specs use `system`/`status` frontmatter and RFC 2119 requirements. Temporary iteration specs remain non-normative and outside both corpora.
+
+Apply specification DRY: define each concept, invariant, or contract once, then link to its canonical owner and describe only local consequences. Normative specs reject roadmaps, rollout or migration plans, progress, delivery metadata, verification plans, legacy comparisons, and other circumstantial concerns.
+
+The normative corpus forms a portable Markdown wiki. Canonical term pages declare `term` and optional `aliases`; each case-insensitive label has exactly one repository-wide owner. Relative links must resolve, Markdown fragments must identify real heading anchors, and links labelled with a canonical term or alias must target its owning page. Link meaningful first occurrences rather than every repetition. Use `domain_tree_resolve_term` for exact canonical or alias lookup.
 
 ## The spec-on-touch convention
 

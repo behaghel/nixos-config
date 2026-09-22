@@ -25,7 +25,7 @@ Load `references/conventions.md` when making decisions about file placement or d
 
 1. Read `domains.yaml` at the project root.
 2. If it doesn't exist, tell the user: "No domain tree found. Run `/domain-tree:init` to create one."
-3. Parse the tree into a mental model of domains, subdomains, code paths, and spec paths.
+3. Parse explicit `kind: group` entries as structural namespaces, then build a model of bounded-context domains, subdomains, code paths, and spec paths. Groups are not domains and own no code or specifications.
 
 ### 2. Resolve domain from context
 
@@ -49,6 +49,8 @@ When creating new files:
 4. If a new subdomain is needed, propose updating `domains.yaml` first.
 
 ### 4. Spec-on-touch (classification-aware)
+
+Default to a domain specification containing durable, present-tense domain truth. Define each concept, invariant, or contract once at its narrowest owner and link to it elsewhere. Use standard relative Markdown links and resolve canonical terms or aliases with `domain_tree_resolve_term`; link meaningful first occurrences to the one repository-wide owner. Use a declared system spec only for a stable RFC 2119 requirement that cannot belong to one domain. Keep temporary scope, acceptance criteria, sequencing, rollout, migration, progress, and verification plans in non-normative iteration artifacts outside both corpora.
 
 When editing production code:
 

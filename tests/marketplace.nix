@@ -229,12 +229,31 @@ let
       node --check ${lib.escapeShellArg (toString path)}
     '') piExtensionPaths}
 
-    node ${lib.escapeShellArg (toString ./domain-tree-nested.test.mjs)}
+    node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
 
     echo ok > "$out"
   '';
 
-  level25 = assertPathExists piSyntaxCheck "pi extensions parse with node --check";
+  domainTreeBehaviorCheck = pkgs.buildNpmPackage {
+    pname = "domain-tree-behavior-check";
+    version = "0.4.0";
+    src = marketplaceDir + "/plugins/domain-tree";
+    npmDeps = pkgs.importNpmLock {
+      npmRoot = marketplaceDir + "/plugins/domain-tree";
+    };
+    npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+    dontNpmBuild = true;
+    installPhase = ''
+      runHook preInstall
+      node test/domain-core.test.mjs
+      echo ok > "$out"
+      runHook postInstall
+    '';
+  };
+
+  level25 =
+    assertPathExists piSyntaxCheck "pi extensions parse with node --check"
+    + assertPathExists domainTreeBehaviorCheck "domain-tree behavior tests pass";
 
   # ── Level 3: Template wiring (explicit opt-in) ──────────────
   templateNames = builtins.attrNames
