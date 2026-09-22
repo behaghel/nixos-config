@@ -27,12 +27,13 @@ import {
 	findAmbiguousCodeMappings,
 	findContextMapIssues,
 	flattenDomains,
-	parseDomainsYaml,
+	parseDomainManifest,
 	resolveDomainForFilePath,
 	specDirForEntry,
 	specLabelForEntry,
 	validateNormativeSpecContent,
 } from "./domain-core.ts";
+import type { ManifestDiagnostic } from "./domain-core.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -96,14 +97,32 @@ function stripFrontmatter(content: string): string {
 	return content;
 }
 
-/** Try to parse domains.yaml and return domains object. */
-async function tryLoadDomains(root: string): Promise<Record<string, any> | null> {
+/** Parse domains.yaml without allowing partial ownership results. */
+async function tryLoadDomains(root: string): Promise<{
+	domains: Record<string, any> | null;
+	diagnostics: ManifestDiagnostic[];
+}> {
 	try {
 		const content = await readFile(join(root, manifestRelPath(root)), "utf-8");
-		return parseDomainsYaml(content);
-	} catch {
-		return null;
+		return parseDomainManifest(content);
+	} catch (error) {
+		return {
+			domains: null,
+			diagnostics: [{
+				path: manifestRelPath(root),
+				message: error instanceof Error ? error.message : String(error),
+			}],
+		};
 	}
+}
+
+function formatManifestDiagnostics(diagnostics: ManifestDiagnostic[]): string {
+	return diagnostics.map((diagnostic) => {
+		const location = diagnostic.line && diagnostic.column
+			? ` (line ${diagnostic.line}, column ${diagnostic.column})`
+			: "";
+		return `- \`${diagnostic.path}\`: ${diagnostic.message}${location}`;
+	}).join("\n");
 }
 
 /** Determine which domain a file path belongs to from the domain manifest. */
@@ -155,6 +174,7 @@ export default function domainTreeExtension(pi: ExtensionAPI) {
 	let domainRoot: string | null = null;
 	let isActive = false;
 	let domainsCache: Record<string, any> | null = null;
+	let manifestDiagnostics: ManifestDiagnostic[] = [];
 
 	// ─── Status helpers ────────────────────────────────────────
 
@@ -170,10 +190,24 @@ export default function domainTreeExtension(pi: ExtensionAPI) {
 	/** Refresh the domain cache. */
 	async function refreshDomainCache() {
 		if (domainRoot) {
-			domainsCache = await tryLoadDomains(domainRoot);
+			const result = await tryLoadDomains(domainRoot);
+			domainsCache = result.domains;
+			manifestDiagnostics = result.diagnostics;
 		} else {
 			domainsCache = null;
+			manifestDiagnostics = [];
 		}
+	}
+
+	function invalidManifestResult() {
+		return {
+			content: [{
+				type: "text" as const,
+				text: "`domains.yaml` is invalid. Ownership results are unavailable until these issues are fixed:\n\n" +
+					formatManifestDiagnostics(manifestDiagnostics),
+			}],
+			details: { valid: false, diagnostics: manifestDiagnostics },
+		};
 	}
 
 	/** Lazily rediscover the domain root for tools/commands after init in the same session. */
@@ -217,6 +251,11 @@ export default function domainTreeExtension(pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async (event) => {
 		if (!isActive) return;
+		if (manifestDiagnostics.length > 0) {
+			return {
+				systemPrompt: `${event.systemPrompt}\n\n## Invalid Domain Manifest\n\nDomain enforcement is unavailable until \`domains.yaml\` is fixed:\n${formatManifestDiagnostics(manifestDiagnostics)}`,
+			};
+		}
 
 		const domainExpertise = `
 ## Domain Tree Environment
@@ -342,6 +381,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			await ensureDomainRoot(ctx);
+			if (domainRoot && manifestDiagnostics.length > 0) {
+				return invalidManifestResult();
+			}
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [
@@ -422,6 +464,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 		}),
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			await ensureDomainRoot(ctx);
+			if (domainRoot && manifestDiagnostics.length > 0) {
+				return invalidManifestResult();
+			}
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
@@ -613,6 +658,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 		parameters: Type.Object({}),
 		async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
 			await ensureDomainRoot(ctx);
+			if (domainRoot && manifestDiagnostics.length > 0) {
+				return invalidManifestResult();
+			}
 			if (!domainRoot || !domainsCache) {
 				return {
 					content: [{ type: "text", text: "No domain tree found. Run `/domain-tree:init` to create one." }],
@@ -742,6 +790,10 @@ Remember:
 				ctx.ui.notify("No domain tree found. Use /domain-tree:init first.", "warning");
 				return;
 			}
+			if (manifestDiagnostics.length > 0) {
+				ctx.ui.notify("domains.yaml is invalid; run domain_tree_check for diagnostics.", "error");
+				return;
+			}
 
 			const detailed = args.includes("--detailed") || args.includes("-d");
 
@@ -773,6 +825,10 @@ Report a summary with pass/fail and actionable recommendations.`;
 				ctx.ui.notify("No domain tree found. Use /domain-tree:init first.", "warning");
 				return;
 			}
+			if (manifestDiagnostics.length > 0) {
+				ctx.ui.notify("domains.yaml is invalid; map output is unavailable.", "error");
+				return;
+			}
 
 			const msg = `I need to visualize the domain tree coverage.
 
@@ -795,6 +851,13 @@ Use domain_tree_map to help generate the report.`;
 
 	pi.on("session_start", async (_event, ctx) => {
 		if (isActive && domainRoot) {
+			if (manifestDiagnostics.length > 0) {
+				ctx.ui.notify(
+					"🌳 Domain-driven project detected, but domains.yaml is invalid. Run domain_tree_check for diagnostics.",
+					"error",
+				);
+				return;
+			}
 			ctx.ui.notify(
 				`🌳 Domain-driven project detected at ${domainRoot}. ` +
 				`Tools: domain_tree_resolve, domain_tree_check, domain_tree_map. ` +

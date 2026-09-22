@@ -18,7 +18,7 @@ import { Type } from "typebox";
 import {
 	entryForResolution,
 	flattenDomains,
-	parseDomainsYaml,
+	parseDomainManifest,
 	resolveDomainForFilePath,
 	specDirForEntry,
 	specLabelForEntry,
@@ -97,7 +97,20 @@ A spec is a verifiable contract. If the spec is right, code review becomes optio
 
 			try {
 				const content = await readFile(join(cwd, "domains.yaml"), "utf-8");
-				const domains = parseDomainsYaml(content);
+				const manifest = parseDomainManifest(content);
+				if (!manifest.domains) {
+					return {
+						content: [{
+							type: "text",
+							text: "`domains.yaml` is invalid. Spec coverage is unavailable until these issues are fixed:\n\n" +
+								manifest.diagnostics.map((diagnostic) =>
+									`- \`${diagnostic.path}\`: ${diagnostic.message}`,
+								).join("\n"),
+						}],
+						details: { valid: false, diagnostics: manifest.diagnostics },
+					};
+				}
+				const domains = manifest.domains;
 				const requested = params.path.replace(/\s*>\s*/g, " > ");
 				const directNode = flattenDomains(domains).find((node) =>
 					node.path.join(" > ") === requested || node.path[node.path.length - 1] === requested

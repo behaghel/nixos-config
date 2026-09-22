@@ -2,10 +2,13 @@ import assert from "node:assert/strict";
 import { mkdir, writeFile, mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import domainTreeExtension from "../pi/extension.ts";
 import {
+  DomainManifestError,
   findAmbiguousCodeMappings,
   findContextMapIssues,
   flattenDomains,
+  parseDomainManifest,
   parseDomainsYaml,
   resolveDomainForFilePath,
   specDirForEntry,
@@ -17,6 +20,7 @@ const manifest = `
 domains:
   business:
     type: core
+    spec: src/business/
     subdomains:
       time-management:
         type: core
@@ -106,13 +110,16 @@ try {
   ]);
   assert.deepEqual(findContextMapIssues(domains), []);
 
-  const invalidContext = parseDomainsYaml(`${manifest}\n  - provider: business/missing\n    consumers: [business/also-missing]\n    pattern: invented\n`);
-  assert.deepEqual(findContextMapIssues(invalidContext), [
-    "Context provider `business/missing` is not declared in the domain tree.",
-    "Context consumer `business/also-missing` is not declared in the domain tree.",
-    "Context relationship `business/missing` uses unsupported pattern `invented`.",
-    "Context relationship `business/missing` has no canonical contract path.",
-  ]);
+  const invalidContext = parseDomainManifest(`${manifest}\n  - provider: business/missing\n    consumers: [business/also-missing]\n    pattern: invented\n`);
+  assert.equal(invalidContext.domains, null);
+  assert.match(
+    invalidContext.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    /Context provider `business\/missing` is not declared/,
+  );
+  assert.match(
+    invalidContext.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    /unsupported pattern `invented`/,
+  );
 
   const parentChildOnly = parseDomainsYaml(`
 domains:
@@ -152,7 +159,7 @@ domains:
           - src/foundation/persistence/
 context-map:
   - provider: foundation/persistence
-    consumers: [business]
+    consumers: [business/operations/time-management]
     pattern: customer-supplier
     contract: src/foundation/persistence/README.md
 `);
@@ -188,9 +195,74 @@ context-map:
     })?.description,
     "Allocation of attention over time",
   );
-  assert.deepEqual(findContextMapIssues(grouped), [
-    "Context consumer `business` is not declared in the domain tree.",
-  ]);
+  assert.deepEqual(findContextMapIssues(grouped), []);
+
+  const invalidManifest = parseDomainManifest(`
+project:
+  name: invalid-project
+  unexpected: true
+domains:
+  business:
+    kind: group
+    type: core
+    code: [src/business/]
+    domains:
+      time-management:
+        type: essential
+        status: shipping
+        codes: [src/business/time-management/]
+context-map:
+  - provider: business
+    consumers: foundation/persistence
+    pattern: invented
+    contract: 42
+    notes: legacy shape
+`);
+  assert.equal(invalidManifest.domains, null);
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
+    /project\.unexpected/,
+  );
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
+    /domains\.business\.type/,
+  );
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
+    /domains\.business\.code/,
+  );
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
+    /domains\.business\.domains\.time-management\.codes/,
+  );
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    /Declare `kind: group`, or provide a domain specification anchor/,
+  );
+  assert.match(
+    invalidManifest.diagnostics.map((diagnostic) => diagnostic.path).join("\n"),
+    /context-map\[0\]\.notes/,
+  );
+  const locatedTypeDiagnostic = invalidManifest.diagnostics.find(
+    (diagnostic) => diagnostic.path === "domains.business.domains.time-management.type",
+  );
+  assert.equal(typeof locatedTypeDiagnostic.line, "number");
+  assert.equal(typeof locatedTypeDiagnostic.column, "number");
+
+  const malformedManifest = parseDomainManifest("domains:\n  broken: [\n");
+  assert.equal(malformedManifest.domains, null);
+  assert.equal(malformedManifest.diagnostics[0].path, "domains.yaml");
+  assert.equal(typeof malformedManifest.diagnostics[0].line, "number");
+  assert.equal(typeof malformedManifest.diagnostics[0].column, "number");
+
+  assert.throws(
+    () => parseDomainsYaml("domains:\n  orphan:\n    subdomains: {}\n"),
+    (error) =>
+      error instanceof DomainManifestError &&
+      error.diagnostics.some((diagnostic) =>
+        diagnostic.message.includes("Declare `kind: group`")
+      ),
+  );
 
   assert.deepEqual(
     validateNormativeSpecContent(
@@ -224,6 +296,56 @@ context-map:
     validateNormativeSpecContent("# Non-normative guide\n", "business/time-management", false),
     [],
   );
+
+  await writeFile(join(root, "domains.yaml"), `
+domains:
+  legacy-group:
+    subdomains:
+      child:
+        code: [src/child/]
+`);
+  const registeredTools = new Map();
+  const registeredHandlers = new Map();
+  domainTreeExtension({
+    on(name, handler) {
+      registeredHandlers.set(name, [
+        ...(registeredHandlers.get(name) || []),
+        handler,
+      ]);
+    },
+    registerTool(tool) {
+      registeredTools.set(tool.name, tool);
+    },
+    registerCommand() {},
+    sendUserMessage() {},
+  });
+  const context = {
+    cwd: root,
+    ui: {
+      setStatus() {},
+      notify() {},
+    },
+  };
+  for (const [toolName, params] of [
+    ["domain_tree_resolve", { path: "src/child/file.ts" }],
+    ["domain_tree_check", {}],
+    ["domain_tree_map", {}],
+  ]) {
+    const result = await registeredTools.get(toolName).execute(
+      "test-call",
+      params,
+      undefined,
+      undefined,
+      context,
+    );
+    assert.equal(result.details.valid, false);
+    assert.match(result.content[0].text, /domains\.legacy-group/);
+    assert.match(result.content[0].text, /ownership results are unavailable/i);
+  }
+  const beforeAgentStart = registeredHandlers.get("before_agent_start")[0];
+  const promptResult = await beforeAgentStart({ systemPrompt: "base" });
+  assert.match(promptResult.systemPrompt, /Invalid Domain Manifest/);
+  assert.match(promptResult.systemPrompt, /domains\.legacy-group/);
 } finally {
   await rm(root, { recursive: true, force: true });
 }

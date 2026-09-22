@@ -13,6 +13,9 @@ Validates the structural contract between `domains.yaml` and the actual codebase
 
 1. Read `domains.yaml`.
 2. If it doesn't exist: "No domain tree found. Run `/domain-tree:init` to create one."
+3. Validate the complete manifest before using it. Report every path-aware schema diagnostic, including YAML line and column where available.
+4. If any diagnostic exists, stop: ownership resolution, maps, and coverage must not use a partial tree.
+5. For a structural-only node with children but no `code` or `spec`, recommend either explicit `kind: group` plus `domains`, or a real domain specification anchor. Never rewrite it automatically.
 
 ### Step 1b: Legacy migration prompt
 

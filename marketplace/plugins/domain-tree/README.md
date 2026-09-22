@@ -66,6 +66,8 @@ domains:
 
 Groups may nest. They do not own code, require specifications, receive classifications, or participate in context-map relationships. Their names remain part of each child domain's fully qualified identity.
 
+`domains.yaml` is validated strictly. Groups, domains, and context-map relationships reject unknown or malformed fields. Every real domain must provide a specification anchor through `code` or `spec`. Invalid manifests fail closed: ownership resolution, coverage maps, and spec checks remain unavailable until `/domain-tree:check` diagnostics are fixed. Legacy structural nodes are reported with manual migration guidance and are never rewritten automatically.
+
 ## Domain classification
 
 Every domain has a `type` that determines investment level:

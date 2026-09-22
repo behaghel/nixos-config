@@ -7,6 +7,12 @@
   "dependencies": {
     "yaml": "^2.9.1"
   },
+  "devDependencies": {
+    "typebox": "^1.3.27"
+  },
+  "peerDependencies": {
+    "typebox": "*"
+  },
   "pi": {
     "extensions": ["./pi/extension.ts"],
     "skills": ["./skills"]

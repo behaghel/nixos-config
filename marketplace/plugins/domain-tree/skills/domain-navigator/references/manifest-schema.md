@@ -51,9 +51,9 @@ context-map:
 
 ## Structural groups
 
-A `kind: group` entry provides namespace and presentation structure only. Its `domains` may contain domains or nested groups. Groups are not bounded contexts: they have no classification, code ownership, specification, or context-map relationships. Fully qualified domain names retain their group path, such as `business/time-management`.
+A `kind: group` entry provides namespace and presentation structure only. Its `domains` may contain domains or nested groups. Groups are not bounded contexts: they have no classification, lifecycle, owners, language, code ownership, specification, subdomains, or context-map relationships. The only allowed group fields are `kind`, `description`, and `domains`. Fully qualified domain names retain their group path, such as `business/time-management`.
 
-Entries without `kind: group` remain domains. Domain nesting uses `subdomains`, not `domains`.
+Entries without `kind: group` remain domains. Domain nesting uses `subdomains`, not `domains`. A domain must declare `code` or an explicit `spec`; a node with only children is invalid and should normally become a group.
 
 ## Domain classification
 
@@ -95,6 +95,12 @@ The `context-map` section declares semantic contracts between domains. Each entr
 - **boundary-enforcer**: When a cross-domain change is detected, consult the context map. The provider owns the canonical `contract`; consumers follow the declared pattern.
 - **domain-tree:check**: Validate that providers and consumers exist, patterns are supported, and canonical contract paths resolve.
 - **spec-driven collection**: When speccing a domain that consumes another, the context map tells you which integration pattern to follow — and therefore what to spec.
+
+## Manifest integrity
+
+The manifest is validated strictly. Unknown fields, malformed value types, unsupported classifications or lifecycle states, incomplete context relationships, and group references in the context map are errors. When any error exists, ownership resolution, maps, and spec coverage fail closed rather than using a partial tree. `/domain-tree:check` reports all diagnostics; malformed YAML includes line and column when available.
+
+Legacy structural-only nodes are never rewritten automatically. Convert them explicitly to `kind: group` with `domains`, or give a real bounded context a `code` or `spec` anchor.
 
 ## Path rules
 

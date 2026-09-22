@@ -1,5 +1,5 @@
 import { join, relative, resolve } from "path";
-import { parse } from "yaml";
+import { LineCounter, parseDocument } from "yaml";
 
 export type DomainEntry = {
 	name: string;
@@ -43,6 +43,30 @@ export type DomainResolution = {
 	subdomain: string | null;
 	type: string;
 };
+
+export type ManifestDiagnostic = {
+	path: string;
+	message: string;
+	line?: number;
+	column?: number;
+};
+
+export type DomainManifestResult = {
+	domains: Domains | null;
+	diagnostics: ManifestDiagnostic[];
+};
+
+export class DomainManifestError extends Error {
+	readonly diagnostics: ManifestDiagnostic[];
+
+	constructor(diagnostics: ManifestDiagnostic[]) {
+		super(diagnostics.map((diagnostic) =>
+			`${diagnostic.path}: ${diagnostic.message}`,
+		).join("\n"));
+		this.name = "DomainManifestError";
+		this.diagnostics = diagnostics;
+	}
+}
 
 function normalizeDomainDir(pathValue: string): string {
 	return pathValue.replace(/\/+$|^\.\//g, "");
@@ -126,12 +150,343 @@ function isDomainGroup(entry: DomainTreeEntry): entry is DomainGroup {
 	return "kind" in entry && entry.kind === "group";
 }
 
-export function parseDomainsYaml(content: string): Domains {
-	const manifest = parse(content);
-	const root = isRecord(manifest) ? manifest : {};
-	const domains = parseDomainEntries(root.domains) as Domains;
-	const rawContextMap = Array.isArray(root["context-map"])
-		? root["context-map"]
+const TOP_LEVEL_FIELDS = new Set([
+	"project",
+	"domains",
+	"context-map",
+	"system-specs",
+]);
+const PROJECT_FIELDS = new Set(["name", "description"]);
+const GROUP_FIELDS = new Set(["kind", "description", "domains"]);
+const DOMAIN_FIELDS = new Set([
+	"description",
+	"type",
+	"status",
+	"owners",
+	"language",
+	"code",
+	"spec",
+	"subdomains",
+]);
+const CONTEXT_FIELDS = new Set([
+	"provider",
+	"consumers",
+	"pattern",
+	"contract",
+]);
+const DOMAIN_TYPES = new Set([
+	"core",
+	"supporting",
+	"generic",
+	"shared-kernel",
+]);
+const DOMAIN_STATUSES = new Set(["active", "deprecated", "planned"]);
+const LANGUAGE_FIELDS = new Set(["term", "meaning"]);
+
+function reportUnknownFields(
+	value: Record<string, unknown>,
+	allowed: Set<string>,
+	path: string,
+	diagnostics: ManifestDiagnostic[],
+) {
+	for (const key of Object.keys(value)) {
+		if (!allowed.has(key)) {
+			diagnostics.push({
+				path: `${path}.${key}`,
+				message: `Unsupported field \`${key}\`.`,
+			});
+		}
+	}
+}
+
+function validateString(
+	value: unknown,
+	path: string,
+	diagnostics: ManifestDiagnostic[],
+) {
+	if (value !== undefined && typeof value !== "string") {
+		diagnostics.push({ path, message: "Expected a string." });
+	}
+}
+
+function validateStringList(
+	value: unknown,
+	path: string,
+	diagnostics: ManifestDiagnostic[],
+) {
+	if (
+		value !== undefined &&
+		(!Array.isArray(value) || value.some((item) => typeof item !== "string"))
+	) {
+		diagnostics.push({ path, message: "Expected a list of strings." });
+	}
+}
+
+function validateDomainEntries(
+	value: unknown,
+	path: string,
+	diagnostics: ManifestDiagnostic[],
+	allowGroups: boolean,
+) {
+	if (!isRecord(value)) {
+		diagnostics.push({ path, message: "Expected a mapping of named domains." });
+		return;
+	}
+	for (const [name, rawEntry] of Object.entries(value)) {
+		const entryPath = `${path}.${name}`;
+		if (!isRecord(rawEntry)) {
+			diagnostics.push({ entryPath, message: "Expected a domain mapping." });
+			continue;
+		}
+
+		if (rawEntry.kind === "group") {
+			if (!allowGroups) {
+				diagnostics.push({
+					path: `${entryPath}.kind`,
+					message: "Groups belong under a group's `domains`, not a domain's `subdomains`.",
+				});
+			}
+			reportUnknownFields(rawEntry, GROUP_FIELDS, entryPath, diagnostics);
+			validateString(rawEntry.description, `${entryPath}.description`, diagnostics);
+			validateDomainEntries(
+				rawEntry.domains,
+				`${entryPath}.domains`,
+				diagnostics,
+				true,
+			);
+			continue;
+		}
+
+		reportUnknownFields(rawEntry, DOMAIN_FIELDS, entryPath, diagnostics);
+		validateString(rawEntry.description, `${entryPath}.description`, diagnostics);
+		if (rawEntry.type !== undefined && !DOMAIN_TYPES.has(String(rawEntry.type))) {
+			diagnostics.push({
+				path: `${entryPath}.type`,
+				message: "Expected `core`, `supporting`, `generic`, or `shared-kernel`.",
+			});
+		}
+		if (
+			rawEntry.status !== undefined &&
+			!DOMAIN_STATUSES.has(String(rawEntry.status))
+		) {
+			diagnostics.push({
+				path: `${entryPath}.status`,
+				message: "Expected `active`, `deprecated`, or `planned`.",
+			});
+		}
+		validateStringList(rawEntry.owners, `${entryPath}.owners`, diagnostics);
+		if (rawEntry.language !== undefined && !Array.isArray(rawEntry.language)) {
+			diagnostics.push({
+				path: `${entryPath}.language`,
+				message: "Expected a list of ubiquitous-language entries.",
+			});
+		} else if (Array.isArray(rawEntry.language)) {
+			for (const [index, languageEntry] of rawEntry.language.entries()) {
+				const languagePath = `${entryPath}.language[${index}]`;
+				if (!isRecord(languageEntry)) {
+					diagnostics.push({
+						path: languagePath,
+						message: "Expected a `term` and `meaning` mapping.",
+					});
+					continue;
+				}
+				reportUnknownFields(
+					languageEntry,
+					LANGUAGE_FIELDS,
+					languagePath,
+					diagnostics,
+				);
+				if (!(typeof languageEntry.term === "string" && languageEntry.term.length > 0)) {
+					diagnostics.push({
+						path: `${languagePath}.term`,
+						message: "Declare a term.",
+					});
+				}
+				if (!(typeof languageEntry.meaning === "string" && languageEntry.meaning.length > 0)) {
+					diagnostics.push({
+						path: `${languagePath}.meaning`,
+						message: "Declare the term's meaning.",
+					});
+				}
+			}
+		}
+		validateStringList(rawEntry.code, `${entryPath}.code`, diagnostics);
+		validateString(rawEntry.spec, `${entryPath}.spec`, diagnostics);
+		const hasCode = Array.isArray(rawEntry.code) && rawEntry.code.length > 0;
+		const hasSpec = typeof rawEntry.spec === "string" && rawEntry.spec.length > 0;
+		if (!hasCode && !hasSpec) {
+			diagnostics.push({
+				path: entryPath,
+				message: "Declare `kind: group`, or provide a domain specification anchor with `code` or `spec`.",
+			});
+		}
+		if (rawEntry.subdomains !== undefined) {
+			validateDomainEntries(
+				rawEntry.subdomains,
+				`${entryPath}.subdomains`,
+				diagnostics,
+				false,
+			);
+		}
+	}
+}
+
+function diagnosticPathParts(path: string): Array<string | number> {
+	const normalized = path.startsWith("domains.yaml.")
+		? path.slice("domains.yaml.".length)
+		: path;
+	const parts: Array<string | number> = [];
+	for (const match of normalized.matchAll(/([^.\[\]]+)|\[(\d+)\]/g)) {
+		parts.push(match[2] === undefined ? match[1] : Number(match[2]));
+	}
+	return parts;
+}
+
+function locateDiagnostics(
+	diagnostics: ManifestDiagnostic[],
+	document: ReturnType<typeof parseDocument>,
+	lineCounter: LineCounter,
+): ManifestDiagnostic[] {
+	return diagnostics.map((diagnostic) => {
+		if (diagnostic.line && diagnostic.column) return diagnostic;
+		const parts = diagnosticPathParts(diagnostic.path);
+		while (parts.length > 0) {
+			const node = document.getIn(parts, true) as { range?: [number, number, number] } | undefined;
+			if (node?.range) {
+				const position = lineCounter.linePos(node.range[0]);
+				return {
+					...diagnostic,
+					line: position.line,
+					column: position.col,
+				};
+			}
+			parts.pop();
+		}
+		return diagnostic;
+	});
+}
+
+function validateContextMap(
+	value: unknown,
+	domainPaths: Set<string>,
+	diagnostics: ManifestDiagnostic[],
+) {
+	if (value === undefined) return;
+	if (!Array.isArray(value)) {
+		diagnostics.push({ path: "context-map", message: "Expected a list." });
+		return;
+	}
+	for (const [index, rawEntry] of value.entries()) {
+		const entryPath = `context-map[${index}]`;
+		if (!isRecord(rawEntry)) {
+			diagnostics.push({ path: entryPath, message: "Expected a relationship mapping." });
+			continue;
+		}
+		reportUnknownFields(rawEntry, CONTEXT_FIELDS, entryPath, diagnostics);
+		validateString(rawEntry.provider, `${entryPath}.provider`, diagnostics);
+		validateStringList(rawEntry.consumers, `${entryPath}.consumers`, diagnostics);
+		validateString(rawEntry.pattern, `${entryPath}.pattern`, diagnostics);
+		validateString(rawEntry.contract, `${entryPath}.contract`, diagnostics);
+
+		if (!(typeof rawEntry.provider === "string" && rawEntry.provider.length > 0)) {
+			diagnostics.push({
+				path: `${entryPath}.provider`,
+				message: "Declare a provider domain.",
+			});
+		} else if (!domainPaths.has(rawEntry.provider)) {
+			diagnostics.push({
+				path: `${entryPath}.provider`,
+				message: `Context provider \`${rawEntry.provider}\` is not declared as a domain.`,
+			});
+		}
+		if (!Array.isArray(rawEntry.consumers) || rawEntry.consumers.length === 0) {
+			diagnostics.push({
+				path: `${entryPath}.consumers`,
+				message: "Declare at least one consumer.",
+			});
+		}
+		if (Array.isArray(rawEntry.consumers)) {
+			for (const [consumerIndex, consumer] of rawEntry.consumers.entries()) {
+				if (typeof consumer === "string" && !domainPaths.has(consumer)) {
+					diagnostics.push({
+						path: `${entryPath}.consumers[${consumerIndex}]`,
+						message: `Context consumer \`${consumer}\` is not declared as a domain.`,
+					});
+				}
+			}
+		}
+		if (!(typeof rawEntry.pattern === "string" && rawEntry.pattern.length > 0)) {
+			diagnostics.push({
+				path: `${entryPath}.pattern`,
+				message: "Declare an integration pattern.",
+			});
+		} else if (!CONTEXT_PATTERNS.has(rawEntry.pattern)) {
+			diagnostics.push({
+				path: `${entryPath}.pattern`,
+				message: `Context relationship uses unsupported pattern \`${rawEntry.pattern}\`.`,
+			});
+		}
+		if (!(typeof rawEntry.contract === "string" && rawEntry.contract.length > 0)) {
+			diagnostics.push({
+				path: `${entryPath}.contract`,
+				message: "Declare a canonical contract path.",
+			});
+		}
+	}
+}
+
+export function parseDomainManifest(content: string): DomainManifestResult {
+	const lineCounter = new LineCounter();
+	const document = parseDocument(content, { lineCounter, prettyErrors: false });
+	if (document.errors.length > 0) {
+		return {
+			domains: null,
+			diagnostics: document.errors.map((error) => {
+				const position = lineCounter.linePos(error.pos[0]);
+				return {
+					path: "domains.yaml",
+					message: error.message,
+					line: position.line,
+					column: position.col,
+				};
+			}),
+		};
+	}
+
+	const manifest = document.toJS();
+	const diagnostics: ManifestDiagnostic[] = [];
+	if (!isRecord(manifest)) {
+		return {
+			domains: null,
+			diagnostics: [{ path: "domains.yaml", message: "Expected a YAML mapping." }],
+		};
+	}
+
+	reportUnknownFields(manifest, TOP_LEVEL_FIELDS, "domains.yaml", diagnostics);
+	if (manifest.project !== undefined) {
+		if (!isRecord(manifest.project)) {
+			diagnostics.push({ path: "project", message: "Expected a mapping." });
+		} else {
+			reportUnknownFields(manifest.project, PROJECT_FIELDS, "project", diagnostics);
+			validateString(manifest.project.name, "project.name", diagnostics);
+			validateString(
+				manifest.project.description,
+				"project.description",
+				diagnostics,
+			);
+		}
+	}
+	validateDomainEntries(manifest.domains, "domains", diagnostics, true);
+	validateStringList(manifest["system-specs"], "system-specs", diagnostics);
+
+	const domains = parseDomainEntries(manifest.domains) as Domains;
+	const domainPaths = new Set(
+		flattenDomains(domains).map((node) => node.path.join("/")),
+	);
+	validateContextMap(manifest["context-map"], domainPaths, diagnostics);
+
+	const rawContextMap = Array.isArray(manifest["context-map"])
+		? manifest["context-map"]
 		: [];
 	const contextEntries: ContextMapEntry[] = [];
 	for (const rawEntry of rawContextMap) {
@@ -143,11 +498,25 @@ export function parseDomainsYaml(content: string): Domains {
 			contract: typeof rawEntry.contract === "string" ? rawEntry.contract : undefined,
 		});
 	}
-
 	const contextMapMatch = content.match(/context-map:\s*\n((?:\s+.*\n?)*)/);
 	if (contextMapMatch) domains._contextMap = contextMapMatch[1];
 	if (contextEntries.length > 0) domains._contextEntries = contextEntries;
-	return domains;
+
+	const locatedDiagnostics = locateDiagnostics(
+		diagnostics,
+		document,
+		lineCounter,
+	);
+	return {
+		domains: locatedDiagnostics.length === 0 ? domains : null,
+		diagnostics: locatedDiagnostics,
+	};
+}
+
+export function parseDomainsYaml(content: string): Domains {
+	const result = parseDomainManifest(content);
+	if (!result.domains) throw new DomainManifestError(result.diagnostics);
+	return result.domains;
 }
 
 export function flattenDomains(domains: Domains): DomainNode[] {
