@@ -116,6 +116,17 @@ let
     + assertNoAttr mp.skills "tdd-planner" "standalone skills do NOT include plugin skills"
     + assertNoAttr mp.skills "devenv-project" "devenv-project is in plugin, not standalone";
 
+  level1-ux-scope =
+    let
+      skill = builtins.readFile ../marketplace/plugins/ux-stories/skills/story-writer/SKILL.md;
+      extension = builtins.readFile ../marketplace/plugins/ux-stories/pi/extension.ts;
+      guardian = builtins.readFile ../marketplace/plugins/ux-stories/agents/story-guardian.md;
+    in
+    assert' "ux-stories skill is graphical-only" (lib.hasInfix "graphical, screen-based" skill)
+    + assert' "ux-stories skill excludes CLI work" (lib.hasInfix "CLI or terminal output" skill)
+    + assert' "ux-stories extension redirects non-graphical work" (lib.hasInfix "Use spec-driven command/output" extension)
+    + assert' "story guardian has a graphical scope gate" (lib.hasInfix "Scope gate" guardian);
+
   level1-no-auto-merge =
     # Top-level mp should NOT have auto-merged commands/agents
     assertNoAttr mp "commands" "no top-level mp.commands (explicit opt-in only)"
@@ -319,6 +330,8 @@ pkgs.runCommand "marketplace-tests" { } ''
   ${level1-select}
   ── Level 1: standalone skills ──
   ${level1-standalone}
+  ── Level 1: graphical UX scope ──
+  ${level1-ux-scope}
   ── Level 1: no auto-merge ──
   ${level1-no-auto-merge}
   ── Level 1: shared infra ──

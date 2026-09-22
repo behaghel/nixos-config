@@ -1,4 +1,6 @@
-# BDD + TDD Nesting Model
+# Graphical UX BDD + TDD Nesting Model
+
+This nesting model belongs to graphical, screen-based UX delivery. Non-graphical surfaces use `spec-tdd` directly; they do not require Gherkin, screenshots, or SVG wireframes.
 
 BDD and TDD are complementary test layers. BDD validates the user's experience. TDD builds the code. They nest — BDD is the outer shell, TDD is the inner loop.
 

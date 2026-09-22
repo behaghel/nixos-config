@@ -1,12 +1,16 @@
 ---
-description: Add BDD scenarios to an existing .feature story, or review/improve scenarios for coverage and DRYness
+description: Add BDD scenarios to an existing graphical UX story, or review/improve scenarios for coverage and DRYness
 argument-hint: [story-path]
 allowed-tools: [Read, Glob, Grep, Bash, Write, Edit]
 ---
 
 # Generate BDD Scenarios
 
-Reads a `.feature` story file and its referenced wireframes, then adds or improves Gherkin scenarios that validate the story's acceptance criteria.
+Reads a graphical UX `.feature` story and its referenced wireframes, then adds or improves Gherkin scenarios that validate the story's acceptance criteria.
+
+## Scope gate
+
+Use this command only for graphical web, mobile, or desktop screens and flows. If the requested surface is CLI, API, CI/CD, repository automation, a report, chat/email output, or non-graphical developer tooling, redirect to `spec-driven` and `spec-tdd`; Gherkin is optional and wireframes must not be required.
 
 ## Key principle: no duplication
 

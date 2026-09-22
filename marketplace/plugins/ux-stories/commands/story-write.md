@@ -1,12 +1,16 @@
 ---
-description: Write a user story as a .feature file with persona, goal, wireframe tags, and BDD scenarios
+description: Write a graphical UX story as a .feature file with persona, goal, wireframe tags, and BDD scenarios
 argument-hint: [persona/feature description]
 allowed-tools: [Read, Glob, Grep, Bash, Write, Edit]
 ---
 
 # Write User Story
 
-Guides the user through writing a complete user story as a `.feature` file — the single artifact that captures persona, goal, acceptance criteria, wireframe references, and executable BDD scenarios.
+Guides the user through writing a complete graphical UX story as a `.feature` file — the single artifact that captures persona, goal, acceptance criteria, wireframe references, and executable BDD scenarios.
+
+## Scope gate
+
+Before writing anything, confirm that the request changes a graphical web, mobile, or desktop screen. If it concerns CLI, API, CI/CD, repository automation, reports, chat/email output, or non-graphical developer tooling, stop and redirect to `spec-driven` and `spec-tdd`. Do not require Gherkin or create SVG wireframes for those surfaces.
 
 ## Key principle: one artifact per story
 
