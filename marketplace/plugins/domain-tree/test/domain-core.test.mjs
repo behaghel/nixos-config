@@ -305,6 +305,7 @@ domains:
         code: [src/child/]
 `);
   const registeredTools = new Map();
+  const registeredCommands = new Map();
   const registeredHandlers = new Map();
   domainTreeExtension({
     on(name, handler) {
@@ -316,14 +317,19 @@ domains:
     registerTool(tool) {
       registeredTools.set(tool.name, tool);
     },
-    registerCommand() {},
+    registerCommand(name, command) {
+      registeredCommands.set(name, command);
+    },
     sendUserMessage() {},
   });
+  const notifications = [];
   const context = {
     cwd: root,
     ui: {
       setStatus() {},
-      notify() {},
+      notify(message, level) {
+        notifications.push({ message, level });
+      },
     },
   };
   for (const [toolName, params] of [
@@ -342,6 +348,10 @@ domains:
     assert.match(result.content[0].text, /domains\.legacy-group/);
     assert.match(result.content[0].text, /ownership results are unavailable/i);
   }
+  await registeredCommands.get("domain-tree:check").handler("", context);
+  assert.match(notifications.at(-1).message, /domains\.legacy-group/);
+  assert.match(notifications.at(-1).message, /line \d+, column \d+/);
+
   const beforeAgentStart = registeredHandlers.get("before_agent_start")[0];
   const promptResult = await beforeAgentStart({ systemPrompt: "base" });
   assert.match(promptResult.systemPrompt, /Invalid Domain Manifest/);

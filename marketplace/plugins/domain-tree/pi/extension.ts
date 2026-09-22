@@ -791,7 +791,10 @@ Remember:
 				return;
 			}
 			if (manifestDiagnostics.length > 0) {
-				ctx.ui.notify("domains.yaml is invalid; run domain_tree_check for diagnostics.", "error");
+				ctx.ui.notify(
+					"domains.yaml is invalid:\n" + formatManifestDiagnostics(manifestDiagnostics),
+					"error",
+				);
 				return;
 			}
 
@@ -826,7 +829,11 @@ Report a summary with pass/fail and actionable recommendations.`;
 				return;
 			}
 			if (manifestDiagnostics.length > 0) {
-				ctx.ui.notify("domains.yaml is invalid; map output is unavailable.", "error");
+				ctx.ui.notify(
+					"domains.yaml is invalid; map output is unavailable:\n" +
+						formatManifestDiagnostics(manifestDiagnostics),
+					"error",
+				);
 				return;
 			}
 
