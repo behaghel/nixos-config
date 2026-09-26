@@ -51,6 +51,20 @@ Install any combination. They complement each other but don't depend on each oth
 | `domain_tree_resolve_term` | Tool | Exact canonical-term and alias lookup with domain ownership |
 | `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
 
+## Pi package build
+
+Pi loads `dist/extension.js`, a self-contained bundle that includes the YAML parser. This keeps local-path installations portable because Pi intentionally does not install dependencies for local packages. Pi supplies `typebox` at runtime, so it remains external to the bundle.
+
+When changing files under `pi/`, rebuild and test from the marketplace repository's devenv shell:
+
+```bash
+devenv -q shell -- npm ci --prefix marketplace/plugins/domain-tree
+devenv -q shell -- npm run build --prefix marketplace/plugins/domain-tree
+devenv -q shell -- npm test --prefix marketplace/plugins/domain-tree
+```
+
+The repository supplies `esbuild` through `devenv.nix` rather than the npm lockfile. This avoids `pkgs.importNpmLock` fetching esbuild's optional native binaries for every supported platform. Commit the updated `dist/extension.js` and `dist/YAML-LICENSE` with the source change.
+
 ## Structural groups
 
 Use explicit groups when names such as `business`, `foundation`, or `technical` organize bounded contexts but do not own behavior themselves:

@@ -132,6 +132,22 @@ let
     assertNoAttr mp "commands" "no top-level mp.commands (explicit opt-in only)"
     + assertNoAttr mp "agents" "no top-level mp.agents (explicit opt-in only)";
 
+  level1-domain-tree-package =
+    let
+      manifest = builtins.fromJSON (
+        builtins.readFile (marketplaceDir + "/plugins/domain-tree/package.json")
+      );
+      lockfile = builtins.readFile (
+        marketplaceDir + "/plugins/domain-tree/package-lock.json"
+      );
+    in
+    assertEq manifest.pi.extensions [ "./dist/extension.js" ]
+      "domain-tree Pi package loads its self-contained bundle"
+    + assertPathExists (marketplaceDir + "/plugins/domain-tree/dist/YAML-LICENSE")
+      "domain-tree bundle includes the YAML license"
+    + assert' "domain-tree lock omits esbuild platform binaries"
+      (!lib.hasInfix "node_modules/@esbuild/" lockfile);
+
   level1-shared =
     let
       marketplaceReadme = builtins.readFile (marketplaceDir + "/README.md");
@@ -160,7 +176,7 @@ let
       && lib.hasInfix "shared \\`devenv-project\\` skill and \\`/devenv-diagnose\\` command" piExtension
     );
 
-  level1 = level1-plugins + level1-bundle + level1-select + level1-standalone + level1-no-auto-merge + level1-shared;
+  level1 = level1-plugins + level1-bundle + level1-select + level1-standalone + level1-no-auto-merge + level1-domain-tree-package + level1-shared;
 
   # ── Level 2: Plugin schema validation ───────────────────────
   pluginNames = builtins.attrNames
@@ -177,9 +193,10 @@ let
 
       skillDirs =
         if hasSkills
-        then builtins.attrNames
-          (lib.filterAttrs (_: t: t == "directory")
-            (builtins.readDir (base + "/skills")))
+        then
+          builtins.attrNames
+            (lib.filterAttrs (_: t: t == "directory")
+              (builtins.readDir (base + "/skills")))
         else [ ];
       skillChecks = lib.concatMapStrings
         (sName:
@@ -190,9 +207,10 @@ let
 
       commandFiles =
         if hasCommands
-        then builtins.attrNames
-          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
-            (builtins.readDir (base + "/commands")))
+        then
+          builtins.attrNames
+            (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
+              (builtins.readDir (base + "/commands")))
         else [ ];
       commandChecks = lib.concatMapStrings
         (fName:
@@ -202,9 +220,10 @@ let
 
       agentFiles =
         if hasAgents
-        then builtins.attrNames
-          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
-            (builtins.readDir (base + "/agents")))
+        then
+          builtins.attrNames
+            (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
+              (builtins.readDir (base + "/agents")))
         else [ ];
       agentChecks = lib.concatMapStrings
         (fName:
@@ -214,7 +233,7 @@ let
     in
     assert' "plugin ${name}: has README.md" hasReadme
     + assert' "plugin ${name}: has at least one of skills/, commands/, agents/"
-        (hasSkills || hasCommands || hasAgents)
+      (hasSkills || hasCommands || hasAgents)
     + assert' "plugin ${name}: has skills/" hasSkills
     + skillChecks
     + commandChecks
@@ -226,14 +245,16 @@ let
   piExtensionPaths = builtins.filter builtins.pathExists [
     (marketplaceDir + "/plugins/devenv-workflow/pi/extension.ts")
     (marketplaceDir + "/plugins/domain-tree/pi/extension.ts")
+    (marketplaceDir + "/plugins/domain-tree/dist/extension.js")
     (marketplaceDir + "/plugins/spec-driven/pi/extension.ts")
     (marketplaceDir + "/plugins/spec-tdd/pi/extension.ts")
     (marketplaceDir + "/plugins/ux-stories/pi/extension.ts")
   ];
 
-  piSyntaxCheck = pkgs.runCommand "marketplace-pi-extension-syntax" {
-    nativeBuildInputs = [ pkgs.nodejs ];
-  } ''
+  piSyntaxCheck = pkgs.runCommand "marketplace-pi-extension-syntax"
+    {
+      nativeBuildInputs = [ pkgs.nodejs ];
+    } ''
     set -euo pipefail
 
     ${lib.concatMapStringsSep "\n" (path: ''
@@ -241,6 +262,19 @@ let
     '') piExtensionPaths}
 
     node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
+
+    # A local Pi package does not install dependencies. Prove the distributable
+    # domain-tree extension loads with only Pi's supplied typebox package.
+    runtime="$TMPDIR/domain-tree-runtime"
+    mkdir -p "$runtime/node_modules/typebox"
+    cp ${lib.escapeShellArg (toString (marketplaceDir + "/plugins/domain-tree/dist/extension.js"))} "$runtime/extension.js"
+    printf '%s\n' '{"type":"module"}' > "$runtime/package.json"
+    printf '%s\n' '{"name":"typebox","type":"module","exports":"./index.js"}' > "$runtime/node_modules/typebox/package.json"
+    printf '%s\n' 'export const Type = {};' > "$runtime/node_modules/typebox/index.js"
+    node --input-type=module -e '
+      const extension = await import("file://" + process.argv[1]);
+      if (typeof extension.default !== "function") process.exit(1);
+    ' "$runtime/extension.js"
 
     echo ok > "$out"
   '';
@@ -334,6 +368,8 @@ pkgs.runCommand "marketplace-tests" { } ''
   ${level1-ux-scope}
   ── Level 1: no auto-merge ──
   ${level1-no-auto-merge}
+  ── Level 1: domain-tree package ──
+  ${level1-domain-tree-package}
   ── Level 1: shared infra ──
   ${level1-shared}
   ── Level 2: Plugin schema ──

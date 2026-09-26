@@ -4,17 +4,19 @@
   "description": "Domain-driven structure with explicit groups, strict manifests, normative domain and system corpora, and specification-wiki integrity.",
   "type": "module",
   "keywords": ["pi-package", "domain-driven-design", "spec", "ddd", "architecture"],
-  "dependencies": {
-    "yaml": "^2.9.1"
+  "scripts": {
+    "build": "esbuild pi/extension.ts --bundle --platform=node --format=esm --target=node20 --outfile=dist/extension.js --external:@mariozechner/pi-coding-agent --external:typebox --banner:js=\"import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);\" && node -e \"require('fs').copyFileSync('node_modules/yaml/LICENSE', 'dist/YAML-LICENSE')\"",
+    "test": "node test/domain-core.test.mjs"
   },
   "devDependencies": {
-    "typebox": "^1.3.27"
+    "typebox": "^1.3.27",
+    "yaml": "^2.9.1"
   },
   "peerDependencies": {
     "typebox": "*"
   },
   "pi": {
-    "extensions": ["./pi/extension.ts"],
+    "extensions": ["./dist/extension.js"],
     "skills": ["./skills"]
   }
 }

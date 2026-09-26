@@ -20,6 +20,7 @@
 - `devenv shell`: Loads `devenv.nix` packages (e.g., `bats`) and installs any `git-hooks.*` definitions automatically; make sure to rerun when hooks change.
 - Custom git hooks go under `git-hooks.hooks.<name>` in `devenv.nix`; set `entry` (e.g., `./tests/run-mail-sync-autocorrect-tests.sh`), keep `language = "system"`, and `pass_filenames = false` when the command doesn't expect file args. devenv symlinks `.pre-commit-config.yaml` automatically once you run `devenv shell`/`direnv allow`.
 - Python helpers go through Ruff/flake8 on build: keep docstrings/help text under 79 chars (wrap via `help=("line" "...")` or multi-line `print()` args) or the derivation fails.
+- Keep native JavaScript build tools such as `esbuild` out of npm lockfiles consumed by `pkgs.importNpmLock`. Their optional dependencies enumerate binaries for every OS/architecture, causing Nix to fetch all platform tarballs. Provide those tools through `devenv.nix` instead; keep package lockfiles for source/runtime/test dependencies.
 
 ### Agent Activation Policy
 - Always ask the user before running `nix run` (activation) or otherwise applying the configuration. The user prefers to trigger activation manually. Only proceed without asking if explicit permission was given in the current session.
