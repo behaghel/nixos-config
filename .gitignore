@@ -1,5 +1,6 @@
 *.~undo-tree~
 /.direnv/
+/.worktrees/
 /result
 node_modules/
 
