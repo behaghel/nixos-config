@@ -3,7 +3,8 @@
   "version": "0.4.0",
   "description": "Domain-driven structure with explicit groups, strict manifests, normative domain and system corpora, and specification-wiki integrity.",
   "type": "module",
-  "files": ["pi", "skills", "README.md"],
+  "license": "MPL-2.0",
+  "files": ["pi", "skills", "README.md", "LICENSE"],
   "keywords": ["pi-package", "domain-driven-design", "spec", "ddd", "architecture"],
   "repository": {
     "type": "git",

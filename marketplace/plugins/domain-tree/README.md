@@ -167,3 +167,7 @@ Rigor scales with classification:
 - **Shared kernel**: spec required, all consumers notified
 - **Supporting** domains: warning when missing
 - **Generic** domains: only when the integration boundary changes
+
+## License
+
+`domain-tree` is free software licensed under the [Mozilla Public License 2.0](LICENSE).
