@@ -136,11 +136,18 @@ in
           };
           # Route smartcard access through PC/SC. Darwin provides its driver
           # through the system framework, and keeps scdaemon's safer exclusive
-          # access. Linux shares its explicit PC/SC driver with other clients.
+          # access. Keep scdaemon on OpenPGP there: scanning the YubiKey's PIV
+          # application can switch applications and clear its verified-PIN
+          # state, causing a prompt for each operation. This does not disable
+          # PIV on the YubiKey for macOS or other clients. Linux shares its
+          # explicit PC/SC driver with other clients.
           scdaemonSettings =
             lib.optionalAttrs expectSmartcard (
               {
                 "disable-ccid" = true;
+              }
+              // lib.optionalAttrs isDarwin {
+                "disable-application" = "piv";
               }
               // lib.optionalAttrs (pcscLib != null) {
                 "pcsc-driver" = pcscLib;

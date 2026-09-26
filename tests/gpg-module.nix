@@ -40,10 +40,17 @@ let
       builtins.hasAttr "pcsc-driver" smartcardSettings
       && smartcardSettings."pcsc-shared");
 
+  applicationCheck = assert' "Darwin avoids OpenPGP/PIV switching that clears card PIN state"
+    (if pkgs.stdenv.isDarwin then
+      smartcardSettings."disable-application" == "piv"
+    else
+      !builtins.hasAttr "disable-application" smartcardSettings);
+
   disabledCheck = assert' "disabled smartcard mode adds no scdaemon settings"
     (!builtins.hasAttr "disable-ccid" disabledSettings
       && !builtins.hasAttr "pcsc-shared" disabledSettings
-      && !builtins.hasAttr "pcsc-driver" disabledSettings);
+      && !builtins.hasAttr "pcsc-driver" disabledSettings
+      && !builtins.hasAttr "disable-application" disabledSettings);
 
   agentLifecycleCheck = assert' "Darwin lets GnuPG start its agent on demand"
     (if pkgs.stdenv.isDarwin then
@@ -54,7 +61,7 @@ in
 pkgs.runCommand "gpg-module-tests" { } ''
   cat <<'RESULTS'
   ── GPG Home Manager module ──
-  ${pcscCheck}${driverCheck}${disabledCheck}${agentLifecycleCheck}RESULTS
+  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}RESULTS
   echo "All GPG module tests passed."
   echo ok > $out
 ''

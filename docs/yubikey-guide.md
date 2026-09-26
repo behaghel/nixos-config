@@ -102,6 +102,10 @@ git push
   a reset after hot-swapping keys.
 - **Repeated pinentry for unwanted keys** — delete those secret keys locally (`gpg --delete-secret-key`). They aren’t
   needed once the YubiKeys hold the subkeys.
+- **macOS asks for the OpenPGP PIN on every operation** — confirm `~/.gnupg/scdaemon.conf` contains both
+  `disable-ccid` and `disable-application piv`. The latter prevents GnuPG from switching between the YubiKey’s OpenPGP
+  and PIV applications, which clears its verified-PIN state. It does not disable PIV, FIDO, or WebAuthn on the YubiKey
+  for macOS and other clients. After changing it, run `gpgconf --kill scdaemon` once so the next operation reloads it.
 - **Firefox on macOS loops after the FIDO PIN** — in `about:config`, set
   `security.webauthn.enable_macos_passkeys` to `false`, then fully quit and relaunch Firefox. This bypasses Apple's
   AuthenticationServices implementation and uses Firefox's USB FIDO path. The setting is intentionally manual because
