@@ -102,6 +102,11 @@ git push
   a reset after hot-swapping keys.
 - **Repeated pinentry for unwanted keys** — delete those secret keys locally (`gpg --delete-secret-key`). They aren’t
   needed once the YubiKeys hold the subkeys.
+- **Firefox on macOS loops after the FIDO PIN** — in `about:config`, set
+  `security.webauthn.enable_macos_passkeys` to `false`, then fully quit and relaunch Firefox. This bypasses Apple's
+  AuthenticationServices implementation and uses Firefox's USB FIDO path. The setting is intentionally manual because
+  the active Firefox profile is not managed by Home Manager; it also disables iCloud Keychain and phone-based passkeys
+  inside Firefox, without affecting Safari.
 - **Ubuntu-only: `/etc/ssh/ssh_config` “Unsupported option GSSAPIAuthentication”** — add
   ```
   Host *
