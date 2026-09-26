@@ -10,6 +10,10 @@
   boot.growPartition = true;
   boot.initrd.availableKernelModules = [ "virtio_pci" "virtio_blk" "virtio_scsi" ];
 
+  # Builder stores need enough headroom for toolchains and intermediate outputs.
+  # The root filesystem grows automatically when the backing QCOW2 is expanded.
+  virtualisation.diskSize = 32768;
+
   networking.hostName = "builder-x86";
   time.timeZone = "UTC";
 
@@ -40,8 +44,17 @@
   # Let Nix serve the store to ssh-ng builders.
   nix = {
     package = pkgs.nixVersions.nix_2_28;
-    settings.experimental-features = [ "nix-command" "flakes" ];
-    settings.trusted-users = [ "root" "builder" ];
+    gc = {
+      automatic = true;
+      dates = "weekly";
+      options = "--delete-older-than 7d";
+    };
+    settings = {
+      experimental-features = [ "nix-command" "flakes" ];
+      trusted-users = [ "root" "builder" ];
+      min-free = 2 * 1024 * 1024 * 1024;
+      max-free = 8 * 1024 * 1024 * 1024;
+    };
     sshServe = {
       enable = true;
       keys = [ (builtins.readFile ../../keys/utm-builder_ed25519.pub) ];
