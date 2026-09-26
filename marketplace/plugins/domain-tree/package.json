@@ -1,9 +1,21 @@
 {
-  "name": "domain-tree",
+  "name": "@behaghel/pi-domain-tree",
   "version": "0.4.0",
   "description": "Domain-driven structure with explicit groups, strict manifests, normative domain and system corpora, and specification-wiki integrity.",
   "type": "module",
+  "files": ["pi", "skills", "README.md"],
   "keywords": ["pi-package", "domain-driven-design", "spec", "ddd", "architecture"],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/behaghel/nixos-config.git",
+    "directory": "marketplace/plugins/domain-tree"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "test": "node test/domain-core.test.mjs"
+  },
   "dependencies": {
     "yaml": "^2.9.1"
   },

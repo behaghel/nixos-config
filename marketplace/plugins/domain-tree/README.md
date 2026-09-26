@@ -51,6 +51,26 @@ Install any combination. They complement each other but don't depend on each oth
 | `domain_tree_resolve_term` | Tool | Exact canonical-term and alias lookup with domain ownership |
 | `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
 
+## Pi package
+
+The publishable package is `@behaghel/pi-domain-tree`. Its third-party YAML parser is a normal runtime dependency; Pi installs it automatically when the package comes from npm. Pi supplies `typebox`, so it remains a peer dependency.
+
+After the first npm release, install it with:
+
+```bash
+pi install npm:@behaghel/pi-domain-tree
+```
+
+A local path is for plugin development and Pi intentionally leaves its dependency tree to the author. Prepare and test a checkout explicitly:
+
+```bash
+devenv -q shell -- npm ci --prefix marketplace/plugins/domain-tree
+devenv -q shell -- npm test --prefix marketplace/plugins/domain-tree
+pi -e ./marketplace/plugins/domain-tree
+```
+
+Do not commit `node_modules` or a generated extension bundle.
+
 ## Structural groups
 
 Use explicit groups when names such as `business`, `foundation`, or `technical` organize bounded contexts but do not own behavior themselves:

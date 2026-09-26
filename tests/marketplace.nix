@@ -132,6 +132,28 @@ let
     assertNoAttr mp "commands" "no top-level mp.commands (explicit opt-in only)"
     + assertNoAttr mp "agents" "no top-level mp.agents (explicit opt-in only)";
 
+  level1-domain-tree-package =
+    let
+      manifest = builtins.fromJSON (
+        builtins.readFile (marketplaceDir + "/plugins/domain-tree/package.json")
+      );
+      lockfile = builtins.readFile (
+        marketplaceDir + "/plugins/domain-tree/package-lock.json"
+      );
+    in
+    assertEq manifest.name "@behaghel/pi-domain-tree"
+      "domain-tree has a scoped npm package name"
+    + assertEq manifest.pi.extensions [ "./pi/extension.ts" ]
+      "domain-tree Pi package loads TypeScript source"
+    + assertEq manifest.dependencies.yaml "^2.9.1"
+      "domain-tree declares YAML as a runtime dependency"
+    + assertEq manifest.peerDependencies.typebox "*"
+      "domain-tree declares Pi-provided typebox as a peer"
+    + assert' "domain-tree package omits generated bundles"
+      (!(builtins.pathExists (marketplaceDir + "/plugins/domain-tree/dist")))
+    + assert' "domain-tree lock omits esbuild platform binaries"
+      (!lib.hasInfix "node_modules/@esbuild/" lockfile);
+
   level1-shared =
     let
       marketplaceReadme = builtins.readFile (marketplaceDir + "/README.md");
@@ -160,7 +182,7 @@ let
       && lib.hasInfix "shared \\`devenv-project\\` skill and \\`/devenv-diagnose\\` command" piExtension
     );
 
-  level1 = level1-plugins + level1-bundle + level1-select + level1-standalone + level1-no-auto-merge + level1-shared;
+  level1 = level1-plugins + level1-bundle + level1-select + level1-standalone + level1-no-auto-merge + level1-domain-tree-package + level1-shared;
 
   # ── Level 2: Plugin schema validation ───────────────────────
   pluginNames = builtins.attrNames
@@ -177,9 +199,10 @@ let
 
       skillDirs =
         if hasSkills
-        then builtins.attrNames
-          (lib.filterAttrs (_: t: t == "directory")
-            (builtins.readDir (base + "/skills")))
+        then
+          builtins.attrNames
+            (lib.filterAttrs (_: t: t == "directory")
+              (builtins.readDir (base + "/skills")))
         else [ ];
       skillChecks = lib.concatMapStrings
         (sName:
@@ -190,9 +213,10 @@ let
 
       commandFiles =
         if hasCommands
-        then builtins.attrNames
-          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
-            (builtins.readDir (base + "/commands")))
+        then
+          builtins.attrNames
+            (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
+              (builtins.readDir (base + "/commands")))
         else [ ];
       commandChecks = lib.concatMapStrings
         (fName:
@@ -202,9 +226,10 @@ let
 
       agentFiles =
         if hasAgents
-        then builtins.attrNames
-          (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
-            (builtins.readDir (base + "/agents")))
+        then
+          builtins.attrNames
+            (lib.filterAttrs (n: _: lib.hasSuffix ".md" n)
+              (builtins.readDir (base + "/agents")))
         else [ ];
       agentChecks = lib.concatMapStrings
         (fName:
@@ -214,7 +239,7 @@ let
     in
     assert' "plugin ${name}: has README.md" hasReadme
     + assert' "plugin ${name}: has at least one of skills/, commands/, agents/"
-        (hasSkills || hasCommands || hasAgents)
+      (hasSkills || hasCommands || hasAgents)
     + assert' "plugin ${name}: has skills/" hasSkills
     + skillChecks
     + commandChecks
@@ -231,9 +256,10 @@ let
     (marketplaceDir + "/plugins/ux-stories/pi/extension.ts")
   ];
 
-  piSyntaxCheck = pkgs.runCommand "marketplace-pi-extension-syntax" {
-    nativeBuildInputs = [ pkgs.nodejs ];
-  } ''
+  piSyntaxCheck = pkgs.runCommand "marketplace-pi-extension-syntax"
+    {
+      nativeBuildInputs = [ pkgs.nodejs ];
+    } ''
     set -euo pipefail
 
     ${lib.concatMapStringsSep "\n" (path: ''
@@ -257,6 +283,21 @@ let
     installPhase = ''
       runHook preInstall
       node test/domain-core.test.mjs
+
+      npm pack --dry-run --json > pack.json
+      node --input-type=module <<'NODE'
+      import { readFileSync } from "node:fs";
+      const [pack] = JSON.parse(readFileSync("pack.json", "utf8"));
+      const files = new Set(pack.files.map((entry) => entry.path));
+      for (const required of [
+        "pi/extension.ts",
+        "pi/domain-core.ts",
+        "skills/domain-navigator/SKILL.md",
+      ]) {
+        if (!files.has(required)) throw new Error("npm package omits " + required);
+      }
+      NODE
+
       echo ok > "$out"
       runHook postInstall
     '';
@@ -334,6 +375,8 @@ pkgs.runCommand "marketplace-tests" { } ''
   ${level1-ux-scope}
   ── Level 1: no auto-merge ──
   ${level1-no-auto-merge}
+  ── Level 1: domain-tree package ──
+  ${level1-domain-tree-package}
   ── Level 1: shared infra ──
   ${level1-shared}
   ── Level 2: Plugin schema ──

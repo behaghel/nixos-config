@@ -37,6 +37,7 @@ When you evolve this marketplace, prefer structural reuse over consumer-specific
   - `agents/*.md` = passive guardrails and redirect language
   - consumer adapters (for example `pi/extension.ts`) = runtime detection, tool registration, interception, and UI glue only
 - Keep generated consumer config declarative. If a consumer is generated from `devenv.nix`, update the source wiring rather than the generated output.
+- Keep native JavaScript build tools such as `esbuild` in `devenv.nix`, not plugin npm lockfiles consumed by `pkgs.importNpmLock`. Their optional native packages otherwise make Nix fetch tarballs for every supported OS and architecture.
 - Mark platform-specific advice explicitly (for example macOS-only or Linux-only) so one platform workaround does not silently become the default rule for every consumer.
 - When in doubt, upstream the shared policy to the marketplace-level docs or plugin shared markdown first, then keep only the minimum consumer-specific runtime bridge.
 
@@ -297,6 +298,16 @@ pi install /path/to/nixos-config/marketplace/plugins/spec-driven
 pi install /path/to/nixos-config/marketplace/plugins/spec-tdd
 pi install /path/to/nixos-config/marketplace/plugins/ux-stories
 ```
+
+These local paths are development installs. Pi loads them in place and does not install their dependencies. Prepare `domain-tree` first with `npm ci --prefix /path/to/nixos-config/marketplace/plugins/domain-tree`.
+
+For normal distribution, install the published npm package instead; Pi then owns dependency installation and updates:
+
+```bash
+pi install npm:@behaghel/pi-domain-tree
+```
+
+The npm command becomes available after the package's first registry release.
 
 ### Per-project install
 
