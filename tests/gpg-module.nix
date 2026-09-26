@@ -27,15 +27,16 @@ let
   smartcardSettings = (evalCfg true).programs.gpg.scdaemonSettings;
   disabledSettings = (evalCfg false).programs.gpg.scdaemonSettings;
 
-  pcscCheck = assert' "smartcard mode uses shared PC/SC access"
-    (smartcardSettings."disable-ccid"
-      && smartcardSettings."pcsc-shared");
+  pcscCheck = assert' "smartcard mode uses PC/SC access"
+    smartcardSettings."disable-ccid";
 
-  driverCheck = assert' "PC/SC driver is explicit only when required"
+  driverCheck = assert' "PC/SC driver and sharing are explicit only when required"
     (if pkgs.stdenv.isDarwin then
       !builtins.hasAttr "pcsc-driver" smartcardSettings
+      && !builtins.hasAttr "pcsc-shared" smartcardSettings
     else
-      builtins.hasAttr "pcsc-driver" smartcardSettings);
+      builtins.hasAttr "pcsc-driver" smartcardSettings
+      && smartcardSettings."pcsc-shared");
 
   disabledCheck = assert' "disabled smartcard mode adds no scdaemon settings"
     (!builtins.hasAttr "disable-ccid" disabledSettings

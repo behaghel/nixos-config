@@ -134,17 +134,17 @@ in
             # Keep key IDs visible so mobile clients (e.g., OpenKeyChain) can decrypt.
             "throw-keyids" = false;
           };
-          # Route all smartcard access through PC/SC and share the reader with
-          # other applications, such as macOS WebAuthn. Darwin provides its
-          # PC/SC driver through the system framework and needs no explicit path.
+          # Route smartcard access through PC/SC. Darwin provides its driver
+          # through the system framework, and keeps scdaemon's safer exclusive
+          # access. Linux shares its explicit PC/SC driver with other clients.
           scdaemonSettings =
             lib.optionalAttrs expectSmartcard (
               {
                 "disable-ccid" = true;
-                "pcsc-shared" = true;
               }
               // lib.optionalAttrs (pcscLib != null) {
                 "pcsc-driver" = pcscLib;
+                "pcsc-shared" = true;
               }
             );
         };
