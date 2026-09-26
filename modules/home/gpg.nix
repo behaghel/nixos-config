@@ -159,7 +159,7 @@ in
       enable = true;
       enableExtraSocket = true;
       # On macOS, grabbing keyboard/mouse can interfere with GUI prompts.
-      grabKeyboardAndMouse = lib.mkIf pkgs.stdenv.isDarwin false;
+      grabKeyboardAndMouse = lib.mkIf isDarwin false;
       enableScDaemon = expectSmartcard;
       enableSshSupport = expectSmartcard;
       defaultCacheTtl = lib.mkDefault (if cfg.requirePinAlways then 0 else 14400);
@@ -175,6 +175,12 @@ in
         allow-loopback-pinentry
       '';
     };
+
+    # Home Manager 25.11 starts gpg-agent with deprecated --supervised
+    # launchd sockets that GnuPG does not discover. It exits with status 2 and
+    # launchd retries forever. Keep Home Manager's generated configuration and
+    # shell integration, but let GnuPG start its own agent on demand.
+    launchd.agents.gpg-agent.enable = lib.mkIf isDarwin (lib.mkForce false);
 
     # On macOS, ensure GUI apps (Emacs, etc.) see the SSH agent socket by
     # exporting it into the user launchd environment at login and periodically.

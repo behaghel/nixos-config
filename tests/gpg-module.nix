@@ -24,8 +24,10 @@ let
       ];
     }).config;
 
-  smartcardSettings = (evalCfg true).programs.gpg.scdaemonSettings;
-  disabledSettings = (evalCfg false).programs.gpg.scdaemonSettings;
+  smartcardCfg = evalCfg true;
+  disabledCfg = evalCfg false;
+  smartcardSettings = smartcardCfg.programs.gpg.scdaemonSettings;
+  disabledSettings = disabledCfg.programs.gpg.scdaemonSettings;
 
   pcscCheck = assert' "smartcard mode uses PC/SC access"
     smartcardSettings."disable-ccid";
@@ -42,11 +44,17 @@ let
     (!builtins.hasAttr "disable-ccid" disabledSettings
       && !builtins.hasAttr "pcsc-shared" disabledSettings
       && !builtins.hasAttr "pcsc-driver" disabledSettings);
+
+  agentLifecycleCheck = assert' "Darwin lets GnuPG start its agent on demand"
+    (if pkgs.stdenv.isDarwin then
+      !smartcardCfg.launchd.agents.gpg-agent.enable
+    else
+      true);
 in
 pkgs.runCommand "gpg-module-tests" { } ''
   cat <<'RESULTS'
   ── GPG Home Manager module ──
-  ${pcscCheck}${driverCheck}${disabledCheck}RESULTS
+  ${pcscCheck}${driverCheck}${disabledCheck}${agentLifecycleCheck}RESULTS
   echo "All GPG module tests passed."
   echo ok > $out
 ''
