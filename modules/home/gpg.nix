@@ -55,7 +55,7 @@ let
     if !expectSmartcard then
       null
     else if isDarwin then
-      # On macOS, use the system PCSC (PCSC.framework). Do not set pcsc-driver.
+    # On macOS, use the system PCSC (PCSC.framework). Do not set pcsc-driver.
       null
     else if useSystemGpg then
       systemPcscPath
@@ -134,12 +134,19 @@ in
             # Keep key IDs visible so mobile clients (e.g., OpenKeyChain) can decrypt.
             "throw-keyids" = false;
           };
+          # Route all smartcard access through PC/SC and share the reader with
+          # other applications, such as macOS WebAuthn. Darwin provides its
+          # PC/SC driver through the system framework and needs no explicit path.
           scdaemonSettings =
-            lib.optionalAttrs (pcscLib != null) {
-              "disable-ccid" = true;
-              "pcsc-driver" = pcscLib;
-              "pcsc-shared" = true;
-            };
+            lib.optionalAttrs expectSmartcard (
+              {
+                "disable-ccid" = true;
+                "pcsc-shared" = true;
+              }
+              // lib.optionalAttrs (pcscLib != null) {
+                "pcsc-driver" = pcscLib;
+              }
+            );
         };
         dirmngrCfg =
           lib.optionalAttrs (lib.hasAttrByPath [ "programs" "gpg" "dirmngr" ] options) {

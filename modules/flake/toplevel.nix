@@ -47,6 +47,7 @@
     # Enables 'nix run' to activate.
     packages.default = self'.packages.activate;
 
+    checks.gpg-module = import ../../tests/gpg-module.nix { inherit pkgs lib inputs; };
     checks.marketplace = import ../../tests/marketplace.nix { inherit pkgs lib; };
     checks.opencode-model-config-modes = import ../../tests/opencode-model-config-modes.nix { inherit pkgs lib inputs; };
     checks.opencode-context7 = import ../../tests/opencode-context7.nix { inherit pkgs lib inputs; };
