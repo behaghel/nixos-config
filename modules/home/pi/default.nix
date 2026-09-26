@@ -172,6 +172,19 @@ let
       };
     };
   };
+
+  tmuxAttentionExtension = ''
+    import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+    export default function (pi: ExtensionAPI) {
+      // agent_settled is the final idle boundary after retries, compaction,
+      // and queued continuations. Ring only when tmux can mark the window.
+      pi.on("agent_settled", async (_event, ctx) => {
+        if (ctx.mode !== "tui" || !process.env.TMUX) return;
+        process.stdout.write("\u0007");
+      });
+    }
+  '';
 in
 {
   options.hub.pi = {
@@ -278,7 +291,10 @@ in
       ''
     );
 
-    home.file = lib.mkIf cfg.local.enable {
+    home.file = {
+      ".pi/agent/extensions/tmux-attention.ts".text = tmuxAttentionExtension;
+    } // lib.optionalAttrs cfg.local.enable {
+      ".local/share/pi-local/agent/extensions/tmux-attention.ts".text = tmuxAttentionExtension;
       ".local/share/pi-local/agent/models.json".text = localModelsJson;
     };
   };

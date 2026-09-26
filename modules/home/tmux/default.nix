@@ -77,9 +77,9 @@ in
       set -g status-style bg=colour234,fg=colour245
       set -g window-status-separator ""
       set -g window-status-style bg=colour234,fg=colour244
-      set -g window-status-format " #[fg=colour240]#[fg=colour250,bg=colour240] #I #[fg=colour252]#W #[fg=colour240,bg=colour234] "
+      set -g window-status-format " #[fg=colour240]#[fg=colour250,bg=colour240] #I #[fg=colour252]#W#{?window_bell_flag,#[fg=colour214,bold] !,} #[fg=colour240,bg=colour234] "
       set -g window-status-current-style bg=colour234,fg=colour252
-      set -g window-status-current-format " #[fg=colour31]#[fg=colour254,bg=colour31,bold] #I #[fg=colour255]#W #[fg=colour31,bg=colour234] "
+      set -g window-status-current-format " #[fg=colour31]#[fg=colour254,bg=colour31,bold] #I #[fg=colour255]#W#{?window_bell_flag,#[fg=colour214,bold] !,} #[fg=colour31,bg=colour234] "
       set -g status-left-length 40
       set -g status-right-length 80
       set -g status-left  " #[fg=colour39,bold]#S #[fg=colour240]| #[fg=colour250]#(whoami)@#h "
