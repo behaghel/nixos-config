@@ -2,13 +2,14 @@
 {
   programs.starship = {
     enable = true;
+    enableZshIntegration = false;
     settings = {
       add_newline = false;
       command_timeout = 1000;
       scan_timeout = 30;
       format = ''
-        [╭](fg:#7aa2f7) $time $username@$hostname ''${custom.project} $nix_shell$fill$gcloud$python
-        [╰](fg:#7aa2f7) $directory $git_branch $git_status$character
+        [╭](fg:#7aa2f7) $time $username@$hostname ''${custom.workon_tags}$fill
+        [╰](fg:#7aa2f7) $directory $git_branch $git_status''${custom.prompt_character}
       '';
       right_format = "";
 
@@ -18,13 +19,7 @@
 
       aws = { disabled = true; };
       gcloud = {
-        # On headless Linux hosts such as MeLE, the gcloud module can block
-        # prompt rendering while probing local/cloud credentials. Keep it for
-        # workstation prompts, but skip it on NixOS servers.
-        disabled = pkgs.stdenv.isLinux;
-        symbol = "☁ ";
-        format = " [$symbol$project]($style)";
-        style = "fg:#7dcfff";
+        disabled = true;
       };
 
       time = {
@@ -68,34 +63,30 @@
         style = "fg:#ff9e64";
       };
 
-      custom.project = {
-        command = "printf '%s' \"$STARSHIP_PROJECT_LABEL\"";
-        when = "[ -n \"$STARSHIP_PROJECT_LABEL\" ]";
+      custom.workon_tags = {
+        command = "printf '%s' \"$STARSHIP_WORKON_TAGS\"";
+        when = "[ -n \"$STARSHIP_WORKON_TAGS\" ]";
         format = "[:$output:]($style)";
         style = "fg:#f7768e";
       };
 
+      custom.prompt_character = {
+        command = "if [ -n \"$STARSHIP_NIX_SHELL_ACTIVE\" ]; then printf '❄'; else printf '❯'; fi";
+        when = "true";
+        format = "[$output]($style) ";
+        style = "bold fg:#7dcfff";
+      };
+
       character = {
-        success_symbol = "[❯](bold fg:#8aad4f)";
-        error_symbol = "[❯](bold fg:#ed8796)";
+        disabled = true;
       };
 
       python = {
-        format = " [$virtualenv]($style)";
-        style = "fg:#e0af68";
-        symbol = "";
-        pyenv_version_name = false;
-        python_binary = "python";
+        disabled = true;
       };
 
       nix_shell = {
-        disabled = false;
-        symbol = "❄ ";
-        format = "[$symbol$state( $name)]($style)";
-        pure_msg = "";
-        impure_msg = "*";
-        unknown_msg = "";
-        style = "fg:#7aa2f7 bold";
+        disabled = true;
       };
     };
   };
