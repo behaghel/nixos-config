@@ -57,7 +57,6 @@ in
 
   packages = with pkgs; [
     bats
-    esbuild
     just
     nixd
   ] ++ trayDevPackages;

@@ -299,6 +299,16 @@ pi install /path/to/nixos-config/marketplace/plugins/spec-tdd
 pi install /path/to/nixos-config/marketplace/plugins/ux-stories
 ```
 
+These local paths are development installs. Pi loads them in place and does not install their dependencies. Prepare `domain-tree` first with `npm ci --prefix /path/to/nixos-config/marketplace/plugins/domain-tree`.
+
+For normal distribution, install the published npm package instead; Pi then owns dependency installation and updates:
+
+```bash
+pi install npm:@behaghel/pi-domain-tree
+```
+
+The npm command becomes available after the package's first registry release.
+
 ### Per-project install
 
 Add to `.pi/settings.json`:

@@ -141,10 +141,16 @@ let
         marketplaceDir + "/plugins/domain-tree/package-lock.json"
       );
     in
-    assertEq manifest.pi.extensions [ "./dist/extension.js" ]
-      "domain-tree Pi package loads its self-contained bundle"
-    + assertPathExists (marketplaceDir + "/plugins/domain-tree/dist/YAML-LICENSE")
-      "domain-tree bundle includes the YAML license"
+    assertEq manifest.name "@behaghel/pi-domain-tree"
+      "domain-tree has a scoped npm package name"
+    + assertEq manifest.pi.extensions [ "./pi/extension.ts" ]
+      "domain-tree Pi package loads TypeScript source"
+    + assertEq manifest.dependencies.yaml "^2.9.1"
+      "domain-tree declares YAML as a runtime dependency"
+    + assertEq manifest.peerDependencies.typebox "*"
+      "domain-tree declares Pi-provided typebox as a peer"
+    + assert' "domain-tree package omits generated bundles"
+      (!(builtins.pathExists (marketplaceDir + "/plugins/domain-tree/dist")))
     + assert' "domain-tree lock omits esbuild platform binaries"
       (!lib.hasInfix "node_modules/@esbuild/" lockfile);
 
@@ -245,7 +251,6 @@ let
   piExtensionPaths = builtins.filter builtins.pathExists [
     (marketplaceDir + "/plugins/devenv-workflow/pi/extension.ts")
     (marketplaceDir + "/plugins/domain-tree/pi/extension.ts")
-    (marketplaceDir + "/plugins/domain-tree/dist/extension.js")
     (marketplaceDir + "/plugins/spec-driven/pi/extension.ts")
     (marketplaceDir + "/plugins/spec-tdd/pi/extension.ts")
     (marketplaceDir + "/plugins/ux-stories/pi/extension.ts")
@@ -263,19 +268,6 @@ let
 
     node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
 
-    # A local Pi package does not install dependencies. Prove the distributable
-    # domain-tree extension loads with only Pi's supplied typebox package.
-    runtime="$TMPDIR/domain-tree-runtime"
-    mkdir -p "$runtime/node_modules/typebox"
-    cp ${lib.escapeShellArg (toString (marketplaceDir + "/plugins/domain-tree/dist/extension.js"))} "$runtime/extension.js"
-    printf '%s\n' '{"type":"module"}' > "$runtime/package.json"
-    printf '%s\n' '{"name":"typebox","type":"module","exports":"./index.js"}' > "$runtime/node_modules/typebox/package.json"
-    printf '%s\n' 'export const Type = {};' > "$runtime/node_modules/typebox/index.js"
-    node --input-type=module -e '
-      const extension = await import("file://" + process.argv[1]);
-      if (typeof extension.default !== "function") process.exit(1);
-    ' "$runtime/extension.js"
-
     echo ok > "$out"
   '';
 
@@ -291,6 +283,21 @@ let
     installPhase = ''
       runHook preInstall
       node test/domain-core.test.mjs
+
+      npm pack --dry-run --json > pack.json
+      node --input-type=module <<'NODE'
+      import { readFileSync } from "node:fs";
+      const [pack] = JSON.parse(readFileSync("pack.json", "utf8"));
+      const files = new Set(pack.files.map((entry) => entry.path));
+      for (const required of [
+        "pi/extension.ts",
+        "pi/domain-core.ts",
+        "skills/domain-navigator/SKILL.md",
+      ]) {
+        if (!files.has(required)) throw new Error("npm package omits " + required);
+      }
+      NODE
+
       echo ok > "$out"
       runHook postInstall
     '';

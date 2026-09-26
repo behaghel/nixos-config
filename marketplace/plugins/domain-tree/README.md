@@ -51,19 +51,25 @@ Install any combination. They complement each other but don't depend on each oth
 | `domain_tree_resolve_term` | Tool | Exact canonical-term and alias lookup with domain ownership |
 | `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
 
-## Pi package build
+## Pi package
 
-Pi loads `dist/extension.js`, a self-contained bundle that includes the YAML parser. This keeps local-path installations portable because Pi intentionally does not install dependencies for local packages. Pi supplies `typebox` at runtime, so it remains external to the bundle.
+The publishable package is `@behaghel/pi-domain-tree`. Its third-party YAML parser is a normal runtime dependency; Pi installs it automatically when the package comes from npm. Pi supplies `typebox`, so it remains a peer dependency.
 
-When changing files under `pi/`, rebuild and test from the marketplace repository's devenv shell:
+After the first npm release, install it with:
+
+```bash
+pi install npm:@behaghel/pi-domain-tree
+```
+
+A local path is for plugin development and Pi intentionally leaves its dependency tree to the author. Prepare and test a checkout explicitly:
 
 ```bash
 devenv -q shell -- npm ci --prefix marketplace/plugins/domain-tree
-devenv -q shell -- npm run build --prefix marketplace/plugins/domain-tree
 devenv -q shell -- npm test --prefix marketplace/plugins/domain-tree
+pi -e ./marketplace/plugins/domain-tree
 ```
 
-The repository supplies `esbuild` through `devenv.nix` rather than the npm lockfile. This avoids `pkgs.importNpmLock` fetching esbuild's optional native binaries for every supported platform. Commit the updated `dist/extension.js` and `dist/YAML-LICENSE` with the source change.
+Do not commit `node_modules` or a generated extension bundle.
 
 ## Structural groups
 
