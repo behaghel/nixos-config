@@ -44,6 +44,7 @@
 - Commits: Imperative, concise subject; include why and what. Example: `nixos: add bluetooth service to laptop`.
 - Scope: Reference touched area (e.g., `home:`, `darwin:`, `overlays:`) when helpful.
 - PRs: Include summary, affected hosts/modules, test notes (`nix flake check` output), and any breaking changes.
+- Agents may create and push PRs, but must never merge them. PR merging is always the user's responsibility.
 - Link issues where applicable; keep changes focused and reviewable.
 
 ## Security & Configuration Tips
