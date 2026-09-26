@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: MPL-2.0 */
+
 import { access, readFile } from "fs/promises";
 import { dirname, extname, join, relative, resolve } from "path";
 import { LineCounter, parseDocument } from "yaml";

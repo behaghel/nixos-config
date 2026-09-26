@@ -145,6 +145,8 @@ let
       "domain-tree has a scoped npm package name"
     + assertEq manifest.pi.extensions [ "./pi/extension.ts" ]
       "domain-tree Pi package loads TypeScript source"
+    + assertEq manifest.license "MPL-2.0"
+      "domain-tree declares the MPL-2.0 license"
     + assertEq manifest.dependencies.yaml "^2.9.1"
       "domain-tree declares YAML as a runtime dependency"
     + assertEq manifest.peerDependencies.typebox "*"
@@ -290,6 +292,7 @@ let
       const [pack] = JSON.parse(readFileSync("pack.json", "utf8"));
       const files = new Set(pack.files.map((entry) => entry.path));
       for (const required of [
+        "LICENSE",
         "pi/extension.ts",
         "pi/domain-core.ts",
         "skills/domain-navigator/SKILL.md",
