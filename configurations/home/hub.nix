@@ -22,7 +22,10 @@ in
 
   programs.gpg.useNixGPG = true;
 
-  hub.mail.enable = true;
+  hub.mail = {
+    enable = true;
+    keychainPassEntries = import ./mail-pass-entries.nix;
+  };
   hub.syncthing.enable = lib.mkIf (!pkgs.stdenv.isLinux) true;
 
   targets.genericLinux.enable = pkgs.stdenv.isLinux;

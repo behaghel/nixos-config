@@ -5,7 +5,9 @@ let
     entry="''${1:?usage: mail-pass <pass-entry>}"
     cache_dir=${lib.escapeShellArg passCacheDir}
     ttl=${toString passCacheTtl}
+    umask 077
     mkdir -p "$cache_dir"
+    chmod 700 "$cache_dir"
     lock_file="$cache_dir/.pass-lock"
     exec 9>"$lock_file"
     if command -v flock >/dev/null 2>&1; then
@@ -45,61 +47,18 @@ let
       mv "$cache_file.tmp" "$cache_file"
       printf '%s\n' "$secret"
     else
+      chmod 600 "$cache_file"
       cat "$cache_file"
     fi
   '';
 
-  gmailOAuthHelper = pkgs.writeShellApplication {
+  gmailOAuthHelper = credentialCommand: pkgs.writeShellApplication {
     name = "gmail-oauth2-token";
     runtimeInputs = [ pkgs.curl pkgs.jq pkgs.pass pkgs.coreutils pkgs.gnused ];
     text = ''
       set -euo pipefail
-      cache_dir=${lib.escapeShellArg passCacheDir}
-      ttl=${toString passCacheTtl}
-      mkdir -p "$cache_dir"
-      lock_file="$cache_dir/.oauth-lock"
-      exec 9>"$lock_file"
-      if command -v flock >/dev/null 2>&1; then
-        flock -x 9
-      else
-        lockdir="$lock_file.d"
-        tries=0
-        while ! mkdir "$lockdir" 2>/dev/null; do
-          tries=$((tries + 1))
-          [ $tries -ge 30 ] && break
-          sleep 1
-        done
-        trap 'rmdir "$lockdir" 2>/dev/null || true' EXIT INT TERM
-      fi
-
-      pass_cached() {
-        key="$1"
-        hash=$(printf '%s' "$key" | sha256sum | awk '{print $1}')
-        cache_file="$cache_dir/$hash"
-        now=$(date +%s)
-        fresh=0
-        if [ -f "$cache_file" ]; then
-          if stat --version >/dev/null 2>&1; then
-            mtime=$(stat -c %Y "$cache_file" 2>/dev/null || echo 0)
-          else
-            mtime=$(stat -f %m "$cache_file" 2>/dev/null || echo 0)
-          fi
-          if [ "$mtime" -ne 0 ] && [ $(( now - mtime )) -lt "$ttl" ]; then
-            fresh=1
-          fi
-        fi
-        if [ "$fresh" -eq 0 ]; then
-          if [ -z "''${MAIL_PASS_SUPPRESS_NOTIFY:-}" ] && [ -z "''${MAIL_PASS_NOTIFIED:-}" ] && command -v notify-send >/dev/null 2>&1; then
-            notify-send "📭 Mail sync" "Touch your YubiKey to decrypt $key." -i mail-unread || true
-            export MAIL_PASS_NOTIFIED=1
-          fi
-          value="$(pass show "$key")" || return $?
-          printf '%s\n' "$value" >"$cache_file.tmp"
-          mv "$cache_file.tmp" "$cache_file"
-          printf '%s\n' "$value"
-        else
-          cat "$cache_file"
-        fi
+      read_secret() {
+        ${lib.escapeShellArg credentialCommand} "$1"
       }
 
       mode="''${1:-token}"
@@ -107,15 +66,15 @@ let
 
       # Default secret prefix for your work account
       prefix="''${OAUTH_PASS_PREFIX:-veriff/mail}"
-      # Allow env overrides; otherwise read from pass(1)
+      # Allow environment overrides; otherwise use the platform credential reader.
       CLIENT_ID="''${CLIENT_ID:-}"
       CLIENT_SECRET="''${CLIENT_SECRET:-}"
       REFRESH_TOKEN="''${REFRESH_TOKEN:-}"
-      if [ -z "''${CLIENT_ID}" ]; then CLIENT_ID="$(pass_cached "$prefix/client-id" | head -n1 || true)"; fi
-      if [ -z "''${CLIENT_SECRET}" ]; then CLIENT_SECRET="$(pass_cached "$prefix/client-secret" | head -n1 || true)"; fi
-      if [ -z "''${REFRESH_TOKEN}" ]; then REFRESH_TOKEN="$(pass_cached "$prefix/refresh-token" | head -n1 || true)"; fi
+      if [ -z "''${CLIENT_ID}" ]; then CLIENT_ID="$(read_secret "$prefix/client-id" | head -n1 || true)"; fi
+      if [ -z "''${CLIENT_SECRET}" ]; then CLIENT_SECRET="$(read_secret "$prefix/client-secret" | head -n1 || true)"; fi
+      if [ -z "''${REFRESH_TOKEN}" ]; then REFRESH_TOKEN="$(read_secret "$prefix/refresh-token" | head -n1 || true)"; fi
       if [ -z "''${CLIENT_ID}" ] || [ -z "''${CLIENT_SECRET}" ] || [ -z "''${REFRESH_TOKEN}" ]; then
-        echo "error: missing OAuth secret(s). Expected in env or pass under $prefix/{client-id,client-secret,refresh-token}" >&2
+        echo "error: missing OAuth secret(s). Expected in env or credential store under $prefix/{client-id,client-secret,refresh-token}" >&2
         exit 1
       fi
       resp=$(curl -sS --fail \

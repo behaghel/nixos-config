@@ -45,4 +45,26 @@ EOF
 runpath=$(nix build --no-link --print-out-paths --impure --expr "$run_expr")
 export MAIL_SYNC_RUN_BIN="$runpath/bin/mail-sync-run"
 
-exec bats "$@" tests/mail-sync-autocorrect.bats
+keychain_expr=$(cat <<EOF
+let
+  flake = builtins.getFlake (toString ./.);
+  pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
+  artefacts = import ./modules/home/mail/keychain.nix {
+    inherit pkgs;
+    lib = pkgs.lib;
+    account = "test-user";
+    entries = [
+      "veriff/mail/client-id"
+      "veriff/mail/refresh-token"
+    ];
+  };
+in artefacts
+EOF
+)
+
+reader_path=$(nix build --no-link --print-out-paths --impure --expr "($keychain_expr).reader")
+sync_path=$(nix build --no-link --print-out-paths --impure --expr "($keychain_expr).sync")
+export MAIL_KEYCHAIN_READER_BIN="$reader_path/bin/mail-keychain-pass"
+export MAIL_KEYCHAIN_SYNC_BIN="$sync_path/bin/mail-keychain-pass-sync"
+
+exec bats "$@" tests/mail-sync-autocorrect.bats tests/mail-keychain.bats
