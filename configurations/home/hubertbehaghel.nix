@@ -35,6 +35,7 @@ in
 
   hub.mail = {
     enable = true;
+    keychainPassEntries = import ./mail-pass-entries.nix;
   } // lib.optionalAttrs isLinux {
     imapnotify = {
       enable = true;

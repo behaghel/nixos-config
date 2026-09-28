@@ -9,14 +9,25 @@ let
   statusFile = "${cacheDir}/status.json";
   passCacheDir = "${cacheDir}/pass";
   passCacheTtl = 14400; # 4 hours
+  isDarwin = pkgs.stdenv.isDarwin;
 
   cacheArtefacts = import ./cache.nix {
     inherit pkgs lib passCacheDir passCacheTtl;
   };
-  inherit (cacheArtefacts) passCacheScript gmailOAuthHelper;
+  inherit (cacheArtefacts) passCacheScript;
+  keychainArtefacts = import ./keychain.nix {
+    inherit pkgs lib;
+    entries = cfg.keychainPassEntries;
+    account = config.home.username;
+  };
+  credentialCommand =
+    if isDarwin
+    then "${keychainArtefacts.reader}/bin/mail-keychain-pass"
+    else "${passCacheScript}/bin/mail-pass";
+  gmailOAuthHelper = cacheArtefacts.gmailOAuthHelper credentialCommand;
 
   accountsArtefacts = import ./accounts.nix {
-    inherit pkgs lib passCacheScript gmailOAuthHelper;
+    inherit pkgs lib credentialCommand gmailOAuthHelper;
   };
   inherit (accountsArtefacts) mailAccounts;
 
@@ -29,20 +40,23 @@ let
   };
   inherit (syncArtefacts) mailSyncScript mailSyncAutocorrectScript;
   mailTrayScript = syncArtefacts.mailTrayScript or null;
-  trayLauncher = if pkgs.stdenv.isLinux then pkgs.writeShellScript "mail-sync-tray-launch" ''
-    set -euo pipefail
-    RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
-    export XDG_RUNTIME_DIR="$RUNTIME_DIR"
-    export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$RUNTIME_DIR/bus}"
-    if [ -z "''${WAYLAND_DISPLAY-}" ] && [ -S "$RUNTIME_DIR/wayland-0" ]; then
-      export WAYLAND_DISPLAY="wayland-0"
-    fi
-    if [ -z "''${DISPLAY-}" ] && [ -S /tmp/.X11-unix/X0 ]; then
-      export DISPLAY=":0"
-    fi
-    exec ${mailTrayScript}/bin/mail-tray
-  '' else null;
-in {
+  trayLauncher =
+    if pkgs.stdenv.isLinux then
+      pkgs.writeShellScript "mail-sync-tray-launch" ''
+        set -euo pipefail
+        RUNTIME_DIR="''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
+        export XDG_RUNTIME_DIR="$RUNTIME_DIR"
+        export DBUS_SESSION_BUS_ADDRESS="''${DBUS_SESSION_BUS_ADDRESS:-unix:path=$RUNTIME_DIR/bus}"
+        if [ -z "''${WAYLAND_DISPLAY-}" ] && [ -S "$RUNTIME_DIR/wayland-0" ]; then
+          export WAYLAND_DISPLAY="wayland-0"
+        fi
+        if [ -z "''${DISPLAY-}" ] && [ -S /tmp/.X11-unix/X0 ]; then
+          export DISPLAY=":0"
+        fi
+        exec ${mailTrayScript}/bin/mail-tray
+      '' else null;
+in
+{
   imports = [ ./imapnotify.nix ];
 
   options.hub.mail = {
@@ -81,9 +95,36 @@ in {
       default = statusFile;
       readOnly = true;
     };
+    keychainPassEntries = mkOption {
+      description = ''
+        Exact password-store keys exported to identically named macOS Login
+        Keychain services during Home Manager activation. Password Store remains
+        authoritative; Linux reads it directly.
+      '';
+      type = types.listOf types.str;
+      default = [ ];
+    };
   };
 
   config = mkIf cfg.enable {
+    assertions = [
+      {
+        assertion = !isDarwin || cfg.keychainPassEntries != [ ];
+        message = "hub.mail.keychainPassEntries must declare mail credentials on macOS.";
+      }
+      {
+        assertion = lib.length cfg.keychainPassEntries == lib.length (lib.unique cfg.keychainPassEntries);
+        message = "hub.mail.keychainPassEntries must not contain duplicates.";
+      }
+    ];
+
+    home.activation.mailPassKeychain = lib.mkIf isDarwin (
+      lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        $DRY_RUN_CMD ${keychainArtefacts.sync}/bin/mail-keychain-pass-sync
+        $DRY_RUN_CMD ${pkgs.coreutils}/bin/rm -rf ${lib.escapeShellArg passCacheDir}
+      ''
+    );
+
     home.packages = with pkgs;
       [ mu gmailOAuthHelper ]
       ++ lib.optionals pkgs.stdenv.isLinux [ mailTrayScript ];
@@ -96,9 +137,9 @@ in {
         enable = true;
         package = pkgs.isync;
         extraConfig = ''
-SyncState "*"
+          SyncState "*"
 
-                 '';
+        '';
       };
     };
 
@@ -231,10 +272,12 @@ SyncState "*"
         intervalSec =
           let m = builtins.match "([0-9]+)([smh]?)" cfg.interval;
           in if m == null then 600 else
-            let n = builtins.fromJSON (builtins.elemAt m 0);
-                u = builtins.elemAt m 1;
-                mul = if u == "h" then 3600 else if u == "m" then 60 else 1;
-            in n * mul;
+          let
+            n = builtins.fromJSON (builtins.elemAt m 0);
+            u = builtins.elemAt m 1;
+            mul = if u == "h" then 3600 else if u == "m" then 60 else 1;
+          in
+          n * mul;
         healthScript = pkgs.writeShellScript "mail-sync-health-darwin" ''
           set -euo pipefail
           stamp=${lib.escapeShellArg cfg.stampFile}
@@ -267,7 +310,8 @@ SyncState "*"
             fi
           fi
         '';
-      in {
+      in
+      {
         "mail-sync" = {
           enable = true;
           config = {
