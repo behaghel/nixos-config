@@ -74,8 +74,13 @@ let
       configLines = lib.splitString "\n" tmuxCfg.programs.tmux.extraConfig;
       markerLines = builtins.filter (lib.hasInfix "window_bell_flag") configLines;
     in
-    assert' "tmux status renders settled-agent bell flags"
-      (builtins.length markerLines == 2
+    assert' "tmux renders settled-agent alerts as an amber inactive pill"
+      (builtins.length markerLines == 1
+        && lib.hasInfix "window-status-bell-style noreverse" tmuxCfg.programs.tmux.extraConfig
+        && lib.hasInfix "#[fg=colour136]" (builtins.head markerLines)
+        && lib.hasInfix "fg=colour234#,bg=colour136#,bold" (builtins.head markerLines)
+        && lib.hasInfix "● #W" (builtins.head markerLines)
+        && !lib.hasInfix " !" tmuxCfg.programs.tmux.extraConfig
         && lib.hasInfix "monitor-bell on" tmuxCfg.programs.tmux.extraConfig);
 
   localCheck = assert' "hub.pi local mode scopes models and extensions to pi-local"
