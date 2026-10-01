@@ -81,7 +81,7 @@ in
       set -g window-status-separator ""
       set -g window-status-style bg=colour234,fg=colour244
       # Commas inside a tmux conditional branch must be escaped as `#,`.
-      set -g window-status-format "#{?window_bell_flag, #[fg=colour136]#[fg=colour234#,bg=colour136#,bold] #I #[fg=colour234]● #W #[fg=colour136#,bg=colour234] , #[fg=colour240]#[fg=colour250#,bg=colour240] #I #[fg=colour252]#W #[fg=colour240#,bg=colour234] }"
+      set -g window-status-format "#{?window_bell_flag, #[fg=colour37]#[fg=colour234#,bg=colour37#,bold] #I #[fg=colour234]● #W #[fg=colour37#,bg=colour234] , #[fg=colour240]#[fg=colour250#,bg=colour240] #I #[fg=colour252]#W #[fg=colour240#,bg=colour234] }"
       set -g window-status-current-style bg=colour234,fg=colour252
       set -g window-status-current-format " #[fg=colour31]#[fg=colour254,bg=colour31,bold] #I #[fg=colour255]#W #[fg=colour31,bg=colour234] "
       set -g status-left-length 40
