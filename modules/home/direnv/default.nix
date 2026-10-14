@@ -16,5 +16,9 @@
       hide_env_diff = true;
     };
   };
+  # The direnv hook is installed earlier in zshrc; run completion repair after it.
+  programs.zsh.initContent = lib.mkOrder 2100 ''
+    source ${./completions.zsh}
+  '';
   xdg.configFile."direnv/direnvrc".source = ./.direnvrc;
 }

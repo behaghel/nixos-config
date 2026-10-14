@@ -52,6 +52,13 @@
     checks.opencode-model-config-modes = import ../../tests/opencode-model-config-modes.nix { inherit pkgs lib inputs; };
     checks.opencode-context7 = import ../../tests/opencode-context7.nix { inherit pkgs lib inputs; };
     checks.pi-module = import ../../tests/pi-module.nix { inherit pkgs lib inputs; };
+    checks.zsh-direnv-completion = pkgs.runCommand "zsh-direnv-completion-test"
+      {
+        nativeBuildInputs = [ pkgs.bash pkgs.direnv pkgs.zsh ];
+      } ''
+      HOOK_FILE=${../../modules/home/direnv/completions.zsh} bash ${../../tests/zsh-direnv-completion.sh}
+      touch $out
+    '';
 
     # Flake inputs we want to update periodically
     # Run: `nix run .#update`.
