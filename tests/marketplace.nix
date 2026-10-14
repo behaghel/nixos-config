@@ -306,9 +306,6 @@ let
     '';
   };
 
-  level25 =
-    assertPathExists piSyntaxCheck "pi extensions parse with node --check"
-    + assertPathExists domainTreeBehaviorCheck "domain-tree behavior tests pass";
 
   # ── Level 3: Template wiring (explicit opt-in) ──────────────
   templateNames = builtins.attrNames
@@ -385,10 +382,15 @@ pkgs.runCommand "marketplace-tests" { } ''
   ── Level 2: Plugin schema ──
   ${level2}
   ── Level 2.5: Pi extension syntax ──
-  ${level25}
   ── Level 3: Template wiring ──
   ${level3}
   RESULTS
+  # Derivation outputs cannot be checked with builtins.pathExists at evaluation
+  # time; reference them here so Nix builds them before this check runs.
+  test -f ${piSyntaxCheck}
+  echo '  ok  pi extensions parse with node --check'
+  test -f ${domainTreeBehaviorCheck}
+  echo '  ok  domain-tree behavior tests pass'
   echo "All marketplace tests passed."
   echo ok > $out
 ''
