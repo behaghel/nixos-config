@@ -16,6 +16,7 @@ export const commandNames = [
 
 export const sessionCommandNames = commandNames.filter((name) => name !== "completion");
 export const globalCommandNames = ["status", "completion", "finish"];
+export const currentSessionCommandNames = sessionCommandNames.filter((name) => !["create", "start", "repair"].includes(name));
 
 export function sessionCommand(slug: string, command: string): string {
 	return `agent-session ${commandNames.includes(slug) ? "-- " : ""}${slug} ${command}`;
@@ -41,10 +42,13 @@ export function parseInvocation(args: string[]): {
 	}
 	const [slug, command, ...tail] = first === "--" ? rest : args;
 	if (!slug) throw argumentError("Missing <task-slug>.");
-	validateSlug(slug);
+	if (slug !== ".") validateSlug(slug);
 	if (!command) throw argumentError(`Missing <command> for session '${slug}'.`);
 	if (!sessionCommandNames.includes(command)) {
 		throw argumentError(`Unknown command '${command}'.${didYouMean(command, sessionCommandNames)}`);
+	}
+	if (slug === "." && !currentSessionCommandNames.includes(command)) {
+		throw argumentError(`Command '${command}' requires an explicit slug, not the current-session target '.'.`);
 	}
 	return { command, args: [slug, ...tail], global: false };
 }
@@ -252,6 +256,7 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session . <cd|run|launch|resume|status|finish> (current managed worktree)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session status [--json] [--refresh]",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",

@@ -8,7 +8,7 @@ import {
 	rmSync,
 	writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
 	commonGitDirectory,
 	git,
@@ -295,6 +295,30 @@ export function assertConfiguredWorktreePath(
 	if (metadata.worktreePath !== expectedPath) {
 		throw new CliError(`Unsafe session metadata for ${metadata.slug}.`);
 	}
+}
+
+// The directory name supplies only a candidate: persisted metadata, configured
+// location and Git registration must all agree before it becomes a target.
+export function resolveSessionTarget(target: string, cwd = process.cwd()): string {
+	if (target !== ".") return target;
+	const current = repositoryRoot(cwd);
+	const root = primaryRoot(current);
+	if (current === root) {
+		throw new CliError("The primary checkout has no current managed session; use an explicit slug.");
+	}
+	const slug = basename(current);
+	try {
+		validateSlug(slug);
+	} catch {
+		throw new CliError("Current worktree is not a managed session; use an explicit slug.");
+	}
+	if (!existsSync(metadataPath(root, slug))) {
+		throw new CliError("Current worktree has no recorded managed session; use an explicit slug to inspect or repair it.");
+	}
+	if (sessionDirectory(root, slug) !== current) {
+		throw new CliError("Current worktree does not match a recorded managed session; use an explicit slug.");
+	}
+	return slug;
 }
 
 // Navigation and ad-hoc commands inspect only local Git evidence. Unlike launch,

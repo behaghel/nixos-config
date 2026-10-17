@@ -66,6 +66,36 @@ Session metadata remains in the shared Git directory at
 `agent-session/sessions/`. Existing Herbert sessions need no data migration.
 Cleanup preserves remote assets and refuses unsafe work unless explicitly forced.
 
+## Current-session targeting
+
+Inside a recorded managed worktree, including its nested directories, use the
+explicit target `.` instead of repeating its slug:
+
+```sh
+as . status --json
+as . cd
+as . run bun test
+as . resume
+```
+
+Resolution verifies the current Git worktree against its configured location,
+persisted metadata, and shared Git registration. It does not infer identity from
+the current branch name, fetch, allocate, or repair anything. The selected command
+retains its normal behavior, and JSON output uses the canonical slug, never `.`.
+Renaming the current branch does not change the session identity.
+
+There is no implicit default target: `as status` still lists all sessions. `.` is
+rejected from the primary checkout, unmanaged worktrees, and unrecorded or invalid
+bindings. A nested Git repository is a separate context, not its outer session.
+Use an explicit slug to inspect or repair missing metadata. Creation, `start`,
+and `repair` require explicit slugs; `.` supports only `cd`, `run`, `launch`,
+`resume`, `status`, and `finish`. The escape form `as -- . status` also works.
+
+The existing invoking-worktree cleanup guard still rejects `as . finish`, even
+with `--force` or `--dry-run`. Move to the primary checkout and finish by slug.
+Bash, Zsh, and Fish offer `.` only for a valid current binding and filter its
+action completions to existing-session commands.
+
 ## JSON creation receipts
 
 ```sh

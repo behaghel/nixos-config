@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
-import { sessionDirectory } from "./sessions.ts";
+import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showStatus } from "./inspection.ts";
 import { finish, finishBulk } from "./finish.ts";
@@ -24,7 +24,7 @@ export function main(args: string[]): number {
 		const invocation = parseInvocation(args);
 		const { command, args: rest } = invocation;
 		if (command === "cd") {
-			const slug = parseRequiredSlug(command, rest);
+			const slug = resolveSessionTarget(parseRequiredSlug(command, rest));
 			process.stdout.write(`${sessionDirectory(primaryRoot(repositoryRoot()), slug)}\n`);
 			return 0;
 		}
@@ -32,7 +32,7 @@ export function main(args: string[]): number {
 			const slug = parseRequiredSlug(command, rest.slice(0, 1));
 			const target = rest.slice(1);
 			if (!target[0]) throw argumentError("Missing <command> for 'run'.");
-			return runInSession(primaryRoot(repositoryRoot()), slug, target);
+			return runInSession(primaryRoot(repositoryRoot()), resolveSessionTarget(slug), target);
 		}
 		if (command === "create") {
 			const options = parseCreateArguments(rest);
@@ -64,7 +64,7 @@ export function main(args: string[]): number {
 			return 0;
 		}
 		if (command === "launch") {
-			const slug = parseRequiredSlug("launch", rest);
+			const slug = resolveSessionTarget(parseRequiredSlug("launch", rest));
 			return launch(primaryRoot(repositoryRoot()), slug);
 		}
 		if (command === "start") {
@@ -73,7 +73,7 @@ export function main(args: string[]): number {
 			return start(root, options.slug, options.launchConfiguredAgent);
 		}
 		if (command === "resume") {
-			const slug = parseRequiredSlug("resume", rest);
+			const slug = resolveSessionTarget(parseRequiredSlug("resume", rest));
 			return launch(primaryRoot(repositoryRoot()), slug, "resume", [
 				"--continue",
 			]);
@@ -83,7 +83,7 @@ export function main(args: string[]): number {
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			showStatus(
 				primaryRoot(repositoryRoot()),
-				options.slug,
+				options.slug === undefined ? undefined : resolveSessionTarget(options.slug),
 				options.json,
 				options.refresh,
 			);
@@ -114,7 +114,7 @@ export function main(args: string[]): number {
 				finish(
 					root,
 					invocationRoot,
-					options.slug ?? "",
+					resolveSessionTarget(options.slug ?? "", invocationRoot),
 					options.yes,
 					options.force,
 					options.keepBranch,

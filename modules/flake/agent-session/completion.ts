@@ -1,8 +1,9 @@
 import { primaryRoot, repositoryRoot } from "./git.ts";
-import { loadConfig, metadataSlugs, discoverManagedWorktrees } from "./sessions.ts";
+import { loadConfig, metadataSlugs, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
 import {
 	commandNames,
 	sessionCommandNames,
+	currentSessionCommandNames,
 	globalCommandNames,
 	argumentError,
 } from "./arguments.ts";
@@ -18,6 +19,14 @@ const commandOptions: Record<string, string[]> = {
 
 export function completionCandidates(scope: string): string[] {
 	if (scope === "commands") return sessionCommandNames;
+	if (scope === "current-commands") {
+		try {
+			resolveSessionTarget(".");
+			return currentSessionCommandNames;
+		} catch {
+			return [];
+		}
+	}
 	if (scope === "shells") return ["bash", "zsh", "fish"];
 	if (scope.startsWith("options:")) return commandOptions[scope.slice(8)] ?? [];
 	const global = [...globalCommandNames, "--"];
@@ -32,7 +41,14 @@ export function completionCandidates(scope: string): string[] {
 		if (scope === "targets" || scope === "sessions") {
 			const discovered = discoverManagedWorktrees(root, loadConfig(root));
 			const slugs = [...new Set([...recorded, ...discovered.keys()])].sort();
-			return scope === "sessions" ? slugs : [...global, ...slugs.filter((slug) => !commandNames.includes(slug))];
+			let current: string[] = [];
+			try {
+				resolveSessionTarget(".");
+				current = ["."];
+			} catch {
+				// No implicit target is offered without a verified current binding.
+			}
+			return scope === "sessions" ? [...current, ...slugs] : [...global, ...current, ...slugs.filter((slug) => !commandNames.includes(slug))];
 		}
 		if (["cd", "run", "launch", "resume", "status", "finish"].includes(scope)) return recorded;
 	} catch {
@@ -60,6 +76,7 @@ _agent_session() {
     fi
   elif [[ $COMP_CWORD -eq $action_index ]]; then
     scope=commands
+    [[ \${COMP_WORDS[subject]} == . ]] && scope=current-commands
   else
     action="\${COMP_WORDS[action_index]}"
     if [[ $action == run && $COMP_CWORD -gt $action_index ]]; then
@@ -99,7 +116,9 @@ if (( subject == 2 )) && [[ " ${globalCommandNames.join(" ")} " == *" $words[2] 
     scope="options:global-$words[2]"
   fi
 elif (( CURRENT == action_index )); then
-  candidates=(\${(f)"$(agent-session __complete commands 2>/dev/null)"})
+  scope=commands
+  [[ $words[$subject] == . ]] && scope=current-commands
+  candidates=(\${(f)"$(agent-session __complete "$scope" 2>/dev/null)"})
   _describe 'command' candidates
   return
 else
@@ -146,6 +165,9 @@ function __agent_session_candidates
     end
   else if test $count_words -lt $action_index
     set scope commands
+    if test "$words[$subject]" = .
+      set scope current-commands
+    end
   else
     if test "$words[$action_index]" = run
       # Fish skips option tokens itself, so the escape separator is not counted.
