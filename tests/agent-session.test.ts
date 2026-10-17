@@ -768,10 +768,182 @@ child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); proce
 	});
 });
 
+describe("explicit unrecorded-worktree retirement", () => {
+	it("previews and removes a dirty renamed worktree offline while preserving every ref", () => {
+		const fixture = createRepositoryFixture("unrecorded session ");
+		try {
+			const { worktree } = startManagedSession(fixture);
+			rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
+			git(worktree, "branch", "-m", "fix/unrecorded-work");
+			git(fixture.checkout, "branch", "unrelated-saved-branch");
+			writeFileSync(join(worktree, "uncommitted"), "discard only after explicit force");
+			writeFileSync(join(fixture.checkout, "primary-work"), "preserve primary");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			const refs = git(fixture.checkout, "for-each-ref", "--format=%(refname) %(objectname)");
+			const preview = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const plan = JSON.parse(preview.stdout).plan;
+			expect(plan.state).toBe("unrecorded");
+			expect(plan.worktreePath).toBe(worktree);
+			expect(plan.currentBranch).toBe("fix/unrecorded-work");
+			expect(plan.keepBranch).toBe(true);
+			expect(plan.allBranchesPreserved).toBe(true);
+			expect(plan.uncommittedWorkWillBeDiscarded).toBe(true);
+			expect(plan.ownedBranches.length).toBe(0);
+			expect(plan.clean).toBe(null);
+			expect(readFileSync(join(worktree, "uncommitted"), "utf8")).toBe("discard only after explicit force");
+			const human = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--dry-run"]);
+			expect(human.stdout).toContain("preserve all branches");
+			const result = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]);
+			expect(result.status).toBe(0);
+			expect(result.stderr).toContain("uncommitted and ignored local files");
+			expect(existsSync(worktree)).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(false);
+			expect(git(fixture.checkout, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
+			expect(readFileSync(join(fixture.checkout, "primary-work"), "utf8")).toBe("preserve primary");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reports detached HEAD risk without creating refs or claiming branch ownership", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
+			git(worktree, "checkout", "--detach", "HEAD");
+			const refs = git(fixture.checkout, "for-each-ref", "--format=%(refname) %(objectname)");
+			const preview = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			expect(JSON.parse(preview.stdout).plan.currentBranch).toBe(null);
+			expect(JSON.parse(preview.stdout).plan.detachedHeadMayBecomeUnreachable).toBe(true);
+			const result = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]);
+			expect(result.status).toBe(0);
+			expect(result.stderr).toContain("detached HEAD commits may become unreachable");
+			expect(git(fixture.checkout, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires explicit force and confirmation, never expands bulk cleanup, and guards the current shell", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
+			git(worktree, "branch", "-m", "fix/unrecorded-work");
+			for (const flags of [["--yes"], ["--dry-run"], ["--force"]]) {
+				expect(runCli(fixture.checkout, ["git-hygiene", "finish", ...flags]).status).toBe(1);
+				expect(existsSync(worktree)).toBe(true);
+			}
+			for (const selector of ["--all", "--gone"]) {
+				for (const flags of [["--dry-run", "--json"], ["--yes"]]) {
+					expect(runCli(fixture.checkout, ["finish", selector, "--force", ...flags]).status).toBe(0);
+					expect(existsSync(worktree)).toBe(true);
+				}
+			}
+			const nested = join(worktree, "nested"); mkdirSync(nested);
+			for (const flags of [["--yes"], ["--dry-run", "--json"]]) {
+				const result = runCli(nested, ["git-hygiene", "finish", "--force", ...flags]);
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain("current shell");
+				expect(existsSync(worktree)).toBe(true);
+			}
+			writeFileSync(join(fixture.checkout, ".gitignore"), "");
+			const ignored = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"], {
+				GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.excludesFile", GIT_CONFIG_VALUE_0: "/dev/null",
+			});
+			expect(ignored.status).toBe(1);
+			expect(ignored.stderr).toContain("Git-ignored");
+			expect(existsSync(worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not interpret malformed, mismatched, directory or dangling records as absent", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const path = sessionMetadataPath(fixture.checkout, "git-hygiene");
+			const original = JSON.parse(readFileSync(path, "utf8"));
+			for (const contents of ["not JSON", "null", JSON.stringify({ ...original, worktreePath: fixture.seed })]) {
+				writeFileSync(path, contents);
+				expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+				expect(existsSync(worktree)).toBe(true);
+				expect(readFileSync(path, "utf8")).toBe(contents);
+			}
+			rmSync(path); symlinkSync(join(fixture.root, "missing-record"), path);
+			for (const command of ["finish", "repair"]) {
+				const flags = command === "finish" ? ["--force", "--yes"] : [];
+				expect(runCli(fixture.checkout, ["git-hygiene", command, ...flags]).status).toBe(1);
+				expect(lstatSync(path).isSymbolicLink()).toBe(true);
+			}
+			rmSync(path); mkdirSync(path);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			rmSync(path, { recursive: true });
+			rmSync(join(path, ".."), { recursive: true });
+			writeFileSync(join(path, ".."), "invalid metadata directory");
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			rmSync(join(path, ".."));
+			symlinkSync(join(fixture.root, "missing-store"), join(path, ".."));
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(existsSync(worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses absent, locked, unregistered, symlinked and foreign configured slots", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
+			git(fixture.checkout, "worktree", "lock", worktree);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			git(fixture.checkout, "worktree", "unlock", worktree);
+			const moved = join(fixture.root, "moved");
+			git(fixture.checkout, "worktree", "move", worktree, moved);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			symlinkSync(moved, worktree);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			rmSync(worktree); mkdirSync(worktree);
+			writeFileSync(join(worktree, "preserve"), "not registered");
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(readFileSync(join(worktree, "preserve"), "utf8")).toBe("not registered");
+			git(worktree, "init");
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(existsSync(moved)).toBe(true);
+			rmSync(worktree, { recursive: true });
+			git(fixture.checkout, "worktree", "move", moved, worktree);
+			writeFileSync(join(worktree, ".git"), `gitdir: ${join(fixture.seed, ".git")}\n`);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(existsSync(worktree)).toBe(true);
+			expect(existsSync(fixture.seed)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("makes repair and doctor suggest explicit preview and retirement without inventing metadata", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			expect(runCli(fixture.checkout, ["--", "doctor", "create"]).status).toBe(0);
+			const worktree = join(realpathSync(fixture.worktrees), "doctor");
+			rmSync(sessionMetadataPath(fixture.checkout, "doctor"));
+			git(worktree, "branch", "-m", "fix/renamed-doctor");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			const result = runCli(fixture.checkout, ["--", "doctor", "repair"]);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("agent-session -- doctor finish --force --dry-run");
+			expect(result.stderr).toContain("preserve all branches");
+			const diagnosis = runCli(fixture.checkout, ["doctor", "--json"]);
+			expect(diagnosis.stdout).toContain("agent-session -- doctor finish --force --dry-run");
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "doctor"))).toBe(false);
+			expect(existsSync(worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("Node terminal confirmation", () => {
 	for (const [mode, args] of [
 		["normal", ["git-hygiene", "finish", "--keep-branch"]],
 		["forced", ["git-hygiene", "finish", "--force", "--keep-branch"]],
+		["unrecorded", ["git-hygiene", "finish", "--force"]],
+		["unrecorded-rebound", ["git-hygiene", "finish", "--force"]],
+		["unrecorded-branch-change", ["git-hygiene", "finish", "--force"]],
+		["unrecorded-replaced", ["git-hygiene", "finish", "--force"]],
 		["bulk", ["finish", "--all", "--keep-branch"]],
 	] as const) {
 		for (const answer of ["yes\n", "no\n", "\n", "EOF"]) {
@@ -779,8 +951,13 @@ describe("Node terminal confirmation", () => {
 				const fixture = createRepositoryFixture();
 				try {
 					const { worktree } = startManagedSession(fixture);
+					const unrecorded = mode.startsWith("unrecorded");
+					if (unrecorded) {
+						rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
+						git(worktree, "branch", "-m", "fix/unrecorded-terminal");
+					}
 					const driver = `
-import errno, json, os, pty, select, subprocess, sys, time
+import errno, json, os, pty, select, shutil, subprocess, sys, time
 master, slave = pty.openpty()
 child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stdout=slave, stderr=slave)
 os.close(slave)
@@ -803,6 +980,16 @@ try:
             if b'[y/N]' in output and not answered:
                 with open(sys.argv[3]) as owner:
                     lock_held = json.load(owner).get('pid') == child.pid
+                if len(sys.argv) > 4 and sys.argv[4]:
+                    with open(sys.argv[4], 'w') as record:
+                        record.write('{}')
+                if len(sys.argv) > 6 and sys.argv[5] == 'unrecorded-branch-change':
+                    subprocess.run(['git', '-C', sys.argv[6], 'branch', '-m', 'fix/changed-after-confirmation'], check=True)
+                if len(sys.argv) > 6 and sys.argv[5] == 'unrecorded-replaced':
+                    original = sys.argv[6]
+                    os.rename(original, original + '.moved')
+                    os.mkdir(original)
+                    shutil.copyfile(original + '.moved/.git', original + '/.git')
                 answer = b'\\x04' if sys.argv[2] == 'EOF' else sys.argv[2].encode()
                 os.write(master, answer)
                 answered = True
@@ -819,7 +1006,7 @@ finally:
     os.close(master)
 `;
 					const entry = mode === "normal" ? ["as"] : ["node", cliScript];
-					const result = spawnSync("python3", ["-c", driver, JSON.stringify([...entry, ...args]), answer, join(fixture.checkout, ".git", "agent-session", "operation.lock", "owner.json")], {
+					const result = spawnSync("python3", ["-c", driver, JSON.stringify([...entry, ...args]), answer, join(fixture.checkout, ".git", "agent-session", "operation.lock", "owner.json"), mode === "unrecorded-rebound" ? sessionMetadataPath(fixture.checkout, "git-hygiene") : "", mode, worktree], {
 						cwd: fixture.checkout, encoding: "utf8",
 						env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
 					});
@@ -829,11 +1016,16 @@ finally:
 					expect(terminal.lockHeld).toBe(true);
 					expect(terminal.output.includes("ReferenceError")).toBe(false);
 					const accepted = answer === "yes\n";
-					if (accepted && terminal.status !== 0) throw new Error(terminal.output);
-					expect(terminal.status).toBe(accepted ? 0 : 1);
-					expect(existsSync(worktree)).toBe(!accepted);
-					expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(!accepted);
-					expect(git(fixture.checkout, "branch", "--list", "--format=%(refname:short)", "agent/git-hygiene")).toBe("agent/git-hygiene");
+					const changed = ["unrecorded-rebound", "unrecorded-branch-change", "unrecorded-replaced"].includes(mode);
+					const removed = accepted && !changed;
+					if (removed && terminal.status !== 0) throw new Error(terminal.output);
+					expect(terminal.status).toBe(removed ? 0 : 1);
+					expect(existsSync(worktree)).toBe(!removed);
+					expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(mode === "unrecorded-rebound" || (!unrecorded && !removed));
+					const branch = mode === "unrecorded-branch-change" ? "fix/changed-after-confirmation" : unrecorded ? "fix/unrecorded-terminal" : "agent/git-hygiene";
+					if (accepted && changed) expect(terminal.output.toLowerCase()).toContain(mode === "unrecorded-rebound" ? "metadata exists" : "target changed");
+					if (mode === "unrecorded-replaced") expect(existsSync(`${worktree}.moved`)).toBe(true);
+					expect(git(fixture.checkout, "branch", "--list", "--format=%(refname:short)", branch)).toBe(branch);
 					if (!accepted) expect(terminal.output).toContain(mode === "bulk" ? "Finish cancelled" : "Cleanup cancelled");
 				} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 			});
@@ -903,7 +1095,7 @@ describe("read-only doctor", () => {
 			binding = report().checks.find((check) => check.id === "binding");
 			expect(binding.code).toBe("metadata-missing-renamed");
 			expect(binding.message).toContain("repair cannot recover");
-			expect(binding.message).toContain("branches are preserved");
+			expect(binding.message).toContain("preserve all branches");
 			expect(runCli(fixture.checkout, ["--", "doctor", "create"]).status).toBe(0);
 			rmSync(sessionMetadataPath(fixture.checkout, "doctor"));
 			const escaped = JSON.parse(runCli(fixture.checkout, ["--", "doctor", "doctor", "--json"]).stdout);

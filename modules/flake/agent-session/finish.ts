@@ -18,6 +18,8 @@ import {
 	metadataPath,
 	withOperationLock,
 	metadataSlugs,
+	sessionRecordExists,
+	unrecordedWorktree,
 } from "./sessions.ts";
 import {
 	inspectSession,
@@ -35,7 +37,7 @@ import {
 import type { SessionMetadata, ProgressReporter } from "./types.ts";
 
 function assertNotInvokingWorktree(
-	metadata: SessionMetadata,
+	metadata: Pick<SessionMetadata, "worktreePath">,
 	invocationRoot: string,
 ): void {
 	if (metadata.worktreePath === invocationRoot) {
@@ -43,6 +45,40 @@ function assertNotInvokingWorktree(
 			"Cannot remove the worktree containing the current shell. Run finish from another repository worktree.",
 		);
 	}
+}
+
+function previewUnrecordedFinish(root: string, invocationRoot: string, slug: string): Record<string, unknown> {
+	assertPrimaryCheckout(root);
+	const target = unrecordedWorktree(root, slug);
+	assertNotInvokingWorktree(target, invocationRoot);
+	return {
+		slug, branch: target.currentBranch, initialBranch: null, currentBranch: target.currentBranch,
+		head: target.head, ownedBranches: [], worktreePath: target.worktreePath,
+		metadataPath: metadataPath(root, slug), force: true, keepBranch: true,
+		state: "unrecorded", clean: null, allBranchesPreserved: true,
+		uncommittedWorkWillBeDiscarded: true, detachedHeadMayBecomeUnreachable: target.currentBranch === null,
+		remoteAssetsModified: false,
+	};
+}
+
+function forceFinishUnrecorded(root: string, invocationRoot: string, slug: string, yes: boolean): void {
+	assertPrimaryCheckout(root);
+	const target = unrecordedWorktree(root, slug);
+	assertNotInvokingWorktree(target, invocationRoot);
+	process.stderr.write(`Force-remove unrecorded worktree, including uncommitted and ignored local files:\n  worktree: ${target.worktreePath}\n  current branch: ${target.currentBranch ?? "detached HEAD"}\n  HEAD: ${target.head}\nAll branches will be preserved; no ownership metadata will be invented.\n`);
+	if (target.currentBranch === null) process.stderr.write("Warning: detached HEAD commits may become unreachable. Create a branch first if you need to retain them.\n");
+	if (!yes) {
+		if (!process.stdin.isTTY) throw new CliError(`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`);
+		if (!confirm("Discard this unrecorded worktree and preserve all branches? [y/N]")) throw new CliError("Cleanup cancelled.");
+	}
+	// Recheck absence and physical/Git identity after the confirmation wait. Do
+	// not fall back to recorded cleanup if metadata appeared in the meantime.
+	const current = unrecordedWorktree(root, slug);
+	assertNotInvokingWorktree(current, invocationRoot);
+	if (JSON.stringify(current) !== JSON.stringify(target)) throw new CliError("Unrecorded worktree target changed; obtain a fresh preview before cleanup.");
+	const removed = run("git", ["worktree", "remove", "--force", target.worktreePath], root, "inherit");
+	if (removed.status !== 0) throw new CliError("Could not remove the unrecorded worktree; branches were not deleted.");
+	process.stdout.write("Unrecorded worktree removed locally. All branches preserved; no session record created or deleted. Remote assets were not modified.\n");
 }
 
 function forceFinishUnlocked(
@@ -314,24 +350,27 @@ export function finish(
 ): void {
 	const report = progressReporter("finish", json);
 	if (dryRun) {
-		const plan = previewFinish(
-			root,
-			invocationRoot,
-			slug,
-			force,
-			keepBranch,
-			report,
-		);
+		const plan = force && !sessionRecordExists(root, slug)
+			? runPhase(report, "inspect-finish", () => previewUnrecordedFinish(root, invocationRoot, slug))
+			: previewFinish(root, invocationRoot, slug, force, keepBranch, report);
 		const branches = (plan.ownedBranches as string[]).join(", ") || "none";
 		writeCommandResult(
 			{ version: 1, command: "finish", dryRun: true, plan },
 			json,
-			`Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n`,
+			plan.allBranchesPreserved === true
+				? `Would remove unrecorded local worktree ${String(plan.worktreePath)} and preserve all branches. Force discards uncommitted and ignored local files.${plan.detachedHeadMayBecomeUnreachable ? " Detached HEAD commits may become unreachable; create a branch first if needed." : ""}\n`
+				: `Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n`,
 		);
 		return;
 	}
 	runPhase(report, "cleanup", () =>
 		withOperationLock(root, "finish", () => {
+			// Only this explicit-slug entrypoint may retire an unrecorded slot.
+			// Bulk cleanup continues to use recorded metadata exclusively.
+			if (force && !sessionRecordExists(root, slug)) {
+				if (expected) throw new CliError("Forced unrecorded cleanup does not accept a recorded-session receipt.");
+				return forceFinishUnrecorded(root, invocationRoot, slug, yes);
+			}
 			if (
 				expected &&
 				previewFinish(

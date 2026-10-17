@@ -100,6 +100,48 @@ with `--force` or `--dry-run`. Move to the primary checkout and finish by slug.
 Bash, Zsh, and Fish offer `.` only for a valid current binding and filter its
 action completions to existing-session commands.
 
+## Retiring an unrecorded worktree
+
+If a registered worktree has lost its session record, explicit forced cleanup can
+retire it without inventing ownership metadata:
+
+```sh
+as my-task finish --force --dry-run
+as my-task finish --force --dry-run --json
+as my-task finish --force
+```
+
+This requires genuinely absent metadata and an existing, non-symlink worktree in
+the configured Git-ignored slot, registered to the same repository. Locked
+worktrees, the primary checkout, and the invoking worktree remain protected.
+Malformed, mismatched, inaccessible or dangling records are not absence and
+never enable this path. Use the explicit slug: `.` cannot identify an unrecorded
+session.
+
+**All branches are preserved**, regardless of whether `--keep-branch` was passed.
+No branch ownership is inferred, no session record is created or removed, and no
+remote is contacted. Force discards the worktree's uncommitted and ignored local
+files; verify ownership, active use and needed local data before confirming.
+Detached HEAD commits can become unreachable: create a branch first if needed.
+After confirmation, the held operation lock protects revalidation of metadata
+absence, canonical location, directory identity, Git registration, branch and
+HEAD before removal. A changed target is refused rather than reinterpreted.
+
+The JSON preview has `state: "unrecorded"`, effective `keepBranch: true`,
+`allBranchesPreserved: true`, `ownedBranches: []`, `initialBranch: null`, and
+`clean: null` (cleanliness is not assessed). It exposes the observed `head` and
+`currentBranch` plus `uncommittedWorkWillBeDiscarded` and
+`detachedHeadMayBecomeUnreachable`. Preview changes nothing and supplies no
+recorded-session receipt. `--expected` remains restricted to non-forced,
+branch-preserving recorded cleanup; no fallback weakens that contract.
+
+This path is explicit-slug-only: `finish --all` and `finish --gone` still consider
+recorded sessions exclusively, including when forced. Existing recorded-session
+force behavior is unchanged. `repair` continues to restore only recognizable
+original managed branches; for renamed/detached unrecorded slots it refuses to
+invent history and instead prints the guarded preview/retirement commands.
+Metadata repair does not recreate local configuration links.
+
 ## Read-only diagnostics
 
 ```sh
@@ -136,7 +178,7 @@ Binding errors can also include a safe `code` explaining the failure:
 | Code | Meaning and next step |
 |------|-----------------------|
 | `metadata-missing` | Expected managed branch has no record; explicitly `repair` it after verifying ownership. |
-| `metadata-missing-renamed` | Registered slot has no record and uses a renamed/detached branch; `repair` cannot recover it. Keep it intact or manually retire it with native Git, preserving branches. |
+| `metadata-missing-renamed` | Registered slot has no record and uses a renamed/detached branch; `repair` cannot recover it. Keep it intact or explicitly preview and retire it with `finish --force`, preserving all branches. |
 | `metadata-invalid` | Record is unreadable, malformed or unsafe; inspect/restore it rather than overwriting it. |
 | `metadata-path-mismatch` | Configured slot and record disagree; check for a moved worktree or changed configuration. |
 | `worktree-missing` | Record exists but directory is absent; locate moved work and preserve branches before stale-record cleanup. |

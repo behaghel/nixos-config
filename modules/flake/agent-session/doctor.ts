@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { commonGitDirectory, git, primaryRoot, repositoryRoot } from "./git.ts";
 import { loadConfig, metadataPath, metadataSlugs, readMetadata, assertConfiguredWorktreePath, readOperationLock, resolveSessionTarget, resolveWorktreeRoot, sessionDirectory, validateSlug } from "./sessions.ts";
 import { run, writeCommandResult } from "./runtime.ts";
-import { sessionCommand } from "./arguments.ts";
+import { sessionCommand, unrecordedRetirementHint } from "./arguments.ts";
 import type { AgentSessionConfig, SessionMetadata } from "./types.ts";
 
 interface Check {
@@ -127,7 +127,7 @@ export function doctor(target?: string, json = false): number {
 					if (registered.get(candidate) === `agent/${candidate}`) {
 						problem("metadata-missing", `Session record is missing. After verifying ownership, restore it with: ${sessionCommand(candidate, "repair")}. This writes metadata without removing work or branches.`);
 					} else if (registered.has(candidate)) {
-						problem("metadata-missing-renamed", "Session record is missing and the registered worktree is on a renamed or detached branch; repair cannot recover this combination. Keep it intact. If retiring it, review its work and remove the worktree with native Git without --force; local branches are preserved.");
+						problem("metadata-missing-renamed", `Session record is missing. ${unrecordedRetirementHint(candidate)}`);
 					} else problem("session-unknown", "No session record or registered managed slot was found. Check the explicit slug; no recovery target was identified.");
 					continue;
 				}

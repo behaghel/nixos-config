@@ -1,5 +1,6 @@
 import {
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	readdirSync,
 	readFileSync,
@@ -16,7 +17,7 @@ import {
 	repositoryRoot,
 	worktreeIsRegistered,
 } from "./git.ts";
-import { CliError } from "./runtime.ts";
+import { CliError, run } from "./runtime.ts";
 import type {
 	AgentSessionConfig,
 	SessionMetadata,
@@ -295,6 +296,57 @@ export function assertConfiguredWorktreePath(
 	if (metadata.worktreePath !== expectedPath) {
 		throw new CliError(`Unsafe session metadata for ${metadata.slug}.`);
 	}
+}
+
+// A dangling record or inaccessible metadata store is not evidence of absence.
+export function sessionRecordExists(root: string, slug: string): boolean {
+	validateSlug(slug);
+	const path = metadataPath(root, slug);
+	try { lstatSync(path); return true; } catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new CliError(`Cannot establish session-record absence for ${slug}.`);
+	}
+	// ENOENT through a dangling store symlink is not a missing record.
+	for (const directory of [dirname(path), dirname(dirname(path))]) {
+		try {
+			const stat = lstatSync(directory);
+			if (stat.isSymbolicLink() ? !existsSync(directory) : !stat.isDirectory()) throw new CliError("Invalid metadata store.");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new CliError(`Cannot establish session-record absence for ${slug}.`);
+		}
+	}
+	return false;
+}
+
+export interface UnrecordedWorktree {
+	slug: string;
+	worktreePath: string;
+	currentBranch: string | null;
+	head: string;
+	gitDirectory: string;
+	device: string;
+	inode: string;
+}
+
+// Local topology identifies a retirement target, never session-owned branches.
+export function unrecordedWorktree(root: string, slug: string): UnrecordedWorktree {
+	validateSlug(slug);
+	if (sessionRecordExists(root, slug)) throw new CliError(`Session metadata exists for ${slug}; unrecorded cleanup is refused.`);
+	const config = loadConfig(root);
+	const configured = resolveWorktreeRoot(root, config.worktree_root);
+	if (run("git", ["check-ignore", "--quiet", "--no-index", "--", `${config.worktree_root}/.agent-session-probe`], root).status !== 0) {
+		throw new CliError("Unrecorded cleanup requires a Git-ignored configured worktree root.");
+	}
+	const path = join(realpathSync(configured), slug);
+	const stat = lstatSync(path, { bigint: true });
+	if (
+		!stat.isDirectory() || realpathSync(path) !== path || path === primaryRoot(root) ||
+		!worktreeIsRegistered(root, path) || repositoryRoot(path) !== path ||
+		commonGitDirectory(path) !== commonGitDirectory(root)
+	) throw new CliError(`No valid registered worktree in the configured slot for ${slug}.`);
+	const gitDirectory = realpathSync(git(path, ["rev-parse", "--absolute-git-dir"]));
+	if (existsSync(join(gitDirectory, "locked"))) throw new CliError(`Registered worktree ${slug} is locked; cleanup is refused.`);
+	const branch = git(path, ["branch", "--show-current"]) || null;
+	return { slug, worktreePath: path, currentBranch: branch, head: git(path, ["rev-parse", "--verify", "HEAD"]), gitDirectory, device: stat.dev.toString(), inode: stat.ino.toString() };
 }
 
 // The directory name supplies only a candidate: persisted metadata, configured
