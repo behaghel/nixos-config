@@ -1,6 +1,8 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
+  agentSession.enable = true;
+
   languages.python = {
     enable = true;
     version = "3.12";

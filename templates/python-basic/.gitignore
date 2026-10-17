@@ -1,4 +1,7 @@
 
+# Managed coding-agent worktrees
+/.worktrees/
+
 # Python
 __pycache__/
 *.py[cod]

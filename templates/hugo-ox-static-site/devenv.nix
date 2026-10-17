@@ -1,6 +1,8 @@
 { pkgs, lib, inputs, ... }:
 
 {
+  agentSession.enable = true;
+
   packages = with pkgs; [
     dart-sass
     gh

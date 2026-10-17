@@ -1,5 +1,7 @@
 { pkgs, lib, config, inputs, ... }:
 {
+  agentSession.enable = true;
+
   packages = with pkgs; [
     guile_3_0
     guile_3_0.dev  # Provides guile.m4 with GUILE_PKG macro and guild
@@ -87,6 +89,9 @@
         cp -r guile-hall-project/* . 2>/dev/null || true
         cp -r guile-hall-project/.* . 2>/dev/null || true
         rm -rf guile-hall-project
+        # Generated dotfiles can replace the template's worktree ignore rule.
+        grep -qxF '/.worktrees/' .gitignore ||
+          printf '\n# Managed coding-agent worktrees\n/.worktrees/\n' >> .gitignore
         echo "  ✓ Moved files from guile-hall-project/ to root directory"
       fi
 

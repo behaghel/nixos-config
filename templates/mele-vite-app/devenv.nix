@@ -1,6 +1,8 @@
 { pkgs, config, ... }:
 
 {
+  agentSession.enable = true;
+
   mele.app = {
     enable = true;
     name = "example";

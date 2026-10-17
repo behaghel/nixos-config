@@ -1,3 +1,6 @@
+# Managed coding-agent worktrees
+/.worktrees/
+
 # Devenv / direnv
 /.devenv/
 /.direnv/

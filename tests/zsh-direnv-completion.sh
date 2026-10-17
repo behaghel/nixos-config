@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Exercise project entry/exit independently of the caller's active project.
+unset DIRENV_ZSH_COMPLETION_DIRS
+
 root="$(mktemp -d)"
 trap 'rm -rf "$root"' EXIT
 mkdir -p "$root/home" "$root/config" "$root/pass-functions" \
@@ -8,7 +11,7 @@ mkdir -p "$root/home" "$root/config" "$root/pass-functions" \
   "$root/project-a" "$root/project-b" "$root/missing"
 printf '#compdef pass\n: \n' > "$root/pass-functions/_pass"
 printf '#compdef other-tool\n: \n' > "$root/pass-functions/_other_tool"
-printf '#compdef agent-session\n: \n' > "$root/agent/zsh/site-functions/_agent_session"
+printf '#compdef agent-session as\n: \n' > "$root/agent/zsh/site-functions/_agent_session"
 printf '#compdef herbert herbert-live\n: \n' > "$root/agent/zsh/site-functions/_herbert"
 printf '#compdef alternate-tool\n: \n' > "$root/other/functions/_alternate"
 printf 'export FPATH=%s\nexport DIRENV_ZSH_COMPLETION_DIRS=%s:%s:%s:%s\n' \
@@ -27,6 +30,7 @@ fpath=("$ROOT/pass-functions" $fpath)
 autoload -Uz compinit
 compinit -D
 [[ $_comps[pass] == _pass && $_comps[other-tool] == _other_tool ]]
+original_as_comp=${_comps[as]-}
 eval "$(direnv hook zsh)"
 source "$HOOK_FILE"
 assert_base() {
@@ -34,7 +38,7 @@ assert_base() {
   (( ${fpath[(Ie)$ROOT/pass-functions]} ))
 }
 assert_agent() {
-  [[ $_comps[agent-session] == _agent_session && $_comps[herbert] == _herbert &&
+  [[ $_comps[agent-session] == _agent_session && $_comps[as] == _agent_session && $_comps[herbert] == _herbert &&
      $_comps[herbert-live] == _herbert ]]
   [[ -r $ROOT/agent/zsh/site-functions/_agent_session &&
      -r $ROOT/agent/zsh/site-functions/_herbert ]]
@@ -45,7 +49,7 @@ assert_agent() {
   [[ $count == 1 ]]
 }
 assert_no_agent() {
-  [[ -z ${_comps[agent-session]-} && -z ${_comps[herbert]-} &&
+  [[ -z ${_comps[agent-session]-} && ${_comps[as]-} == "$original_as_comp" && -z ${_comps[herbert]-} &&
      -z ${_comps[herbert-live]-} ]]
   [[ -z ${fpath[(r)$ROOT/agent/zsh/site-functions]} ]]
 }

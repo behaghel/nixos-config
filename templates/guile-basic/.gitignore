@@ -1,4 +1,7 @@
 
+# Managed coding-agent worktrees
+/.worktrees/
+
 # Compiled Guile files
 *.go
 
