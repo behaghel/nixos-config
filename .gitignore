@@ -3,6 +3,7 @@
 /.worktrees/
 /result
 node_modules/
+/.pi/npm/
 
 # IDEs
 .idea/
