@@ -65,6 +65,10 @@ Creation supports both preview JSON and an actual creation receipt.
 Session metadata remains in the shared Git directory at
 `agent-session/sessions/`. Existing Herbert sessions need no data migration.
 Cleanup preserves remote assets and refuses unsafe work unless explicitly forced.
+Interactive cleanup uses Node-compatible confirmation for normal, forced and bulk
+finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a failed
+prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
+`--yes` skips only confirmation, not ownership or cleanup safety checks.
 
 ## Current-session targeting
 
@@ -127,6 +131,20 @@ JSON is one newline-terminated document with `version: 1`, `command: "doctor"`,
 target could not be resolved.
 Each check has `id`, `status` (`ok`, `info`, `warning`, or `error`), and `message`;
 binding/link checks can include `slug` and a project-relative link `path`.
+Binding errors can also include a safe `code` explaining the failure:
+
+| Code | Meaning and next step |
+|------|-----------------------|
+| `metadata-missing` | Expected managed branch has no record; explicitly `repair` it after verifying ownership. |
+| `metadata-missing-renamed` | Registered slot has no record and uses a renamed/detached branch; `repair` cannot recover it. Keep it intact or manually retire it with native Git, preserving branches. |
+| `metadata-invalid` | Record is unreadable, malformed or unsafe; inspect/restore it rather than overwriting it. |
+| `metadata-path-mismatch` | Configured slot and record disagree; check for a moved worktree or changed configuration. |
+| `worktree-missing` | Record exists but directory is absent; locate moved work and preserve branches before stale-record cleanup. |
+| `git-binding-invalid` | Directory exists but Git registration or repository identity disagrees; inspect local registration. |
+| `session-unknown` | Neither a record nor a registered configured slot exists for the requested slug. |
+
+A healthy binding does not imply cleanup eligibility: doctor does not run the
+freshness, publication or dirty-work checks required by `finish`.
 Exit status is `0` with no errors (warnings are allowed), `1` for diagnostic
 errors, and `64` for invalid CLI arguments. Valid diagnostic requests still
 return JSON when configuration or repository context is missing.

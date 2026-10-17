@@ -768,6 +768,79 @@ child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); proce
 	});
 });
 
+describe("Node terminal confirmation", () => {
+	for (const [mode, args] of [
+		["normal", ["git-hygiene", "finish", "--keep-branch"]],
+		["forced", ["git-hygiene", "finish", "--force", "--keep-branch"]],
+		["bulk", ["finish", "--all", "--keep-branch"]],
+	] as const) {
+		for (const answer of ["yes\n", "no\n", "\n", "EOF"]) {
+			it(`handles ${JSON.stringify(answer)} for ${mode} cleanup on a real terminal`, () => {
+				const fixture = createRepositoryFixture();
+				try {
+					const { worktree } = startManagedSession(fixture);
+					const driver = `
+import errno, json, os, pty, select, subprocess, sys, time
+master, slave = pty.openpty()
+child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stdout=slave, stderr=slave)
+os.close(slave)
+output = b''
+answered = False
+lock_held = False
+try:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+            if b'[y/N]' in output and not answered:
+                with open(sys.argv[3]) as owner:
+                    lock_held = json.load(owner).get('pid') == child.pid
+                answer = b'\\x04' if sys.argv[2] == 'EOF' else sys.argv[2].encode()
+                os.write(master, answer)
+                answered = True
+        elif child.poll() is not None:
+            break
+    else:
+        raise TimeoutError('terminal confirmation did not complete')
+    code = child.wait(timeout=5)
+    print(json.dumps({'status': code, 'output': output.decode(errors='replace'), 'answered': answered, 'lockHeld': lock_held}))
+finally:
+    if child.poll() is None:
+        child.kill()
+        child.wait()
+    os.close(master)
+`;
+					const entry = mode === "normal" ? ["as"] : ["node", cliScript];
+					const result = spawnSync("python3", ["-c", driver, JSON.stringify([...entry, ...args]), answer, join(fixture.checkout, ".git", "agent-session", "operation.lock", "owner.json")], {
+						cwd: fixture.checkout, encoding: "utf8",
+						env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+					});
+					expect(result.status).toBe(0);
+					const terminal = JSON.parse(result.stdout);
+					expect(terminal.answered).toBe(true);
+					expect(terminal.lockHeld).toBe(true);
+					expect(terminal.output.includes("ReferenceError")).toBe(false);
+					const accepted = answer === "yes\n";
+					if (accepted && terminal.status !== 0) throw new Error(terminal.output);
+					expect(terminal.status).toBe(accepted ? 0 : 1);
+					expect(existsSync(worktree)).toBe(!accepted);
+					expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(!accepted);
+					expect(git(fixture.checkout, "branch", "--list", "--format=%(refname:short)", "agent/git-hygiene")).toBe("agent/git-hygiene");
+					if (!accepted) expect(terminal.output).toContain(mode === "bulk" ? "Finish cancelled" : "Cleanup cancelled");
+				} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+			});
+		}
+	}
+});
+
 describe("read-only doctor", () => {
 	it("reports healthy bindings as one versioned JSON document and offers human diagnostics", () => {
 		const fixture = createRepositoryFixture();
@@ -815,6 +888,31 @@ describe("read-only doctor", () => {
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 
+	it("distinguishes recoverable missing records from renamed branches without guessing repair", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const metadata = sessionMetadataPath(fixture.checkout, "git-hygiene");
+			rmSync(metadata);
+			const report = () => JSON.parse(runCli(fixture.checkout, ["doctor", "--json"]).stdout);
+			let binding = report().checks.find((check) => check.id === "binding");
+			expect(binding.code).toBe("metadata-missing");
+			expect(binding.message).toContain("agent-session git-hygiene repair");
+			expect(existsSync(metadata)).toBe(false);
+			git(worktree, "branch", "-m", "fix/renamed-session");
+			binding = report().checks.find((check) => check.id === "binding");
+			expect(binding.code).toBe("metadata-missing-renamed");
+			expect(binding.message).toContain("repair cannot recover");
+			expect(binding.message).toContain("branches are preserved");
+			expect(runCli(fixture.checkout, ["--", "doctor", "create"]).status).toBe(0);
+			rmSync(sessionMetadataPath(fixture.checkout, "doctor"));
+			const escaped = JSON.parse(runCli(fixture.checkout, ["--", "doctor", "doctor", "--json"]).stdout);
+			expect(escaped.checks.find((check) => check.id === "binding").message).toContain("agent-session -- doctor repair");
+			expect(existsSync(worktree)).toBe(true);
+			expect(existsSync(metadata)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
 	it("reports malformed, unsafe, missing and unrecorded bindings without repair and scopes named reports", () => {
 		const fixture = createRepositoryFixture();
 		try {
@@ -826,6 +924,8 @@ describe("read-only doctor", () => {
 				const result = runCli(fixture.checkout, ["git-hygiene", "doctor", "--json"]);
 				expect(result.status).toBe(1);
 				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "binding" && check.status === "error")).toBe(true);
+				const code = contents.startsWith("{") ? "metadata-path-mismatch" : "metadata-invalid";
+				expect(JSON.parse(result.stdout).checks.some((check) => check.code === code)).toBe(true);
 				expect(readFileSync(path, "utf8")).toBe(contents);
 				const current = runCli(worktree, [".", "doctor", "--json"]);
 				expect(current.status).toBe(1);
@@ -844,7 +944,11 @@ describe("read-only doctor", () => {
 			expect(unknown.status).toBe(1);
 			expect(JSON.parse(unknown.stdout).checks.some((check) => check.slug === "git-hygiene")).toBe(false);
 			git(fixture.checkout, "worktree", "remove", "--force", worktree);
-			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(1);
+			const missing = JSON.parse(runCli(fixture.checkout, ["doctor", "--json"]).stdout);
+			expect(missing.checks.some((check) => check.code === "worktree-missing")).toBe(true);
+			mkdirSync(worktree);
+			const unregistered = JSON.parse(runCli(fixture.checkout, ["doctor", "--json"]).stdout);
+			expect(unregistered.checks.some((check) => check.code === "git-binding-invalid")).toBe(true);
 			expect(readFileSync(path, "utf8")).toBe(original);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});

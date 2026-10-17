@@ -10,6 +10,35 @@ export class CliError extends Error {
 	}
 }
 
+// Node makes terminal stdin nonblocking, so synchronous readSync can fail with
+// EAGAIN. Let a child of the same runtime read asynchronously while the parent
+// waits synchronously, keeping the existing operation lock held throughout.
+// Callers enforce TTY input; EOF or a failed prompt never supplies consent.
+export function confirm(question: string): boolean {
+	const reader = `
+process.stderr.write(process.argv[1] + ' ');
+let input = '', answered = false;
+const answer = (accepted) => {
+  if (answered) return;
+  answered = true;
+  process.stdout.write(accepted ? 'yes' : 'no');
+  process.stdin.pause();
+};
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (chunk) => {
+  input += chunk;
+  const newline = input.indexOf('\\n');
+  if (newline >= 0) answer(['y', 'yes'].includes(input.slice(0, newline).trim().toLowerCase()));
+});
+process.stdin.on('end', () => answer(false));
+process.stdin.on('error', () => answer(false));
+`;
+	const result = spawnSync(process.execPath, ["--input-type=module", "-e", reader, question], {
+		stdio: ["inherit", "pipe", "inherit"], encoding: "utf8",
+	});
+	return result.status === 0 && result.stdout === "yes";
+}
+
 export function progressReporter(command: string, json: boolean): ProgressReporter {
 	return (phase, status, detail) => {
 		if (json) {

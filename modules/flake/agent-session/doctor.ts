@@ -1,9 +1,10 @@
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { commonGitDirectory, git, primaryRoot, repositoryRoot } from "./git.ts";
-import { loadConfig, metadataSlugs, readOperationLock, resolveSessionTarget, resolveWorktreeRoot, sessionDirectory, validateSlug } from "./sessions.ts";
+import { loadConfig, metadataPath, metadataSlugs, readMetadata, assertConfiguredWorktreePath, readOperationLock, resolveSessionTarget, resolveWorktreeRoot, sessionDirectory, validateSlug } from "./sessions.ts";
 import { run, writeCommandResult } from "./runtime.ts";
-import type { AgentSessionConfig } from "./types.ts";
+import { sessionCommand } from "./arguments.ts";
+import type { AgentSessionConfig, SessionMetadata } from "./types.ts";
 
 interface Check {
 	id: string;
@@ -11,6 +12,7 @@ interface Check {
 	message: string;
 	slug?: string;
 	path?: string;
+	code?: string;
 }
 
 function localPath(path: string): boolean {
@@ -29,8 +31,8 @@ function present(path: string): boolean {
 // configured fsmonitor. Never include raw config/metadata errors in diagnostics.
 export function doctor(target?: string, json = false): number {
 	const checks: Check[] = [];
-	const add = (id: string, status: Check["status"], message: string, session?: string, path?: string) =>
-		checks.push({ id, status, message, ...(session ? { slug: session } : {}), ...(path ? { path } : {}) });
+	const add = (id: string, status: Check["status"], message: string, session?: string, path?: string, code?: string) =>
+		checks.push({ id, status, message, ...(session ? { slug: session } : {}), ...(path ? { path } : {}), ...(code ? { code } : {}) });
 	let slug = target;
 	let unresolved = false;
 	if (target === ".") {
@@ -104,15 +106,42 @@ export function doctor(target?: string, json = false): number {
 			const candidates = new Set(metadataSlugs(primary));
 			// Include registered slots even after a branch rename erased the agent/
 			// naming clue. This is diagnostic evidence, never authority to repair.
-			for (const line of git(primary, ["worktree", "list", "--porcelain"]).split("\n")) {
-				if (!line.startsWith("worktree ")) continue;
-				const path = line.slice("worktree ".length);
+			const registered = new Map<string, string | undefined>();
+			for (const record of git(primary, ["worktree", "list", "--porcelain"]).split(/\n\n+/)) {
+				const lines = record.split("\n");
+				const path = lines.find((line) => line.startsWith("worktree "))?.slice("worktree ".length);
+				if (!path) continue;
 				const actual = existsSync(path) ? realpathSync(path) : resolve(path);
-				if (dirname(actual) === canonical) candidates.add(basename(actual));
+				if (dirname(actual) !== canonical) continue;
+				const candidate = basename(actual);
+				candidates.add(candidate);
+				registered.set(candidate, lines.find((line) => line.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length));
 			}
 			for (const candidate of slug ? [slug] : [...candidates].sort()) {
 				try { validateSlug(candidate); } catch {
 					add("binding", "error", "A metadata filename or managed worktree slot has an invalid slug. Inspect local state manually.");
+					continue;
+				}
+				const problem = (code: string, message: string) => add("binding", "error", message, candidate, undefined, code);
+				if (!present(metadataPath(primary, candidate))) {
+					if (registered.get(candidate) === `agent/${candidate}`) {
+						problem("metadata-missing", `Session record is missing. After verifying ownership, restore it with: ${sessionCommand(candidate, "repair")}. This writes metadata without removing work or branches.`);
+					} else if (registered.has(candidate)) {
+						problem("metadata-missing-renamed", "Session record is missing and the registered worktree is on a renamed or detached branch; repair cannot recover this combination. Keep it intact. If retiring it, review its work and remove the worktree with native Git without --force; local branches are preserved.");
+					} else problem("session-unknown", "No session record or registered managed slot was found. Check the explicit slug; no recovery target was identified.");
+					continue;
+				}
+				let metadata: SessionMetadata;
+				try { metadata = readMetadata(primary, candidate); } catch {
+					problem("metadata-invalid", "Session record is unreadable, malformed or unsafe. Inspect or restore the record manually; do not overwrite it with repair or delete its worktree based on this record.");
+					continue;
+				}
+				try { assertConfiguredWorktreePath(primary, settings, metadata); } catch {
+					problem("metadata-path-mismatch", "Recorded worktree location does not match the configured slot. Verify whether configuration or location changed; do not delete or repair by guessing.");
+					continue;
+				}
+				if (!existsSync(metadata.worktreePath)) {
+					problem("worktree-missing", "Recorded worktree directory is missing. Check whether it was moved; preserve remaining local branches before considering stale-record cleanup.");
 					continue;
 				}
 				let worktree: string;
@@ -120,7 +149,7 @@ export function doctor(target?: string, json = false): number {
 					worktree = sessionDirectory(primary, candidate);
 					add("binding", "ok", "Recorded location and Git registration agree.", candidate);
 				} catch {
-					add("binding", "error", "Session metadata, location or Git registration is missing or invalid. Inspect status by explicit slug; repair only after verifying ownership.", candidate);
+					problem("git-binding-invalid", "Worktree exists but Git registration, root or repository membership does not agree. Inspect Git worktree registration before attempting repair or cleanup.");
 					continue;
 				}
 				for (const path of settings.local_links) {
