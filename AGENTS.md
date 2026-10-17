@@ -1,5 +1,21 @@
 # Repository Guidelines
 
+## Coding-agent sessions (Pi)
+
+Pi loads this `AGENTS.md` automatically. For new tasks that edit repository files:
+
+1. Run `git status --short --branch` before editing. Preserve existing changes; never discard, stash or overwrite someone else's work without permission.
+2. Use the project environment (`devenv -q shell -- <command>`) so `as` resolves to this repository's shared `agent-session`, not a system assembler. The module is imported locally from `modules/flake/agent-session/devenv.nix` and launches `pi` by default.
+3. If already in this task's managed worktree, verify it with `as . status --json` and continue there. Do not allocate another resource just because a new Pi process or conversation starts. An unrecorded or invalid binding is not authority to repair or replace it.
+4. Otherwise create one isolated managed worktree with `devenv -q shell -- as <task-slug> create --json`. Use its returned `session.worktreePath` and `session.branch`. Do not run `as <task-slug> start` from an existing agent: it launches a nested Pi; `create` prepares only. Human operators may use `as <task-slug> start` to launch Pi directly in a new worktree.
+5. Keep edits on that worktree's `agent/` branch or a task-specific `feat/`, `fix/`, `docs/`, or `chore/` branch created there. Use absolute worktree paths for read/edit/write tools and explicit working directories for every command; a `cd` inside one tool call does not relocate future calls or the current Pi session.
+6. Creation requires a clean primary checkout on its upstream default branch. If blocked, report the problem and ask Hubert; do not switch the user's primary branch, move their changes, relax guards, or manually fabricate a managed session to get past the failure.
+7. Within the managed worktree, use `as . run <command> [args...]` for quiet devenv execution and `as . doctor --json` for local diagnostics. Use explicit `sh -c` for pipelines. `as . cd` changes a sourced parent shell only; the executable `agent-session . cd` prints the path. Commands in noninteractive tool calls must still use the intended worktree directory.
+8. Commit coherent verified changes with configured authorship and signing intact; never disable signing to work around a locked token. Push the task branch, open/update its PR, and report tests, commit, worktree and check state. Never merge PRs or deploy/activate automatically.
+9. Do not repair, force-clean, or remove other sessions without explicit user intent. After review/merge, offer a preview/finish command from another worktree rather than deleting the invoking worktree. Doctor findings are not permission to mutate resources; metadata repair does not repair local links.
+
+Only the explicitly configured ignored local settings are linked into new worktrees. Never copy credentials, private Pi histories, `.pi/npm/`, runtime state, or generated agent configuration. Pi-specific settings remain under `.pi/`; do not manage them through Claude/OpenCode configuration. Read-only questions do not require allocating a coding worktree. System activation still requires the explicit permission described below.
+
 ## Project Structure & Module Organization
 - `flake.nix`/`flake.lock`: Flake entry and inputs (nixos-unified autowiring).
 - `modules/`: Reusable modules

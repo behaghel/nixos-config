@@ -363,6 +363,29 @@ describe("agent-session create and start", () => {
 		}
 	});
 
+	it("adopts the local module with explicit Pi and ignored local configuration links", () => {
+		const devenv = readFileSync("devenv.nix", "utf8");
+		const ignore = readFileSync(".gitignore", "utf8").split("\n");
+		expect(devenv).toContain("imports = [ ./modules/flake/agent-session/devenv.nix ];");
+		expect(devenv).toContain('agentCommand = [ "pi" ];');
+		expect(devenv).toContain("localLinks = [");
+		for (const name of [".envrc.local", "devenv.local.nix", "devenv.local.yaml", ".workon-assistant"]) {
+			expect(devenv).toContain(`"${name}"`);
+			expect(ignore.some((pattern) => pattern === name || pattern === `/${name}`)).toBe(true);
+		}
+		expect(ignore.includes("/.worktrees/")).toBe(true);
+	});
+
+	it("gives future Pi sessions a repository-managed worktree contract without a custom extension", () => {
+		const instructions = readFileSync("AGENTS.md", "utf8");
+		expect(instructions).toContain("## Coding-agent sessions (Pi)");
+		expect(instructions).toContain("as <task-slug> create --json");
+		expect(instructions).toContain("as . status --json");
+		expect(instructions).toContain("Do not run `as <task-slug> start` from an existing agent");
+		expect(instructions).toContain("absolute worktree paths");
+		expect(instructions).toContain("do not switch the user's primary branch");
+	});
+
 	it("is packaged and configured by the shared devenv module", () => {
 		expect(existsSync(cliScript)).toBe(true);
 		const module = readFileSync("modules/flake/agent-session/devenv.nix", "utf8");

@@ -14,6 +14,47 @@ git config core.hooksPath githooks
 
 Use `nix flake check` to evaluate the defined system configurations and verify formatting.
 
+## Pi and managed worktrees
+
+This repository enables its local [agent-session module](modules/flake/agent-session/README.md)
+in `devenv.nix`, with `pi` as the agent and `.worktrees/` as the ignored workspace
+root. Enter `devenv shell` to make `as` and its shell integration available; no
+system activation is required. Pi must already be available on your PATH.
+
+Human operators can launch Pi in a new managed worktree:
+
+```sh
+devenv shell
+as my-task start
+```
+
+An existing Pi session must prepare without launching another agent:
+
+```sh
+devenv -q shell -- as my-task create --json
+```
+
+Use the returned `session.worktreePath` for all subsequent edits and command
+working directories. Existing managed tasks use `as . status --json`,
+`as . run <command>`, and `as . doctor --json` from their worktree, including nested
+directories. A shell `cd` does not move an already-running Pi process or change
+future tool-call directories. Pi automatically loads [AGENTS.md](AGENTS.md), which
+contains the coding-agent workflow; no custom Pi extension or generated
+Claude/OpenCode configuration is required.
+
+Creation requires the primary checkout to be clean and on its upstream default
+branch. A feature branch or someone else's dirty work is a blocker to report,
+not permission to switch their checkout or bypass the tool's guards. After
+merging this setup, use an updated checkout and a new Pi session (or reload its
+instructions) to pick up the workflow.
+
+Only existing `.envrc.local`, `devenv.local.nix`, `devenv.local.yaml`, and
+`.workon-assistant` are linked into newly created worktrees. They are ignored by
+Git; no contents are copied or committed. Existing worktrees are not changed.
+Doctor may identify missing links in older worktrees; metadata `repair` does not
+restore links, and existing files must never be overwritten blindly. Worktrees
+separate Git work, not operating-system permissions or credential access.
+
 ## Agent Skills
 
 - Repo-local agent skills live under `.agents/skills/`.
