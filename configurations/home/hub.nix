@@ -9,7 +9,6 @@ in
     self.homeModules.default
     self.homeModules.emacs
     self.homeModules.password-store
-    self.homeModules.dev
     self.homeModules.linux-only
   ];
 
@@ -17,8 +16,10 @@ in
     inherit (user) username fullname email;
   };
 
-  # Keep this headless-friendly: skip graphical extras from linux-only.
+  # Keep this headless-friendly. Use the nixpkgs devenv package here so
+  # evaluating this Linux host on macOS doesn't require a Linux IFD builder.
   hub.linux.graphicalTools.enable = false;
+  home.packages = [ pkgs.devenv ];
 
   programs.gpg.useNixGPG = true;
 
