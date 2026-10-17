@@ -19,6 +19,7 @@ let
     inherit pkgs lib;
     entries = cfg.keychainPassEntries;
     account = config.home.username;
+    stateFile = "${config.xdg.stateHome or (config.home.homeDirectory + "/.local/state")}/pass-keychain/mail.json";
   };
   credentialCommand =
     if isDarwin
@@ -97,9 +98,10 @@ in
     };
     keychainPassEntries = mkOption {
       description = ''
-        Exact password-store keys exported to identically named macOS Login
-        Keychain services during Home Manager activation. Password Store remains
-        authoritative; Linux reads it directly.
+        Exact password-store keys promoted to identically named macOS Login
+        Keychain services during Home Manager activation. Promotion decrypts
+        only on the initial verified run, changed ciphertext, or missing items.
+        Password Store remains authoritative; Linux reads it directly.
       '';
       type = types.listOf types.str;
       default = [ ];
