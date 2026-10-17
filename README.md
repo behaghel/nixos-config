@@ -16,9 +16,8 @@ Use `nix flake check` to evaluate the defined system configurations and verify f
 
 ## Agent Skills
 
-- Repo-local OpenCode skills live under `.agents/skills/`.
+- Repo-local agent skills live under `.agents/skills/`.
 - Use `npx skills ...` to add or update shared skills; Home Manager installs `nodejs`, which provides `npx`.
-- Keep OpenCode plugins and MCP configuration in `modules/home/opencode/`.
 - Reuse the existing global `devenv-project-workflow` skill for `devenv.nix` and `.envrc` work instead of copying it into `.agents/skills/`.
 
 ## Prerequisite: Install Nix

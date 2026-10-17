@@ -33,28 +33,8 @@ let
       cairo
       gobject-introspection
     ];
-  # Marketplace plugin bundle; strips agent frontmatter for OpenCode.
-  mp = import ./marketplace/lib.nix { inherit lib; };
-  marketplacePlugins = mp.select (builtins.attrNames mp.plugins);
 in
 {
-  # OpenCode: wire all marketplace plugins
-  opencode = {
-    enable = true;
-    skills = marketplacePlugins.skills;
-    commands = marketplacePlugins.commands;
-    agents = marketplacePlugins.agents;
-    mcp = {
-      devenv = {
-        type = "local";
-        command = [ "devenv" "mcp" ];
-        environment = {
-          DEVENV_TUI = "false";
-        };
-      };
-    };
-  };
-
   imports = [ ./modules/flake/agent-session/devenv.nix ];
   agentSession = {
     enable = true;

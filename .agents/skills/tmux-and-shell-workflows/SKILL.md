@@ -1,6 +1,6 @@
 ---
 name: tmux-and-shell-workflows
-description: Maintain this repository's tmux, workon, and OpenCode shell workflow safely. Use when editing tmux bindings, scrolling/copy-mode behavior, assistant launcher scripts, or session notification hooks.
+description: Maintain this repository's tmux, workon, and assistant shell workflow safely. Use when editing tmux bindings, scrolling/copy-mode behavior, assistant launcher scripts, or session notification hooks.
 ---
 
 # Tmux And Shell Workflows
@@ -25,7 +25,7 @@ Use this skill when changing `modules/home/tmux/` or the shell scripts that laun
 ## Repository Anchors
 
 - Scrollback uses tmux copy mode from `modules/home/tmux/default.nix`.
-- `workon` defaults to `opencode` and can wrap commands with `workon-assistant`.
+- `workon` defaults to `pi` and can wrap commands with `workon-assistant`.
 - Notification helpers are installed from the tmux module, not a separate shell module.
 
 ## Manual Verification
