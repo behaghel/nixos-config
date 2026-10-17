@@ -23,6 +23,11 @@ export function sessionCommand(slug: string, command: string): string {
 	return `agent-session ${commandNames.includes(slug) ? "-- " : ""}${slug} ${command}`;
 }
 
+export function unrecordedRetirementHint(slug: string): string {
+	const command = sessionCommand(slug, "finish");
+	return `Automatic repair cannot recover missing metadata on a renamed or detached branch. Keep the worktree intact unless retiring it. Preview with: ${command} --force --dry-run. If intended, run: ${command} --force. This discards uncommitted and ignored local files but will preserve all branches; verify ownership and active use first.`;
+}
+
 export function legacySessionSyntax(command: string): CliError {
 	return argumentError(`Session commands use <task-slug> <command>. Use: agent-session <task-slug> ${command}. Command-word slugs require: agent-session -- <task-slug> <command>.`);
 }

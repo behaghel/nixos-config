@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
+import { unrecordedRetirementHint } from "./arguments.ts";
 import { dirname, join } from "node:path";
 import {
 	git,
@@ -18,6 +19,8 @@ import {
 	sessionDirectory,
 	withOperationLock,
 	metadataPath,
+	sessionRecordExists,
+	unrecordedWorktree,
 	discoverManagedWorktrees,
 	writeMetadata,
 	resolveWorktreeRoot,
@@ -158,12 +161,13 @@ function repairUnlocked(root: string, slug: string): void {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
 	const config = loadConfig(root);
-	if (existsSync(metadataPath(root, slug))) {
+	if (sessionRecordExists(root, slug)) {
 		throw new CliError(`Session metadata already exists: ${slug}`);
 	}
 	const worktree = discoverManagedWorktrees(root, config).get(slug);
 	if (!worktree) {
-		throw new CliError(`No unrecorded managed worktree: ${slug}`);
+		unrecordedWorktree(root, slug); // Establish a real local target before suggesting retirement.
+		throw new CliError(unrecordedRetirementHint(slug));
 	}
 	const primaryBranch = git(root, ["branch", "--show-current"]);
 	if (!primaryBranch) {
