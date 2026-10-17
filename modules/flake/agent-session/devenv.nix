@@ -13,6 +13,10 @@ let
     name = "agent-session";
     runtimeInputs = [ pkgs.nodejs_24 pkgs.git ];
     text = ''
+      if [ "''${0##*/}" = as ] && [ "''${1-}" = cd ]; then
+        printf '%s\n' "as cd requires shell integration; source \"\$AGENT_SESSION_SHELL_ROOT/init.sh\" in Bash/Zsh or init.fish in Fish." >&2
+        exit 64
+      fi
       export AGENT_SESSION_CONFIG=${runtimeConfig}
       exec ${lib.getExe pkgs.nodejs_24} ${./cli.ts} "$@"
     '';
@@ -29,7 +33,12 @@ let
       "$out/share/bash-completion/completions" \
       "$out/share/zsh/site-functions" \
       "$out/share/fish/vendor_completions.d" \
+      "$out/share/fish/vendor_conf.d" \
+      "$out/share/agent-session" \
       "$out/nix-support"
+    cp ${./shell-integration.sh} "$out/share/agent-session/init.sh"
+    cp ${./shell-integration.fish} "$out/share/agent-session/init.fish"
+    cp ${./shell-integration.fish} "$out/share/fish/vendor_conf.d/agent-session.fish"
     agent-session completion bash > "$out/share/bash-completion/completions/agent-session"
     ln -s agent-session "$out/share/bash-completion/completions/as"
     agent-session completion zsh > "$out/share/zsh/site-functions/_agent_session"
@@ -41,6 +50,7 @@ let
     # the running shell's fpath and hide completions installed before entry.
     if test -n "\$BASH_VERSION" && type complete >/dev/null 2>&1; then
       . "$out/share/bash-completion/completions/agent-session"
+      . "$out/share/agent-session/init.sh"
     fi
     EOF
   '';
@@ -100,5 +110,9 @@ in
     env.DIRENV_ZSH_COMPLETION_DIRS = lib.mkDefault "${completionPackage}/share/zsh/site-functions";
     env.AGENT_SESSION_COMPLETION_ROOT = "${completionPackage}/share";
     env.AGENT_SESSION_CONFIG = runtimeConfig;
+    env.AGENT_SESSION_SHELL_ROOT = "${completionPackage}/share/agent-session";
+    enterShell = ''
+      source ${./shell-integration.sh}
+    '';
   };
 }

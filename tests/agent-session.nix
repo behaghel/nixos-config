@@ -9,6 +9,7 @@ let
           packages = lib.mkOption { type = lib.types.listOf lib.types.package; default = [ ]; };
           env = lib.mkOption { type = lib.types.attrsOf lib.types.anything; default = { }; };
           assertions = lib.mkOption { type = lib.types.listOf lib.types.anything; default = [ ]; };
+          enterShell = lib.mkOption { type = lib.types.lines; default = ""; };
         };
         config.agentSession.enable = true;
       }
@@ -20,7 +21,7 @@ assert builtins.all (item: item.assertion) cfg.assertions;
 pkgs.runCommand "agent-session-tests"
 {
   nativeBuildInputs = cfg.packages ++ [ pkgs.bun pkgs.nodejs_24 pkgs.git pkgs.bash pkgs.zsh pkgs.fish pkgs.nix ];
-  inherit (cfg.env) AGENT_SESSION_CONFIG AGENT_SESSION_COMPLETION_ROOT;
+  inherit (cfg.env) AGENT_SESSION_CONFIG AGENT_SESSION_COMPLETION_ROOT AGENT_SESSION_SHELL_ROOT;
 }
   ''
     export HOME=$(mktemp -d)

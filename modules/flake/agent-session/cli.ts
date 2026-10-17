@@ -15,6 +15,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
+import { constants } from "node:os";
 
 interface AgentSessionConfig {
 	version: number;
@@ -943,6 +944,40 @@ function launch(
 	return launchAgent(prepared.config, prepared.metadata, additionalArguments);
 }
 
+// Navigation and ad-hoc commands inspect only local Git evidence. Unlike launch,
+// they neither fetch nor require the primary checkout or session to be clean.
+function sessionDirectory(root: string, slug: string): string {
+	validateSlug(slug);
+	const config = loadConfig(root);
+	const metadata = readMetadata(root, slug);
+	assertConfiguredWorktreePath(root, config, metadata);
+	if (!existsSync(metadata.worktreePath)) {
+		throw new CliError(`Managed worktree is missing for session ${slug}.`);
+	}
+	const path = realpathSync(metadata.worktreePath);
+	if (
+		path !== metadata.worktreePath ||
+		!worktreeIsRegistered(root, path) ||
+		repositoryRoot(path) !== path ||
+		commonGitDirectory(path) !== commonGitDirectory(root)
+	) {
+		throw new CliError(`Managed worktree is invalid for session ${slug}.`);
+	}
+	return path;
+}
+
+function runInSession(root: string, slug: string, command: string[]): number {
+	const cwd = sessionDirectory(root, slug);
+	const result = spawnSync("devenv", ["-q", "shell", "--", ...command], {
+		cwd,
+		stdio: "inherit",
+	});
+	if (result.error) {
+		throw new CliError(`Cannot run devenv: ${result.error.message}`);
+	}
+	return result.status ?? (result.signal ? 128 + constants.signals[result.signal] : 1);
+}
+
 function assertNotInvokingWorktree(
 	metadata: SessionMetadata,
 	invocationRoot: string,
@@ -1707,6 +1742,8 @@ function start(
 }
 
 const commandNames = [
+	"cd",
+	"run",
 	"create",
 	"launch",
 	"start",
@@ -1920,7 +1957,7 @@ function completionCandidates(command: string): string[] {
 				.filter((slug) => !recorded.has(slug))
 				.sort();
 		}
-		if (["launch", "resume", "status", "finish"].includes(command)) {
+		if (["cd", "run", "launch", "resume", "status", "finish"].includes(command)) {
 			return metadataSlugs(root);
 		}
 	} catch {
@@ -1940,6 +1977,18 @@ _agent_session() {
     return
   fi
   command="\${COMP_WORDS[1]}"
+  if [[ $command == run && $COMP_CWORD -ge 3 ]]; then
+    if [[ $COMP_CWORD -eq 3 ]]; then
+      COMPREPLY=( $(compgen -c -- "$current") )
+    else
+      COMPREPLY=( $(compgen -f -- "$current") )
+    fi
+    return
+  fi
+  if [[ $command == cd && $COMP_CWORD -gt 2 ]]; then
+    COMPREPLY=()
+    return
+  fi
   case "$command" in
     create) options="--dry-run --json" ;;
     start) options="--no-agent" ;;
@@ -1962,7 +2011,23 @@ if (( CURRENT == 2 )); then
   _describe 'command' commands
   return
 fi
+if [[ $words[2] == run ]] && (( CURRENT >= 4 )); then
+  local -a run_words
+  local run_current=$(( CURRENT - 3 ))
+  run_words=("\${(@)words[4,-1]}")
+  local -a words
+  local CURRENT=$run_current
+  words=("$run_words[@]")
+  _normal
+  return
+fi
 candidates=(\${(f)"$(agent-session __complete "$words[2]" 2>/dev/null)"})
+if [[ $words[2] == cd || $words[2] == run ]]; then
+  if (( CURRENT == 3 )); then
+    _describe 'session' candidates
+  fi
+  return
+fi
 _arguments '*:session:($candidates)' \\
   '--dry-run[preview without mutation]' '--json[emit JSON]' \\
   '--refresh[refresh remote refs]' '--no-agent[do not launch the agent]' \\
@@ -1980,6 +2045,8 @@ end
 complete -c agent-session -f
 complete -c agent-session -n '__fish_use_subcommand' -a '${commandNames.join(" ")}'
 complete -c agent-session -n '__fish_seen_subcommand_from launch resume status repair finish' -a '(__agent_session_sessions)'
+complete -c agent-session -n '__fish_seen_subcommand_from cd run; and test (count (commandline -opc)) -eq 2' -a '(__agent_session_sessions)'
+complete -c agent-session -n '__fish_seen_subcommand_from run; and test (count (commandline -opc)) -ge 3' -a '(__fish_complete_subcommand --fcs-skip=3)'
 complete -c agent-session -n '__fish_seen_subcommand_from create finish' -l dry-run
 complete -c agent-session -n '__fish_seen_subcommand_from create status finish' -l json
 complete -c agent-session -n '__fish_seen_subcommand_from finish' -l all
@@ -1997,6 +2064,9 @@ complete -c agent-session -n '__fish_seen_subcommand_from finish' -l yes
 function usage(): string {
 	return [
 		"Usage:",
+		"  as cd <task-slug> (shell integration required)",
+		"  agent-session cd <task-slug> (print the worktree path)",
+		"  agent-session run <task-slug> <command> [args...]",
 		"  agent-session create <task-slug> [--dry-run [--json]]",
 		"  agent-session launch <task-slug>",
 		"  agent-session start <task-slug> [--no-agent]",
@@ -2012,6 +2082,17 @@ function usage(): string {
 export function main(args: string[]): number {
 	try {
 		const [command, ...rest] = args;
+		if (command === "cd") {
+			const slug = parseRequiredSlug(command, rest);
+			process.stdout.write(`${sessionDirectory(primaryRoot(repositoryRoot()), slug)}\n`);
+			return 0;
+		}
+		if (command === "run") {
+			const slug = parseRequiredSlug(command, rest.slice(0, 1));
+			const target = rest.slice(1);
+			if (!target[0]) throw argumentError("Missing <command> for 'run'.");
+			return runInSession(primaryRoot(repositoryRoot()), slug, target);
+		}
 		if (command === "create") {
 			const options = parseCreateArguments(rest);
 			return create(
