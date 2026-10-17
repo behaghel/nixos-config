@@ -1,6 +1,6 @@
 ---
 name: spec-collector
-description: "Collect domain-first specifications, irreducible system requirements, or temporary iteration specs without mixing their concerns. Use when creating a spec, defining requirements or acceptance criteria, planning a feature, or asking what a spec should contain."
+description: "Collect and revalidate requirements separately from design choices and delivery plans. Use when creating a spec, planning work, touching an area with unclear inherited requirements, or when implementation experience or user feedback challenges a spec."
 ---
 
 # Spec-Driven Development
@@ -26,12 +26,35 @@ Start from the smallest credible design that delivers the outcome using existing
 
 During collection, distinguish the human's requested outcomes and constraints from architectural choices the implementation introduced. Present the simple baseline first; add complexity only when a specific counterexample or measured need shows why the baseline is insufficient and why a simpler alternative cannot satisfy it. Document material *subsequent* decisions that amend or complexify that baseline in an Architecture Decision Record (ADR): context/evidence, the earlier baseline, the change and rejected simpler alternatives, consequences, and the conditions for revisiting or removing it. Link the ADR from the relevant spec instead of embedding decision history in normative domain/system pages. Use an existing project ADR convention; if none exists, agree on a location rather than inventing a framework. Routine edits do not need ADRs.
 
+## Requirements, design choices, and delivery plans
+
+| Kind | Question | Example | Home |
+|------|----------|---------|------|
+| Requirement | What outcome or constraint must hold, and why? | Two workers cannot implement the same issue concurrently. | Owning domain spec; system spec only when no domain can own it |
+| Design choice | How does the implementation meet that requirement? | Use an atomic database claim. | Code; an ADR when a significant choice needs explanation |
+| Delivery plan | How do we deliver this change? | Replace the reservation workflow in two steps. | Issue or temporary iteration spec |
+
+A real technical contract can be a requirement: a consumer may depend on a protocol, schema, or exact identity guarantee. Do not remove it merely because it is technical. Ask who depends on it and what would break if it changed. Conversely, an existing implementation, passing test, or normative “must” does not establish that the human requested that mechanism.
+
+## Revalidate requirements as you go
+
+When collecting a spec or changing an area, read the relevant requirements and compare them with the current request and what implementation has taught us. Use ordinary engineering language. Distinguish supported requirements from inherited design choices and unresolved assumptions; investigate available code and discussions before asking the user. Missing historical rationale is a question, not evidence that a guarantee is unnecessary.
+
+Backfill only what affects the work at hand. Do not require a repository-wide audit, new tracking document, or fixed interview schedule. Revisit requirements when implementation exposes a contradiction, repeated workarounds, unused behavior, or complexity whose purpose is unclear—not only during the first implementation.
+
+Start a short `grill-me` session when an inherited requirement forces substantial complexity, evidence challenges its need, current user intent conflicts with it, or removing machinery could remove an important guarantee. Read the skill when available; otherwise follow its method: ask one question at a time, explain the consequence, and recommend an answer with reasons. Answer codebase questions through investigation, not by asking the user. Stop interviewing when the material uncertainty is resolved; routine edits need no interview.
+
+For example: “The spec requires an announcement and ten-minute wait. I found no reason beyond the existing workflow. I recommend removing both while preserving duplicate-work protection. Do you need a chance to intervene before work starts?”
+
+Do not treat silence as approval or rewrite uncertain intent as an agreed requirement. State the open assumption and pause work that depends on it; independent work can continue. After agreement, update the owning spec in present-tense plain language, retain the discussion/approval in the issue or existing project discussion, and link significant design decisions to ADRs. A clarified requirement does not automatically need an ADR. Keep tests for the agreed behavior; replace or remove tests that encode only a rejected mechanism. Do not add interview history or “unconfirmed requirement” metadata to the normative corpus.
+
 ## When to Collect a Spec
 
 - Before writing any code for a new feature, fix, or refactor
 - When an AI agent will implement the work
 - When multiple people need to agree on what "done" means
 - When the blast radius of a change is unclear
+- When current user intent or implementation evidence calls an inherited requirement into question
 
 ## Choose the mode
 
@@ -141,5 +164,6 @@ Before including any line:
 Before finalizing:
 
 - **"Does every acceptance criterion have a verification method?"** → If not, add one.
-- **"Could an AI agent implement from this spec alone?"** → If not, what's missing?
+- **"Can an implementor distinguish agreed requirements, design choices, and open assumptions?"** → If not, clarify; do not invent more requirements.
+- **"Could an AI agent implement from this spec and its linked contracts?"** → If not, what's missing?
 - **"Is the scope explicit enough to prevent unintended changes?"** → If not, tighten it.

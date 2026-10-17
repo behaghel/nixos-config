@@ -9,6 +9,19 @@ description: "Audit domain, system, iteration, and standalone development specs 
 
 Verify a specification against the rules of its corpus. Catching gaps here prevents both incorrect implementation and pollution of durable domain knowledge.
 
+## Requirements before completeness
+
+Use these checks in every mode, including when reviewing an existing spec during implementation:
+
+- Separate required outcomes and constraints from implementation choices and delivery plans. An existing “must,” mechanism, or passing test does not prove the human required that design.
+- For a disputed requirement, investigate its reason, source, and consumers. A technical protocol or schema can be a genuine requirement; missing history is not permission to remove a safety guarantee.
+- Ask whether a simpler design satisfies the requirement. Require concrete evidence or an actual domain/authority contract for added machinery; do not demand new workflow stages for hypothetical edge cases.
+- Identify material assumptions that conflict with user feedback or implementation evidence. Recommend a focused `grill-me` session using the collector's guidance: one question and recommendation at a time, not an interview for every edit. Silence is not approval.
+- Check that agreed changes reach the owning spec in plain language. Significant design choices belong in code/linked ADRs, delivery plans in issues or iteration specs, and discussion history outside normative pages. Do not require new documents or a repository-wide backfill.
+- Preserve tests for required behavior, not tests whose only purpose is to enforce a rejected mechanism.
+
+Report only uncertainties relevant to the current work. An unresolved requirement makes dependent work not ready; it need not block unrelated work or trigger rewriting untouched specs. Do not call a spec ready merely because its sections are complete while disputed requirements are presented as agreed facts.
+
 ## Classify before verifying
 
 When `domains.yaml` exists:
@@ -101,6 +114,7 @@ State the detected mode first, then report only dimensions appropriate to that m
 ### Completeness: [section gaps]
 ### Criteria Quality: [issues per criterion]
 ### Scope Clarity: [scope issues]
+### Requirements and Design: [inherited machinery, disputed requirements, or material assumptions]
 ### Decision Coverage: [missing decisions]
 ### Verification Coverage: [unmapped criteria]
 

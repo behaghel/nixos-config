@@ -2,6 +2,8 @@
 
 The 6-phase framework for collecting spec information. Each phase produces specific outputs that feed into the final spec.
 
+For an existing area, first follow the collector's “Revalidate requirements as you go” guidance: investigate disputed requirements, ask focused questions only when the answer affects the design, and update affected specs after agreement. These phases do not require a full recollection or repository-wide cleanup on every change.
+
 ## Phase 1: Problem Space
 
 **Goal:** Understand why this work needs to exist.
@@ -13,6 +15,7 @@ The 6-phase framework for collecting spec information. Each phase produces speci
 - What happens if we don't solve this?
 - What are the hard constraints? (deadline, backward compatibility, regulatory, performance)
 - Is there an existing issue, ticket, or discussion that captures context?
+- Has implementation or use changed what is needed? Which stated constraints came from the human, consumers, or the current design?
 
 **Output:** Problem section of the spec.
 
@@ -67,7 +70,7 @@ When later evidence warrants a material amendment or more complex design, record
 - Integration: How to connect with existing systems
 - Migration: How to get from current state to desired state
 
-**Output:** Decisions table in the spec.
+**Output:** Decisions table in the iteration/standalone spec, separate from the requirements. Keep agreed durable behavior in the owning domain or system spec; keep discussion history in the issue or existing project discussion.
 
 **Distinguish decisions from assumptions:**
 

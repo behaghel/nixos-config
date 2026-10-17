@@ -10,6 +10,12 @@ This plugin helps you collect the right information, structure it into the corre
 
 When `domains.yaml` exists, domain specifications are the default. Temporary acceptance and verification work becomes a non-normative iteration spec; only durable requirements irreducible to one domain become RFC 2119 system specs. This keeps delivery concerns out of the domain wiki.
 
+## Requirements are not the implementation
+
+Domain specs describe required outcomes and contracts, not every mechanism currently used to provide them. For example, “do not implement one issue twice concurrently” is a requirement; “use an atomic database claim” is a design choice; “replace reservations in two steps” is a delivery plan. Genuine technical contracts still belong in specs when consumers depend on them.
+
+When an area is touched, revisit requirements that conflict with current user intent or implementation evidence. Investigate first, then start a short `grill-me` interview if the answer affects the design: one question at a time, with a recommendation. Routine edits do not need an interview, and silence is not approval. Update affected requirements after agreement instead of requiring a repository-wide backfill. Keep discussion in the issue, important design decisions in code/ADRs, and delivery plans in issues or iteration specs. Collector, verifier, and challenger use this distinction.
+
 ## What's Included
 
 ### Skills

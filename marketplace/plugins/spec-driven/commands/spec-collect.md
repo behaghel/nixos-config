@@ -6,7 +6,7 @@ allowed-tools: [Read, Glob, Grep, Bash]
 
 # Collect Spec
 
-Collects the appropriate specification without mixing durable domain knowledge and temporary delivery concerns.
+Collects or revalidates requirements without mixing them with implementation choices or temporary delivery plans.
 
 ## Instructions
 
@@ -18,6 +18,8 @@ When this command is invoked:
 4. Use system mode only for durable RFC 2119 requirements that subsidiarity cannot assign to one domain.
 5. Honor an explicit `--mode domain|iteration|system` request.
 6. Start from the simplest credible design using existing capabilities. Distinguish the human's requested outcomes from inherited implementation choices; require concrete evidence or an authority boundary before adding machinery. Material later decisions to amend or complexify the baseline belong in linked ADRs, not normative decision history.
+
+Before editing requirements, follow the spec-collector skill's “Revalidate requirements as you go” guidance. Read the relevant specs, code, and available discussions; distinguish required behavior from inherited machinery. If the answer materially changes the design, initiate a short `grill-me` session: one recommendation-backed question at a time. Do not interview for routine edits, infer approval from silence, or require a repository-wide backfill. Update only the affected requirements after agreement; keep discussion history outside normative specs.
 
 For domain mode, update the normative domain corpus with present-tense responsibilities, boundaries, ubiquitous language, behavior, invariants, and contracts. Exclude problem history, project management, implementation sequencing, rollout, migration, progress, legacy comparisons, temporary workarounds, and verification plans.
 
@@ -40,12 +42,12 @@ For iteration mode, or when no domain manifest exists, use the following six-pha
 1. Based on the problem description, search the codebase:
    - Find files and modules related to the described feature area
    - Identify existing patterns and conventions
-   - Find existing tests that act as implicit specs
+   - Find tests for required behavior and tests that merely encode the current design
    - Map interaction points with other systems
 2. Present findings to the user:
    - "I found [relevant files/patterns]. Here's what the codebase tells me..."
-   - "Should we follow the existing [pattern X]?"
-   - "These tests in [path] seem related — should they continue passing as-is?"
+   - "What guarantee does [pattern X] provide, and could something simpler provide it?"
+   - "These tests cover [behavior]. Which behavior matters, and which tests only encode the old mechanism?"
 3. Draft the Context section
 
 ### Phase 3: Decision Points
@@ -80,7 +82,7 @@ For iteration mode, or when no domain manifest exists, use the following six-pha
    - **May modify:** files identified in Phase 2
    - **Must not modify:** sensitive areas (schemas, public APIs, CI)
 2. Propose invariants:
-   - Existing test suites that must pass
+   - Required behavior and the tests that protect it, not every old implementation detail
    - API contracts that must hold
    - Performance baselines
 3. Ask user to confirm or tighten

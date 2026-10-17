@@ -1,8 +1,20 @@
 # Verification Checklist
 
-Detailed checklist for temporary iteration and conventional standalone development specs. Work through each section in order.
+Start with the requirements/design checks in every mode. The delivery sections below apply only to temporary iteration and conventional standalone development specs.
 
-Do not apply this delivery checklist to normative domain or system specs. For those, use the corpus-specific durability, subsidiarity, DRY, frontmatter, wiki-link, RFC 2119, and timelessness checks in the parent skill.
+For normative domain or system specs, also use the corpus-specific durability, subsidiarity, DRY, frontmatter, wiki-link, RFC 2119, and timelessness checks in the parent skill; do not demand delivery sections.
+
+## Requirements and design (all modes)
+
+- [ ] Required behavior is distinguished from today's mechanism and the delivery plan
+- [ ] Disputed requirements have been investigated rather than inferred from code or tests
+- [ ] Real consumer, security, and authority contracts remain protected, including technical contracts
+- [ ] Material conflicts with current user intent or implementation evidence are resolved or explicitly left open outside the normative corpus
+- [ ] Open questions that affect the design prompt a short, recommendation-backed interview; silence is not recorded as agreement
+- [ ] Changes are limited to the requirements needed for this work; no repository-wide cleanup is required
+- [ ] Significant design decisions link to ADRs where useful; requirement clarification alone does not demand one
+
+The remaining sections apply only to iteration and standalone specs.
 
 ## Problem Statement
 
@@ -15,7 +27,7 @@ Do not apply this delivery checklist to normative domain or system specs. For th
 
 - [ ] Relevant existing code is identified (files, modules, patterns)
 - [ ] Interaction points with other systems are mapped
-- [ ] Existing tests that serve as implicit specs are referenced
+- [ ] Relevant tests are referenced without treating every implementation assertion as a requirement
 - [ ] The agent could navigate to the right files from this section alone
 
 ## Decisions
@@ -53,7 +65,7 @@ Coverage gaps to probe:
 
 ## Invariants
 
-- [ ] Existing test suites that must continue passing are named
+- [ ] Tests protecting required behavior are named; tests of rejected mechanisms can be replaced or removed
 - [ ] Public API contracts are protected (response shapes, status codes)
 - [ ] Performance baselines are stated if relevant
 - [ ] Security invariants are explicit (no new exposed endpoints, no credential changes)
@@ -88,8 +100,8 @@ Coverage check:
 
 Answer these three questions:
 
-1. **"Could an AI agent implement this spec correctly without asking follow-up questions?"**
-   → If no, what's missing?
+1. **"Are the requirements needed for this work agreed and clear, with open assumptions identified?"**
+   → If no, investigate or ask a focused question; do not invent constraints to fill the gap.
 
 2. **"Would I be confident in the result without reading the generated code?"**
    → If no, which criteria or invariants need strengthening?
