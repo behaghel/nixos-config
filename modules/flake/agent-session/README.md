@@ -123,6 +123,28 @@ agent-session completion fish | source
 For manual Zsh setup, save `agent-session completion zsh` output as
 `_agent_session` in a directory on `fpath`, then rerun `compinit`.
 
+## Implementation layout
+
+`cli.ts` remains the executable entrypoint for packaged and source-based consumers.
+It dispatches to modules with explicit imports and no initialization side effects:
+
+| Module | Responsibility |
+|--------|----------------|
+| `arguments.ts` | Argument parsing, command names, help, and diagnostics |
+| `completion.ts` | Dynamic candidates and Bash/Zsh/Fish completion scripts |
+| `sessions.ts` | Configuration, session records, locks, discovery, and path validation |
+| `git.ts` | Git execution, repository roots, refs, and worktree registration |
+| `inspection.ts` | Local session state, branch ownership, and status reporting |
+| `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
+| `finish.ts` | Cleanup previews, receipts, confirmations, and guarded removal |
+| `runtime.ts` | Shared command errors, subprocess execution, and progress output |
+| `types.ts` | Shared configuration, metadata, and status types |
+
+The Nix wrapper packages this source directory as a unit so Node can resolve the
+relative TypeScript imports in the Nix store. No bundler or npm dependencies are
+required. The module dependency graph is acyclic; shared records and Git primitives
+do not import command dispatch or lifecycle operations.
+
 ## Runtime and verification
 
 The command uses Nix-provided Node.js 24's native TypeScript support and Git.

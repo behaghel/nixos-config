@@ -221,6 +221,40 @@ function mergeSessionAndDeleteRemoteBranch(
 }
 
 describe("agent-session create and start", () => {
+	it("creates, inspects and receipt-finishes sessions through the installed package outside the source checkout", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const installed = (command: string, args: string[]) => spawnSync(command, args, {
+				cwd: fixture.checkout,
+				encoding: "utf8",
+			});
+			const created = installed("as", ["create", "installed-package"]);
+			expect(created.status).toBe(0);
+			const worktree = join(realpathSync(fixture.worktrees), "installed-package");
+			const status = installed("as", ["status", "installed-package", "--json"]);
+			expect(status.status).toBe(0);
+			const catalog = JSON.parse(status.stdout);
+			expect(catalog.sessions.length).toBe(1);
+			expect(catalog.sessions[0].worktreePath).toBe(worktree);
+			const path = installed("agent-session", ["cd", "installed-package"]);
+			expect(path.status).toBe(0);
+			expect(path.stdout).toBe(`${worktree}\n`);
+			const candidates = installed("as", ["__complete", "finish"]);
+			expect(candidates.status).toBe(0);
+			expect(candidates.stdout).toBe("installed-package\n");
+			const preview = installed("as", ["finish", "installed-package", "--keep-branch", "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const receipt = JSON.parse(preview.stdout).plan.receipt;
+			expect(receipt.length).toBe(64);
+			const finished = installed("as", ["finish", "installed-package", "--keep-branch", "--yes", "--expected", receipt]);
+			expect(finished.status).toBe(0);
+			expect(existsSync(worktree)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/installed-package")).toBe("agent/installed-package");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
 	it("is packaged and configured by the shared devenv module", () => {
 		expect(existsSync(cliScript)).toBe(true);
 		const module = readFileSync("modules/flake/agent-session/devenv.nix", "utf8");

@@ -18,7 +18,7 @@ let
         exit 64
       fi
       export AGENT_SESSION_CONFIG=${runtimeConfig}
-      exec ${lib.getExe pkgs.nodejs_24} ${./cli.ts} "$@"
+      exec ${lib.getExe pkgs.nodejs_24} ${./.}/cli.ts "$@"
     '';
   };
   aliasPackage = pkgs.runCommand "agent-session-as-alias" { } ''
