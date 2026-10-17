@@ -45,7 +45,10 @@
     };
 
     # Enables 'nix run' to activate.
-    packages.default = self'.packages.activate;
+    packages = {
+      default = self'.packages.activate;
+      pass-keychain = import ../home/pass-keychain { inherit pkgs; };
+    };
 
     checks.agent-session = import ../../tests/agent-session.nix { inherit pkgs lib; };
     checks.gpg-module = import ../../tests/gpg-module.nix { inherit pkgs lib inputs; };

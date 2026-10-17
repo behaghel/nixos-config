@@ -8,7 +8,7 @@ system=$(nix eval --impure --raw --expr 'builtins.currentSystem')
 
 auto_expr=$(cat <<EOF
 let
-  flake = builtins.getFlake (toString ./.);
+  flake = builtins.getFlake ("git+file://" + toString ./.);
   pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
 in import ./modules/home/mail/autocorrect-script.nix {
   inherit pkgs;
@@ -21,7 +21,7 @@ export MAIL_SYNC_AUTOCORRECT_BIN="$autopath/bin/mail-sync-autocorrect"
 
 run_expr=$(cat <<EOF
 let
-  flake = builtins.getFlake (toString ./.);
+  flake = builtins.getFlake ("git+file://" + toString ./.);
   pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
   dummyConfig = {
     programs.gpg = {
@@ -47,12 +47,13 @@ export MAIL_SYNC_RUN_BIN="$runpath/bin/mail-sync-run"
 
 keychain_expr=$(cat <<EOF
 let
-  flake = builtins.getFlake (toString ./.);
+  flake = builtins.getFlake ("git+file://" + toString ./.);
   pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
   artefacts = import ./modules/home/mail/keychain.nix {
     inherit pkgs;
     lib = pkgs.lib;
     account = "test-user";
+    stateFile = "/tmp/pass-keychain-tests/state.json";
     entries = [
       "veriff/mail/client-id"
       "veriff/mail/refresh-token"
@@ -66,5 +67,10 @@ reader_path=$(nix build --no-link --print-out-paths --impure --expr "($keychain_
 sync_path=$(nix build --no-link --print-out-paths --impure --expr "($keychain_expr).sync")
 export MAIL_KEYCHAIN_READER_BIN="$reader_path/bin/mail-keychain-pass"
 export MAIL_KEYCHAIN_SYNC_BIN="$sync_path/bin/mail-keychain-pass-sync"
+export PASS_KEYCHAIN_BIN="$(nix build --no-link --print-out-paths --impure --expr "
+  let flake = builtins.getFlake ("git+file://" + toString ./.);
+  in import ./modules/home/pass-keychain {
+    pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
+  }")/bin/pass-keychain"
 
 exec bats "$@" tests/mail-sync-autocorrect.bats tests/mail-keychain.bats

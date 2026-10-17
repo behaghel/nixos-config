@@ -50,6 +50,9 @@ in
 
   hub.pi = {
     enable = true;
+    # Keep the existing macOS install; update it explicitly with `pi update`.
+    # Linux still provisions Pi on hosts without that installation.
+    npm.enable = isLinux;
     local.enable = true;
     ds4.enable = true;
   };
