@@ -43,14 +43,14 @@ function git(cwd: string, ...args: string[]): string {
 	return result.stdout.trim();
 }
 
-function createRepositoryFixture(): {
+function createRepositoryFixture(prefix = "agent-session-"): {
 	root: string;
 	remote: string;
 	seed: string;
 	checkout: string;
 	worktrees: string;
 } {
-	const root = mkdtempSync(join(tmpdir(), "agent-session-"));
+	const root = mkdtempSync(join(tmpdir(), prefix));
 	const remote = join(root, "remote.git");
 	const seed = join(root, "seed");
 	const checkout = join(root, "checkout");
@@ -119,6 +119,22 @@ function runCli(cwd: string, args: string[], env: Record<string, string> = {}) {
 			...env,
 		},
 	});
+}
+
+function installedShellIntegration(shell: string): string {
+	const root = process.env.AGENT_SESSION_SHELL_ROOT;
+	if (!root) throw new Error("Run shell integration tests through devenv.");
+	return join(root, shell === "fish" ? "init.fish" : "init.sh");
+}
+
+function installFixtureCLI(fixture: ReturnType<typeof createRepositoryFixture>): string {
+	const bin = join(fixture.root, "bin");
+	mkdirSync(bin);
+	writeFileSync(join(bin, "agent-session"), `#!/usr/bin/env bash\nexec node ${tomlString(cliScript)} "$@"\n`);
+	chmodSync(join(bin, "agent-session"), 0o755);
+	writeFileSync(join(bin, "as"), `#!/usr/bin/env bash\nexec agent-session "$@"\n`);
+	chmodSync(join(bin, "as"), 0o755);
+	return bin;
 }
 
 function createFakeAgent(root: string, logPath: string): string {
@@ -486,6 +502,228 @@ describe("agent-session create and start", () => {
 
 			expect(result.status).toBe(1);
 			expect(result.stderr).toContain("must be Git-ignored");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+});
+
+describe("agent-session cd and run", () => {
+	it("resolves an existing worktree offline from any checkout without requiring clean work", () => {
+		const fixture = createRepositoryFixture("agent session ");
+		try {
+			const { worktree, agentLog } = startManagedSession(fixture);
+			writeFileSync(join(fixture.checkout, "unfinished"), "primary work");
+			writeFileSync(join(worktree, "unfinished"), "session work");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			for (const cwd of [fixture.checkout, worktree]) {
+				const result = runCli(cwd, ["cd", "git-hygiene"]);
+				expect(result.status).toBe(0);
+				expect(result.stdout).toBe(`${worktree}\n`);
+				expect(result.stderr).toBe("");
+			}
+			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(1);
+			expect(readFileSync(join(worktree, "unfinished"), "utf8")).toBe("session work");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses missing, orphaned, unregistered, and redirected sessions", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			expect(runCli(fixture.checkout, ["cd", "unknown"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["cd", "../escape"]).status).toBe(64);
+			const metadataFile = sessionMetadataPath(fixture.checkout, "git-hygiene");
+			const original = readFileSync(metadataFile, "utf8");
+			writeFileSync(metadataFile, JSON.stringify({ ...JSON.parse(original), worktreePath: fixture.seed }));
+			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			writeFileSync(metadataFile, original);
+			// A nested directory is not the registered worktree, even in the same repository.
+			const child = join(worktree, "child");
+			mkdirSync(child);
+			writeFileSync(metadataFile, JSON.stringify({ ...JSON.parse(original), worktreePath: child }));
+			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			writeFileSync(metadataFile, original);
+			git(fixture.checkout, "worktree", "remove", "--force", worktree);
+			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			mkdirSync(worktree);
+			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("runs one command through quiet devenv with exact arguments, output and exit status", () => {
+		const fixture = createRepositoryFixture("agent session ");
+		try {
+			const { worktree } = startManagedSession(fixture);
+			writeFileSync(join(fixture.checkout, "unfinished"), "primary work");
+			writeFileSync(join(worktree, "unfinished"), "session work");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			const bin = join(fixture.root, "bin");
+			mkdirSync(bin);
+			writeFileSync(join(bin, "devenv"), `#!/usr/bin/env node
+import { spawnSync } from 'node:child_process';
+import { writeFileSync } from 'node:fs';
+writeFileSync(process.env.DEVENV_LOG, JSON.stringify({ cwd: process.cwd(), args: process.argv.slice(2) }));
+const result = spawnSync(process.argv[5], process.argv.slice(6), { stdio: 'inherit' });
+process.exit(result.status ?? 1);
+`);
+			chmodSync(join(bin, "devenv"), 0o755);
+			const log = join(fixture.root, "devenv.json");
+			const command = ["node", "-e", "process.stdout.write(JSON.stringify(process.argv.slice(1))); process.stderr.write('command stderr\\n'); process.exit(23)", "", "two words", "$(not-evaluated)", "; not evaluated"];
+			const result = runCli(worktree, ["run", "git-hygiene", ...command], {
+				PATH: `${bin}:${process.env.PATH}`,
+				DEVENV_LOG: log,
+			});
+			expect(result.status).toBe(23);
+			expect(result.stdout).toBe(JSON.stringify(command.slice(3)));
+			expect(result.stderr).toBe("command stderr\n");
+			const invoked = JSON.parse(readFileSync(log, "utf8"));
+			expect(invoked.cwd).toBe(worktree);
+			expect(JSON.stringify(invoked.args)).toBe(JSON.stringify(["-q", "shell", "--", ...command]));
+			expect(readFileSync(join(worktree, "unfinished"), "utf8")).toBe("session work");
+			const invalid = runCli(fixture.checkout, ["run", "unknown", ...command]);
+			expect(invalid.status).toBe(1);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("diagnoses missing parent-shell integration instead of pretending the executable can cd", () => {
+		const result = spawnSync("as", ["cd", "example"], { encoding: "utf8" });
+		expect(result.status).toBe(64);
+		expect(result.stdout).toBe("");
+		expect(result.stderr).toContain("shell integration");
+	});
+
+	it("requires an explicit slug and a command for run", () => {
+		for (const args of [["cd"], ["cd", "task", "extra"], ["run"], ["run", "task"]]) {
+			expect(runCli(resolve("."), args).status).toBe(64);
+		}
+	});
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		it(`changes the current ${shell} directory and preserves it on errors`, () => {
+			const fixture = createRepositoryFixture("agent session ");
+			try {
+				const { worktree } = startManagedSession(fixture);
+				const bin = installFixtureCLI(fixture);
+				const integration = installedShellIntegration(shell);
+				const script = shell === "fish" ? `
+source "$INTEGRATION"
+as cd git-hygiene; or exit 11
+test "$PWD" = "$EXPECTED"; or exit 12
+as cd unknown 2>/dev/null; and exit 13
+test "$PWD" = "$EXPECTED"; or exit 14
+as __complete cd | string match -q git-hygiene; or exit 15
+` : `
+source "$INTEGRATION"
+as cd git-hygiene || exit 11
+[ "$PWD" = "$EXPECTED" ] || exit 12
+if as cd unknown 2>/dev/null; then exit 13; fi
+[ "$PWD" = "$EXPECTED" ] || exit 14
+[ "$(as __complete cd)" = git-hygiene ] || exit 15
+`;
+				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "bash" ? "--noprofile" : "-f", "-c", script], {
+					cwd: fixture.checkout,
+					encoding: "utf8",
+					env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, INTEGRATION: integration, EXPECTED: worktree, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				});
+				expect(result.status).toBe(0);
+				expect(result.stdout).toBe("");
+			} finally {
+				rmSync(fixture.root, { recursive: true, force: true });
+			}
+		});
+	}
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		it(`preserves the executable as outside enabled projects in ${shell}`, () => {
+			const root = mkdtempSync(join(tmpdir(), "agent-shell-fallback-"));
+			try {
+				writeFileSync(join(root, "as"), '#!/usr/bin/env bash\nprintf "%s\\n" "$*"\n');
+				chmodSync(join(root, "as"), 0o755);
+				const integration = installedShellIntegration(shell);
+				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "bash" ? "--noprofile" : "-f", "-c", 'source "$INTEGRATION"; as cd input.s'], {
+					encoding: "utf8",
+					env: { ...process.env, PATH: `${root}:${process.env.PATH}`, INTEGRATION: integration, AGENT_SESSION_CONFIG: "" },
+				});
+				expect(result.status).toBe(0);
+				expect(result.stdout).toBe("cd input.s\n");
+			} finally {
+				rmSync(root, { recursive: true, force: true });
+			}
+		});
+	}
+
+	for (const shell of ["bash", "fish"]) {
+		it(`completes session slugs then command names in ${shell}`, () => {
+			const fixture = createRepositoryFixture();
+			try {
+				startManagedSession(fixture);
+				const bin = installFixtureCLI(fixture);
+				writeFileSync(join(bin, "git-completion-test"), "#!/usr/bin/env bash\nexit 0\n");
+				chmodSync(join(bin, "git-completion-test"), 0o755);
+				const completion = runCli(fixture.checkout, ["completion", shell]);
+				expect(completion.status).toBe(0);
+				const path = join(fixture.root, "completion");
+				writeFileSync(path, completion.stdout.replaceAll("-c agent-session ", "-c as "));
+				const script = shell === "fish" ? `
+source "$COMPLETION"
+complete -C 'as cd git-' | string replace -r '^' 'slug:'
+complete -C 'as run git-hygiene git-' | string replace -r '^' 'command:'
+` : `
+source "$COMPLETION"
+COMP_WORDS=(as cd git-); COMP_CWORD=2; _agent_session
+printf 'slug:%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as run git-hygiene git-); COMP_CWORD=3; _agent_session
+printf 'command:%s\\n' "\${COMPREPLY[@]}"
+`;
+				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : "--noprofile", "-c", script], {
+					cwd: fixture.checkout,
+					encoding: "utf8",
+					env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, COMPLETION: path, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				});
+				expect(result.status).toBe(0);
+				expect(result.stdout).toContain("slug:git-hygiene");
+				expect(result.stdout).toContain("command:git-completion-test");
+				expect(result.stdout.includes("command:git-hygiene")).toBe(false);
+			} finally {
+				rmSync(fixture.root, { recursive: true, force: true });
+			}
+		});
+	}
+
+	it("delegates Zsh run-command completion with the command's own words and cursor", () => {
+		const root = mkdtempSync(join(tmpdir(), "agent-completion-"));
+		try {
+			writeFileSync(join(root, "_agent_session"), runCli(resolve("."), ["completion", "zsh"]).stdout);
+			const result = spawnSync("zsh", ["-f", "-c", `
+fpath=("$COMPLETION" $fpath)
+autoload -Uz compinit
+compinit -D -i
+_normal() { print -r -- "$CURRENT:\${(j:|:)words}"; }
+words=(as run git-hygiene git-completion-test --arg)
+CURRENT=5
+_agent_session
+`], { encoding: "utf8", env: { ...process.env, COMPLETION: root } });
+			expect(result.status).toBe(0);
+			expect(result.stdout).toBe("2:git-completion-test|--arg\n");
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("offers session slugs for cd and run", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture);
+			for (const command of ["cd", "run"]) {
+				expect(runCli(fixture.checkout, ["__complete", command]).stdout).toBe("git-hygiene\n");
+			}
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}

@@ -33,6 +33,8 @@ as start my-task                    # prepare and launch Pi
 as status                          # reconcile worktrees and session records
 as launch my-task                   # launch in an existing worktree
 as resume my-task                   # launch with --continue
+as cd my-task                       # change the current shell's directory
+as run my-task bun test             # run devenv -q shell -- bun test there
 as finish my-task --dry-run         # preview local cleanup
 as finish my-task                   # guarded local cleanup, with confirmation
 ```
@@ -56,11 +58,49 @@ agentSession = {
 Local links are explicit ignored paths, not automatic secret copying. Keep
 project-specific links and preparation commands in the consuming project.
 
+## Navigation and one-off commands
+
+`as cd <slug>` changes the current shell's directory. It needs the shell function
+shipped with the package: an executable cannot change its parent shell's directory.
+Without that function, `as cd` reports how to enable it instead of pretending to navigate.
+This repository's managed Bash, Zsh, and Fish configs load it at startup after
+Home Manager activation. Bash devenv startup and Fish's vendor startup also load
+it. In an already-running shell, or on another machine, initialize it explicitly:
+
+```sh
+# Bash or Zsh
+source "$AGENT_SESSION_SHELL_ROOT/init.sh"
+# Fish
+source "$AGENT_SESSION_SHELL_ROOT/init.fish"
+```
+
+The `as` executable is retained for scripts and every other subcommand. Outside
+an enabled project the function delegates unchanged to the executable on PATH,
+including the system assembler. For scripts that need just a path,
+`agent-session cd <slug>` prints the validated absolute worktree path.
+
+`as run <slug> <command> [args...]` runs exactly one command inside that worktree
+through `devenv -q shell --`. Arguments, empty arguments, stdout, stderr, and exit
+status are preserved; the caller's directory is unchanged. Slugs and commands are
+required, and command arguments are not evaluated as shell code. Use an explicit
+shell for pipelines or shell operators:
+
+```sh
+as run my-task sh -c 'bun test && bun run lint'
+```
+
+Both commands work from any checkout in the same repository, including a dirty
+primary checkout or worktree, without fetching or launching an agent. They reject
+unknown sessions, missing worktrees, invalid metadata, and unregistered paths
+without changing directories or running a command.
+
 ## Completions
 
 Both command names have installed completions. The module exports
 `AGENT_SESSION_COMPLETION_ROOT` and defaults `DIRENV_ZSH_COMPLETION_DIRS` to its
-Zsh completion directory. This repository's managed post-direnv hook registers
+Zsh completion directory. `cd` and `run` complete session names; after the slug,
+`run` switches to command completion (command/file names in Bash, native command
+completion in Zsh and Fish). This repository's managed post-direnv hook registers
 these after `compinit`, preserves existing completions, and restores registrations
 on project exit. Plain direnv cannot register completions in an already-running
 Zsh without that shell integration.
@@ -86,6 +126,7 @@ For manual Zsh setup, save `agent-session completion zsh` output as
 ## Runtime and verification
 
 The command uses Nix-provided Node.js 24's native TypeScript support and Git.
+`run` also needs the `devenv` executable on PATH.
 It needs no npm dependencies, install step, or Bun runtime. Bun remains only in
 this repository's optional regression-test profile; the default shell does not
 include it. Package cache availability still depends on the consumer's nixpkgs pin.

@@ -93,6 +93,18 @@ in
     ];
 
   programs = {
+    # Only a shell function can implement `as cd` in the caller's shell. Outside
+    # an enabled project it delegates unchanged to the executable (e.g. assembler).
+    bash.initExtra = ''
+      source ${../../flake/agent-session/shell-integration.sh}
+    '';
+    zsh.initContent = lib.mkOrder 2000 ''
+      source ${../../flake/agent-session/shell-integration.sh}
+    '';
+    fish.interactiveShellInit = ''
+      source ${../../flake/agent-session/shell-integration.fish}
+    '';
+
     bat.enable = true;
     zoxide = {
       enable = true;
