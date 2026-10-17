@@ -14,12 +14,15 @@ import {
 	parseFinishArguments,
 	parseStatusArguments,
 	parseRequiredSlug,
+	parseInvocation,
+	legacySessionSyntax,
 } from "./arguments.ts";
 import { completionCandidates, completionScript } from "./completion.ts";
 
 export function main(args: string[]): number {
 	try {
-		const [command, ...rest] = args;
+		const invocation = parseInvocation(args);
+		const { command, args: rest } = invocation;
 		if (command === "cd") {
 			const slug = parseRequiredSlug(command, rest);
 			process.stdout.write(`${sessionDirectory(primaryRoot(repositoryRoot()), slug)}\n`);
@@ -77,6 +80,7 @@ export function main(args: string[]): number {
 		}
 		if (command === "status") {
 			const options = parseStatusArguments(rest);
+			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			showStatus(
 				primaryRoot(repositoryRoot()),
 				options.slug,
@@ -92,6 +96,7 @@ export function main(args: string[]): number {
 		}
 		if (command === "finish") {
 			const options = parseFinishArguments(rest);
+			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
 			if (options.all || options.gone) {

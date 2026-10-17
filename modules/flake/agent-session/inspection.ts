@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
+import { sessionCommand } from "./arguments.ts";
 import {
 	countRevisionRange,
 	git,
@@ -66,7 +67,7 @@ function unrecordedStatus(worktree: ManagedWorktree): SessionStatus {
 		publication: "unpublished",
 		ahead: 0,
 		behind: 0,
-		problem: `Session metadata is missing. Recover with: agent-session repair ${worktree.slug}`,
+		problem: `Session metadata is missing. Recover with: ${sessionCommand(worktree.slug, "repair")}`,
 	};
 }
 
@@ -129,7 +130,7 @@ export function inspectSession(
 			publication: "unpublished",
 			ahead: 0,
 			behind: 0,
-			problem: `Managed worktree is missing. Recover with: agent-session finish ${metadata.slug} --force`,
+			problem: `Managed worktree is missing. Recover with: ${sessionCommand(metadata.slug, "finish")} --force`,
 		};
 	}
 	const actualRoot = run(

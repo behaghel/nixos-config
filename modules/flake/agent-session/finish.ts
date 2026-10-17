@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
+import { sessionCommand } from "./arguments.ts";
 import {
 	git,
 	localBranches,
@@ -78,7 +79,7 @@ function forceFinishUnlocked(
 	if (!yes) {
 		if (!process.stdin.isTTY) {
 			throw new CliError(
-				`Confirmation required. Re-run: agent-session finish ${slug} --force --yes`,
+				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`,
 			);
 		}
 		const answer = prompt("Discard local session assets? [y/N]") ?? "";
@@ -206,7 +207,7 @@ function finishUnlocked(
 	if (!yes) {
 		if (!process.stdin.isTTY) {
 			throw new CliError(
-				`Confirmation required. Re-run: agent-session finish ${slug} --yes`,
+				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --yes`,
 			);
 		}
 		const answer = prompt("Delete local worktree and branch? [y/N]") ?? "";

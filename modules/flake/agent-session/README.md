@@ -28,16 +28,39 @@ The remote tip is fetched for creation; `status` does not fetch unless requested
 The default agent is `pi`, which must be available in your environment.
 
 ```sh
-as create my-task                   # prepare without launching a nested agent
-as start my-task                    # prepare and launch Pi
-as status                          # reconcile worktrees and session records
-as launch my-task                   # launch in an existing worktree
-as resume my-task                   # launch with --continue
-as cd my-task                       # change the current shell's directory
-as run my-task bun test             # run devenv -q shell -- bun test there
-as finish my-task --dry-run         # preview local cleanup
-as finish my-task                   # guarded local cleanup, with confirmation
+as my-task create                   # prepare without launching a nested agent
+as my-task start                    # prepare and launch Pi
+as status                           # reconcile all sessions
+as my-task status                   # inspect one session
+as my-task launch                   # launch in an existing worktree
+as my-task resume                   # launch with --continue
+as my-task cd                       # change the current shell's directory
+as my-task run bun test             # run devenv -q shell -- bun test there
+as my-task finish --dry-run         # preview local cleanup
+as my-task finish                   # guarded local cleanup, with confirmation
 ```
+
+## Command grammar and migration
+
+Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
+Repository-wide commands remain command-first: `as status`,
+`as finish --all|--gone`, and `as completion bash|zsh|fish`.
+
+Command words are reserved in the first position so old command-first calls cannot
+be mistaken for an action on a differently named session. To address an existing
+session whose slug is a command word, put `--` before the slug:
+
+```sh
+as -- status create
+as -- status cd
+as -- status run bun test
+```
+
+The separator is valid for any slug. Legacy forms such as `as create my-task` and
+`as status my-task` fail with migration hints before any Git mutation or execution.
+Update scripts and their pinned input together; older pins keep their old grammar.
+Session metadata, JSON schemas, and cleanup receipts are unchanged. In this version,
+creation still supports `--json` only with `--dry-run`.
 
 Session metadata remains in the shared Git directory at
 `agent-session/sessions/`. Existing Herbert sessions need no data migration.
@@ -60,9 +83,9 @@ project-specific links and preparation commands in the consuming project.
 
 ## Navigation and one-off commands
 
-`as cd <slug>` changes the current shell's directory. It needs the shell function
+`as <slug> cd` changes the current shell's directory. It needs the shell function
 shipped with the package: an executable cannot change its parent shell's directory.
-Without that function, `as cd` reports how to enable it instead of pretending to navigate.
+Without that function, `as <slug> cd` reports how to enable it instead of pretending to navigate.
 This repository's managed Bash, Zsh, and Fish configs load it at startup after
 Home Manager activation. Bash devenv startup and Fish's vendor startup also load
 it. In an already-running shell, or on another machine, initialize it explicitly:
@@ -77,16 +100,16 @@ source "$AGENT_SESSION_SHELL_ROOT/init.fish"
 The `as` executable is retained for scripts and every other subcommand. Outside
 an enabled project the function delegates unchanged to the executable on PATH,
 including the system assembler. For scripts that need just a path,
-`agent-session cd <slug>` prints the validated absolute worktree path.
+`agent-session <slug> cd` prints the validated absolute worktree path.
 
-`as run <slug> <command> [args...]` runs exactly one command inside that worktree
+`as <slug> run <command> [args...]` runs exactly one command inside that worktree
 through `devenv -q shell --`. Arguments, empty arguments, stdout, stderr, and exit
 status are preserved; the caller's directory is unchanged. Slugs and commands are
 required, and command arguments are not evaluated as shell code. Use an explicit
 shell for pipelines or shell operators:
 
 ```sh
-as run my-task sh -c 'bun test && bun run lint'
+as my-task run sh -c 'bun test && bun run lint'
 ```
 
 Both commands work from any checkout in the same repository, including a dirty
@@ -98,8 +121,9 @@ without changing directories or running a command.
 
 Both command names have installed completions. The module exports
 `AGENT_SESSION_COMPLETION_ROOT` and defaults `DIRENV_ZSH_COMPLETION_DIRS` to its
-Zsh completion directory. `cd` and `run` complete session names; after the slug,
-`run` switches to command completion (command/file names in Bash, native command
+Zsh completion directory. Completion offers session names and global commands
+first, session actions after the slug, and options after the action. After `run`,
+it switches to command completion (command/file names in Bash, native command
 completion in Zsh and Fish). This repository's managed post-direnv hook registers
 these after `compinit`, preserves existing completions, and restores registrations
 on project exit. Plain direnv cannot register completions in an already-running

@@ -1,4 +1,5 @@
 import { CliError } from "./runtime.ts";
+import { validateSlug } from "./sessions.ts";
 
 export const commandNames = [
 	"cd",
@@ -12,6 +13,41 @@ export const commandNames = [
 	"finish",
 	"completion",
 ];
+
+export const sessionCommandNames = commandNames.filter((name) => name !== "completion");
+export const globalCommandNames = ["status", "completion", "finish"];
+
+export function sessionCommand(slug: string, command: string): string {
+	return `agent-session ${commandNames.includes(slug) ? "-- " : ""}${slug} ${command}`;
+}
+
+export function legacySessionSyntax(command: string): CliError {
+	return argumentError(`Session commands use <task-slug> <command>. Use: agent-session <task-slug> ${command}. Command-word slugs require: agent-session -- <task-slug> <command>.`);
+}
+
+export function parseInvocation(args: string[]): {
+	command: string;
+	args: string[];
+	global: boolean;
+} {
+	const [first, ...rest] = args;
+	if (!first) throw argumentError("Missing command.");
+	if (first === "__complete" || globalCommandNames.includes(first)) {
+		return { command: first, args: rest, global: true };
+	}
+	if (commandNames.includes(first)) {
+		if (rest.length === 0) throw argumentError(`Missing <task-slug> for '${first}'. Use: agent-session <task-slug> ${first}.`);
+		throw legacySessionSyntax(first);
+	}
+	const [slug, command, ...tail] = first === "--" ? rest : args;
+	if (!slug) throw argumentError("Missing <task-slug>.");
+	validateSlug(slug);
+	if (!command) throw argumentError(`Missing <command> for session '${slug}'.`);
+	if (!sessionCommandNames.includes(command)) {
+		throw argumentError(`Unknown command '${command}'.${didYouMean(command, sessionCommandNames)}`);
+	}
+	return { command, args: [slug, ...tail], global: false };
+}
 
 function editDistance(left: string, right: string): number {
 	const previous = Array.from(
@@ -209,16 +245,18 @@ export function parseRequiredSlug(command: string, args: string[]): string {
 function usage(): string {
 	return [
 		"Usage:",
-		"  as cd <task-slug> (shell integration required)",
-		"  agent-session cd <task-slug> (print the worktree path)",
-		"  agent-session run <task-slug> <command> [args...]",
-		"  agent-session create <task-slug> [--dry-run [--json]]",
-		"  agent-session launch <task-slug>",
-		"  agent-session start <task-slug> [--no-agent]",
-		"  agent-session resume <task-slug>",
-		"  agent-session status [task-slug] [--json] [--refresh]",
-		"  agent-session repair <task-slug>",
-		"  agent-session finish <task-slug> [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  as <task-slug> cd (shell integration required)",
+		"  agent-session <task-slug> cd (print the worktree path)",
+		"  agent-session <task-slug> run <command> [args...]",
+		"  agent-session <task-slug> create [--dry-run [--json]]",
+		"  agent-session <task-slug> launch",
+		"  agent-session <task-slug> start [--no-agent]",
+		"  agent-session <task-slug> resume",
+		"  agent-session <task-slug> status [--json] [--refresh]",
+		"  agent-session <task-slug> repair",
+		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
+		"  agent-session status [--json] [--refresh]",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session completion <bash|zsh|fish>",
 	].join("\n");

@@ -33,10 +33,10 @@ reuse this repository's existing input and ignore `/.worktrees/`.
 After committing the initial setup and configuring an upstream default branch:
 
 ```sh
-as create my-task                 # create a worktree without launching an agent
-as start my-task                  # create a worktree and launch Pi
+as my-task create                 # create a worktree without launching an agent
+as my-task start                  # create a worktree and launch Pi
 as status                        # inspect existing sessions
-as finish my-task --dry-run       # preview cleanup
+as my-task finish --dry-run       # preview cleanup
 ```
 
 Pi must be available on your PATH, or set `agentSession.agentCommand` to another

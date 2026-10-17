@@ -93,7 +93,7 @@ in
     ];
 
   programs = {
-    # Only a shell function can implement `as cd` in the caller's shell. Outside
+    # Only a shell function can implement `as <slug> cd` in the caller's shell. Outside
     # an enabled project it delegates unchanged to the executable (e.g. assembler).
     bash.initExtra = ''
       source ${../../flake/agent-session/shell-integration.sh}
