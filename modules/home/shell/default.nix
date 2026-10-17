@@ -61,11 +61,11 @@ in
   home.sessionPath = emacsExecPath;
 
   home.sessionVariables = {
-    # Prefer the daemon-backed client in terminals; fall back to a new frame elsewhere
+    # Terminal clients use the running server. On Darwin the GUI app owns it:
+    # fail instead of silently starting an independent headless daemon.
     EDITOR = "emacsclient -t";
-    VISUAL = "emacsclient -c -a ''";
-    # Allow emacsclient to start a new server if the daemon isn't up yet
-    ALTERNATE_EDITOR = "";
+    VISUAL = if pkgs.stdenv.isDarwin then "emacsclient -r" else "emacsclient -c -a ''";
+    ALTERNATE_EDITOR = if pkgs.stdenv.isDarwin then "/usr/bin/false" else "";
     # Make Git use the terminal client explicitly
     GIT_EDITOR = "emacsclient -t";
   };

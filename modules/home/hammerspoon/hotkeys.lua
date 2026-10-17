@@ -4,10 +4,7 @@ function M.setup()
   -- App focus hotkeys
   local bindings = {
     t = { name = "Ghostty" },
-    -- Emacs can appear as "Emacs" or lower-case "emacs" depending on the build.
-    -- Launch it via /usr/bin/open instead of Hammerspoon's launchOrFocus helper:
-    -- the latter can add noticeable synchronous latency before Emacs appears.
-    e = { name = "Emacs", bundleID = "org.gnu.Emacs", altNames = { "emacs" }, asyncOpen = true },
+    e = { name = "Emacs" }, -- Handled below by native app activation.
     f = { name = "Firefox" },
     v = { name = "VLC" },
     s = { name = "Slack" },
@@ -61,9 +58,50 @@ function M.setup()
     focusWhenReady(1)
   end
 
+  -- Focus the real GUI app, regardless of server availability. In particular,
+  -- don't query emacsclient here: an empty ALTERNATE_EDITOR can start a daemon.
+  local emacsLaunchPending = false
+  local function focusEmacs()
+    local function focusWhenReady(attempt)
+      local apps = hs.application.applicationsForBundleID("org.gnu.Emacs")
+      local app = apps and apps[1]
+      if app then
+        local activated = app:activate(true)
+        local win = app:mainWindow()
+        if win then win:focus() end
+        if activated and app:isFrontmost() then
+          emacsLaunchPending = false
+          return
+        end
+      end
+      if attempt >= 20 then
+        emacsLaunchPending = false
+        hs.alert.show("Could not focus Emacs.app", 1.5)
+      else
+        hs.timer.doAfter(0.25, function() focusWhenReady(attempt + 1) end)
+      end
+    end
+
+    local apps = hs.application.applicationsForBundleID("org.gnu.Emacs")
+    if apps and #apps > 0 then
+      focusWhenReady(1)
+    elseif not emacsLaunchPending then
+      emacsLaunchPending = true
+      local appPath = os.getenv("HOME") .. "/Applications/Home Manager Apps/Emacs.app"
+      hs.task.new("/usr/bin/open", function(code)
+        if code ~= 0 then
+          emacsLaunchPending = false
+          hs.alert.show("Could not open Emacs.app", 1.5)
+        else
+          focusWhenReady(1)
+        end
+      end, { "-a", appPath }):start()
+    end
+  end
+
   for key, entry in pairs(bindings) do
     hs.hotkey.bind({ "ctrl", "alt", "cmd" }, key, function()
-      focusOrLaunch(entry)
+      if key == "e" then focusEmacs() else focusOrLaunch(entry) end
       hs.alert.show("→ " .. entry.name, 0.5)
     end)
   end

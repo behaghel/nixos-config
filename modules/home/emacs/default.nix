@@ -4,7 +4,6 @@ let
   emacsFileUTIs = [
     "public.plain-text"
     "public.text"
-    "net.daringfireball.markdown"
     "public.comma-separated-values-text"
     "public.tab-separated-values-text"
     "public.json"
@@ -14,8 +13,6 @@ let
   emacsFileExtensions = [
     "txt"
     "text"
-    "md"
-    "markdown"
     "org"
     "rst"
     "tex"
@@ -99,14 +96,57 @@ in
     package = if pkgs.stdenv.isDarwin then (pkgs.emacs-29-macport or pkgs.emacs-unstable) else pkgs.emacs-unstable;
     # Install mu4e from emacsPackages (nixpkgs builds it to match pkgs.mu)
     extraPackages = epkgs: [ epkgs.mu4e ];
+    # Patch the packaged app's document declaration, not its identity or
+    # executable. Home Manager copies this same Emacs.app for Spotlight/Finder.
+    overrides = _: super: lib.optionalAttrs pkgs.stdenv.isDarwin {
+      emacsWithPackages = packages:
+        (super.emacsWithPackages packages).overrideAttrs (old: {
+          buildCommand = old.buildCommand + ''
+            chmod u+w "$out/Applications/Emacs.app/Contents/Info.plist"
+            ${pkgs.python3}/bin/python3 - "$out/Applications/Emacs.app/Contents/Info.plist" <<'PY'
+import plistlib
+import sys
+
+path = sys.argv[1]
+with open(path, "rb") as f:
+    info = plistlib.load(f)
+for document in info["CFBundleDocumentTypes"]:
+    if document.get("CFBundleTypeName") == "Markdown document":
+        document["CFBundleTypeExtensions"] = sorted(
+            set(document.get("CFBundleTypeExtensions", [])) | {"md"}
+        )
+        document["LSItemContentTypes"] = ["net.daringfireball.markdown"]
+        break
+else:
+    raise RuntimeError("Emacs.app no longer declares Markdown documents")
+with open(path, "wb") as f:
+    plistlib.dump(info, f)
+PY
+          '';
+        });
+    };
   };
 
-  # Use Home Manager's built-in Emacs user service (daemon)
+  # On macOS the regular Emacs.app owns the server. A headless daemon would
+  # compete for the default socket and make Finder/Dock open a second process.
   services.emacs = {
-    enable = true;
+    enable = pkgs.stdenv.isLinux;
     package = if pkgs.stdenv.isDarwin then (pkgs.emacs-29-macport or pkgs.emacs-unstable) else pkgs.emacs-unstable;
     # Session defaults handled in modules/home/shell/default.nix
     defaultEditor = false;
+  };
+
+  hub.fileAssociations.markdown = {
+    darwin = {
+      enable = true;
+      contentType = "net.daringfireball.markdown";
+      application = "${config.home.homeDirectory}/Applications/Home Manager Apps/Emacs.app";
+      extension = "md";
+    };
+    linux = {
+      mimeType = "text/markdown";
+      desktopFile = "emacsclient.desktop";
+    };
   };
 
   # Add the setup script and Emacs runtime CLI dependencies to your environment (+ duti on Darwin)
@@ -161,7 +201,7 @@ in
       terminal = false;
       startupNotify = true;
       categories = [ "Development" "Utility" "TextEditor" ];
-      mimeType = [ "text/plain" ];
+      mimeType = [ "text/plain" "text/markdown" ];
     };
   };
 

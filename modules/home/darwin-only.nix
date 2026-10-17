@@ -23,6 +23,17 @@ in
   config = lib.mkIf pkgs.stdenv.isDarwin {
     services.local-modules.nix-darwin.keyboard.bepo.enable = lib.mkDefault true;
 
+    # Home Manager's linkApps exposes store symlinks, which Spotlight does not
+    # index. copyApps keeps the same app names/paths but installs real bundles.
+    targets.darwin.linkApps.enable = false;
+    targets.darwin.copyApps.enable = true;
+
+    # On the first switch, linkGeneration must remove the old
+    # ~/Applications/Home Manager Apps symlink before the copyApps permission
+    # check or rsync sees a read-only Nix store directory instead of ~/Applications.
+    home.activation.prepareCopiedApps = lib.hm.dag.entryBetween
+      [ "checkAppManagementPermission" "copyApps" ] [ "linkGeneration" ] ":";
+
     home.activation.verifyLaunchAgents = lib.hm.dag.entryAfter [ "setupLaunchAgents" ] ''
       set -euo pipefail
 

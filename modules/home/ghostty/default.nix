@@ -32,6 +32,12 @@ in
           keybind = alt+t=esc:t
           keybind = alt+s=esc:s
           keybind = alt+r=esc:r
+          # BÉPO x is on the US KeyC position. Ghostty's character keybinds
+          # follow the layout, and Option+x produces } instead of x. The
+          # Realforce also maps physical left Alt to Command; the built-in
+          # keyboard keeps it as Option. Send Meta-x from either keyboard.
+          keybind = super+KeyC=esc:x
+          keybind = alt+KeyC=esc:x
           keybind = alt+shift+c=esc:C
           keybind = alt+shift+r=esc:R
 

@@ -11,6 +11,7 @@
     ./starship.nix
     ./git
     ./ghostty
+    ./file-associations
     ./ssh
     ./nix.nix
     ./pi
