@@ -33,6 +33,8 @@ pkgs.runCommand "agent-session-tests"
     cp ${./agent-session-templates.test.ts} tests/agent-session-templates.test.ts
     cp -R ${../templates} templates
     cp ${../devenv.nix} devenv.nix
+    cp ${../AGENTS.md} AGENTS.md
+    cp ${../.gitignore} .gitignore
     bun test ./tests/agent-session.test.ts ./tests/agent-session-templates.test.ts --timeout 30000
     touch "$out"
   ''
