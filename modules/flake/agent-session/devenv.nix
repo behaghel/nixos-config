@@ -13,12 +13,17 @@ let
     name = "agent-session";
     runtimeInputs = [ pkgs.nodejs_24 pkgs.git ];
     text = ''
-      if [ "''${0##*/}" = as ] && [ "''${1-}" = cd ]; then
-        printf '%s\n' "as cd requires shell integration; source \"\$AGENT_SESSION_SHELL_ROOT/init.sh\" in Bash/Zsh or init.fish in Fish." >&2
+      action="''${2-}"
+      case "''${1-}" in
+        --) action="''${3-}" ;;
+        status|doctor|finish|completion|__complete) action= ;;
+      esac
+      if [ "''${0##*/}" = as ] && [ "$action" = cd ]; then
+        printf '%s\n' "as <slug> cd requires shell integration; source \"\$AGENT_SESSION_SHELL_ROOT/init.sh\" in Bash/Zsh or init.fish in Fish." >&2
         exit 64
       fi
       export AGENT_SESSION_CONFIG=${runtimeConfig}
-      exec ${lib.getExe pkgs.nodejs_24} ${./cli.ts} "$@"
+      exec ${lib.getExe pkgs.nodejs_24} ${./.}/cli.ts "$@"
     '';
   };
   aliasPackage = pkgs.runCommand "agent-session-as-alias" { } ''

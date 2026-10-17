@@ -20,6 +20,10 @@ import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
+	lstatSync,
+	readdirSync,
+	readlinkSync,
+	symlinkSync,
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
@@ -154,7 +158,7 @@ function startManagedSession(
 	const agentLog = join(fixture.root, "agent-cwd");
 	const fakeAgent = createFakeAgent(fixture.root, agentLog);
 	writeConfig(fixture.checkout, fakeAgent);
-	const result = runCli(fixture.checkout, ["start", slug]);
+	const result = runCli(fixture.checkout, [slug, "start"]);
 	if (result.status !== 0) {
 		throw new Error(`agent-session start failed: ${result.stderr}`);
 	}
@@ -220,7 +224,145 @@ function mergeSessionAndDeleteRemoteBranch(
 	git(fixture.seed, "push", "origin", "--delete", `agent/${slug}`);
 }
 
+describe("subject-first invocation", () => {
+	it("creates and inspects a named session while retaining repository-wide commands", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const created = runCli(fixture.checkout, ["new-task", "create"]);
+			expect(created.status).toBe(0);
+			const inspected = runCli(fixture.checkout, ["new-task", "status", "--json"]);
+			expect(inspected.status).toBe(0);
+			expect(JSON.parse(inspected.stdout).sessions[0].slug).toBe("new-task");
+			expect(runCli(fixture.checkout, ["status", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["finish", "--all", "--dry-run", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["completion", "bash"]).status).toBe(0);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects legacy argument order before creating, deleting or executing anything", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			for (const args of [
+				["create", "should-not-exist"],
+				["start", "should-not-exist"],
+				["launch", "git-hygiene"],
+				["resume", "git-hygiene"],
+				["repair", "git-hygiene"],
+				["status", "git-hygiene"],
+				["status", "--json", "git-hygiene"],
+				["finish", "git-hygiene", "--keep-branch", "--yes"],
+				["run", "git-hygiene", "touch", "unexpected"],
+				["cd", "git-hygiene"],
+				["--", "create"],
+			]) {
+				expect(runCli(fixture.checkout, args).status).toBe(64);
+				expect(existsSync(worktree)).toBe(true);
+			}
+			expect(existsSync(join(fixture.worktrees, "should-not-exist"))).toBe(false);
+			expect(existsSync(join(worktree, "unexpected"))).toBe(false);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("never interprets a flag-like target as a global selector", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			for (const args of [
+				["--all", "finish", "--yes"],
+				["--gone", "finish", "--yes"],
+				["--json", "status"],
+				["--", "--all", "finish", "--yes"],
+			]) {
+				expect(runCli(fixture.checkout, args).status).toBe(64);
+				expect(existsSync(worktree)).toBe(true);
+			}
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("requires an explicit escape for slugs that collide with command words", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			for (const slug of ["status", "doctor", "finish", "create", "run", "completion"]) {
+				expect(runCli(fixture.checkout, ["--", slug, "create"]).status).toBe(0);
+				const result = runCli(fixture.checkout, ["--", slug, "status", "--json"]);
+				expect(result.status).toBe(0);
+				expect(JSON.parse(result.stdout).sessions[0].slug).toBe(slug);
+				expect(runCli(fixture.checkout, [slug, "cd"]).status).toBe(64);
+			}
+			const targets = runCli(fixture.checkout, ["__complete", "targets"]);
+			expect(targets.stdout).toContain("status\n");
+			expect(targets.stdout.split("\n").includes("create")).toBe(false);
+			const escaped = runCli(fixture.checkout, ["__complete", "sessions"]);
+			expect(escaped.stdout).toContain("create\n");
+			git(fixture.checkout, "worktree", "remove", join(fixture.worktrees, "status"));
+			const orphaned = runCli(fixture.checkout, ["--", "status", "status", "--json"]);
+			expect(orphaned.status).toBe(0);
+			expect(JSON.parse(orphaned.stdout).sessions[0].problem).toContain("agent-session -- status finish --force");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("agent-session create and start", () => {
+	it("creates, inspects and receipt-finishes sessions through the installed package outside the source checkout", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const installed = (command: string, args: string[], cwd = fixture.checkout) => spawnSync(command, args, {
+				cwd,
+				encoding: "utf8",
+			});
+			const created = installed("as", ["installed-package", "create", "--json"]);
+			expect(created.status).toBe(0);
+			const creationReceipt = JSON.parse(created.stdout);
+			expect(creationReceipt.version).toBe(1);
+			expect(creationReceipt.dryRun).toBe(false);
+			const worktree = join(realpathSync(fixture.worktrees), "installed-package");
+			expect(creationReceipt.session.worktreePath).toBe(worktree);
+			const nested = join(worktree, "nested");
+			mkdirSync(nested);
+			const current = installed("as", [".", "status", "--json"], nested);
+			expect(current.stderr).toBe("");
+			expect(current.status).toBe(0);
+			expect(JSON.parse(current.stdout).sessions[0].slug).toBe("installed-package");
+			const diagnosis = installed("as", [".", "doctor", "--json"], nested);
+			expect(diagnosis.status).toBe(0);
+			expect(JSON.parse(diagnosis.stdout).slug).toBe("installed-package");
+			expect(installed("as", ["doctor", "--json"]).status).toBe(0);
+			expect(installed("as", ["doctor", "cd"]).stderr).toContain("Session commands use <task-slug> <command>");
+			expect(installed("agent-session", [".", "cd"], nested).stdout).toBe(`${worktree}\n`);
+			rmSync(nested, { recursive: true });
+			const status = installed("as", ["installed-package", "status", "--json"]);
+			expect(status.status).toBe(0);
+			const catalog = JSON.parse(status.stdout);
+			expect(catalog.sessions.length).toBe(1);
+			expect(catalog.sessions[0].worktreePath).toBe(worktree);
+			const path = installed("agent-session", ["installed-package", "cd"]);
+			expect(path.status).toBe(0);
+			expect(path.stdout).toBe(`${worktree}\n`);
+			const candidates = installed("as", ["__complete", "finish"]);
+			expect(candidates.status).toBe(0);
+			expect(candidates.stdout).toBe("installed-package\n");
+			const preview = installed("as", ["installed-package", "finish", "--keep-branch", "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const receipt = JSON.parse(preview.stdout).plan.receipt;
+			expect(receipt.length).toBe(64);
+			const finished = installed("as", ["installed-package", "finish", "--keep-branch", "--yes", "--expected", receipt]);
+			expect(finished.status).toBe(0);
+			expect(existsSync(worktree)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/installed-package")).toBe("agent/installed-package");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
 	it("is packaged and configured by the shared devenv module", () => {
 		expect(existsSync(cliScript)).toBe(true);
 		const module = readFileSync("modules/flake/agent-session/devenv.nix", "utf8");
@@ -271,7 +413,7 @@ describe("agent-session create and start", () => {
 			);
 			const latestRemoteHead = advanceRemoteDefault(fixture);
 
-			const result = runCli(fixture.checkout, ["start", "git-hygiene"]);
+			const result = runCli(fixture.checkout, ["git-hygiene", "start"]);
 			const worktree = join(realpathSync(fixture.worktrees), "git-hygiene");
 
 			expect(result.status).toBe(0);
@@ -310,7 +452,7 @@ describe("agent-session create and start", () => {
 			const fakeAgent = createFakeAgent(fixture.root, agentCwd);
 			writeConfig(fixture.checkout, fakeAgent);
 
-			const result = runCli(fixture.checkout, ["create", "agent-friendly"]);
+			const result = runCli(fixture.checkout, ["agent-friendly", "create"]);
 
 			expect(result.status).toBe(0);
 			const worktree = join(realpathSync(fixture.worktrees), "agent-friendly");
@@ -326,6 +468,124 @@ describe("agent-session create and start", () => {
 			expect(
 				existsSync(sessionMetadataPath(fixture.checkout, "agent-friendly")),
 			).toBe(true);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("returns one persisted creation receipt with JSON progress despite subprocess output", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const launched = join(fixture.root, "agent-launched");
+			const prepared = join(fixture.root, "prepared");
+			writeConfig(fixture.checkout, createFakeAgent(fixture.root, launched), [
+				"bash", "-c", `printf 'preparation stdout\\n'; printf 'preparation stderr\\n' >&2; printf '%s' "$PWD" > ${tomlString(prepared)}`,
+			]);
+			const result = runCli(fixture.checkout, ["json-created", "create", "--json"]);
+			expect(result.status).toBe(0);
+			const payload = JSON.parse(result.stdout);
+			expect(payload.version).toBe(1);
+			expect(payload.command).toBe("create");
+			expect(payload.dryRun).toBe(false);
+			expect(payload.session.slug).toBe("json-created");
+			expect(payload.session.branch).toBe("agent/json-created");
+			expect(payload.session.worktreePath).toBe(join(realpathSync(fixture.worktrees), "json-created"));
+			expect(JSON.stringify(payload.session)).toBe(JSON.stringify(JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "json-created"), "utf8"))));
+			expect(result.stdout.trim().split("\n").length).toBe(1);
+			expect(readFileSync(prepared, "utf8")).toBe(payload.session.worktreePath);
+			expect(existsSync(launched)).toBe(false);
+			const events = result.stderr.trim().split("\n").map((line) => JSON.parse(line));
+			expect(events.every((event) => event.version === 1 && event.type === "progress" && event.command === "create")).toBe(true);
+			expect(events.filter((event) => event.status === "completed").map((event) => event.phase).join(",")).toBe("remote-sync,worktree-create,worktree-prepare,metadata-record");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("emits no creation receipt and rolls back a failed JSON preparation", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true", ["bash", "-c", "printf 'failed preparation stdout\\n'; printf 'failed preparation stderr\\n' >&2; exit 7"]);
+			const result = runCli(fixture.checkout, ["json-failed", "create", "--json"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toContain("failed preparation stderr");
+			const events = result.stderr.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+			expect(events.some((event) => event.phase === "worktree-prepare" && event.status === "failed")).toBe(true);
+			expect(events.some((event) => event.phase === "metadata-record")).toBe(false);
+			expect(existsSync(join(fixture.worktrees, "json-failed"))).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "json-failed"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/json-failed")).toBe("");
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain").includes("json-failed")).toBe(false);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("retains captured Git failure diagnostics without emitting a JSON creation receipt", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "missing-remote.git"));
+			const result = runCli(fixture.checkout, ["json-fetch-failed", "create", "--json"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toBe("");
+			const events = result.stderr.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+			const failed = events.find((event) => event.phase === "remote-sync" && event.status === "failed");
+			expect(failed?.detail.includes("missing-remote.git")).toBe(true);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "json-fetch-failed"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/json-fetch-failed")).toBe("");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("flushes large status JSON completely through source and installed entrypoints", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			const directory = join(fixture.checkout, ".git", "agent-session", "sessions");
+			mkdirSync(directory, { recursive: true });
+			for (let index = 0; index < 48; index++) {
+				const slug = `large-session-${String(index).padStart(2, "0")}`;
+				writeFileSync(join(directory, `${slug}.json`), JSON.stringify({
+					version: 1, slug, branch: `agent/${slug}`, worktreePath: join(fixture.worktrees, slug),
+					remote: "origin", defaultBranch: "master", createdAt: "2026-01-01T00:00:00.000Z", conversation: null,
+					preexistingBranches: Array.from({ length: 128 }, (_, branch) => `feat/topic-${branch}-${"a".repeat(32)}`),
+				}));
+			}
+			// Pause the reader until output arrives, then delay draining the pipe.
+			// This makes truncation deterministic instead of relying on scheduling.
+			const slowReader = `
+import { spawn } from 'node:child_process';
+const [entry, ...args] = process.argv.slice(1);
+const child = spawn(entry, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+const chunks = [];
+child.stdout.once('readable', () => setTimeout(() => {
+  child.stdout.on('data', (chunk) => chunks.push(chunk));
+  child.stdout.resume();
+}, 100));
+child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+child.on('error', (error) => { process.stderr.write(String(error)); process.exitCode = 1; });
+child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); process.exitCode = code ?? 1; });
+`;
+			const results = [["node", cliScript], ["as"]].map((entry) =>
+				spawnSync("node", ["--input-type=module", "-e", slowReader, ...entry, "status", "--json"], {
+					cwd: fixture.checkout,
+					encoding: "utf8",
+					env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				}),
+			);
+			for (const result of results) {
+				expect(result.status).toBe(0);
+				expect(result.stdout.length > 128 * 1024).toBe(true);
+				expect(result.stdout.endsWith("\n")).toBe(true);
+				const payload = JSON.parse(result.stdout);
+				expect(payload.version).toBe(1);
+				expect(payload.sessions.length).toBe(48);
+				expect(payload.sessions.at(-1).slug).toBe("large-session-47");
+				expect(payload.sessions.at(-1).preexistingBranches.length).toBe(128);
+			}
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
@@ -347,8 +607,8 @@ describe("agent-session create and start", () => {
 			);
 
 			const result = runCli(fixture.checkout, [
-				"create",
 				"preview",
+				"create",
 				"--dry-run",
 				"--json",
 			]);
@@ -399,7 +659,7 @@ describe("agent-session create and start", () => {
 				"caller",
 			);
 
-			const result = runCli(callerWorktree, ["start", "sibling", "--no-agent"]);
+			const result = runCli(callerWorktree, ["sibling", "start", "--no-agent"]);
 
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain(
@@ -416,7 +676,7 @@ describe("agent-session create and start", () => {
 	it("rejects a missing module-generated runtime configuration", () => {
 		const fixture = createRepositoryFixture();
 		try {
-			const result = runCli(fixture.checkout, ["start", "git-hygiene"], {
+			const result = runCli(fixture.checkout, ["git-hygiene", "start"], {
 				AGENT_SESSION_CONFIG: "",
 			});
 			expect(result.status).toBe(1);
@@ -444,7 +704,7 @@ describe("agent-session create and start", () => {
 		const fixture = createRepositoryFixture();
 		try {
 			mkdirSync(fixture.worktrees, { recursive: true });
-			const result = runCli(fixture.checkout, ["start", "Git Hygiene"]);
+			const result = runCli(fixture.checkout, ["Git Hygiene", "start"]);
 			expect(result.status).toBe(64);
 			expect(result.stderr).toContain(
 				"Use lowercase letters, numbers, dots, or dashes",
@@ -466,7 +726,7 @@ describe("agent-session create and start", () => {
 				"../outside",
 			]) {
 				writeConfig(fixture.checkout, fakeAgent, [], worktreeRoot);
-				const result = runCli(fixture.checkout, ["start", "unsafe-root"]);
+				const result = runCli(fixture.checkout, ["unsafe-root", "start"]);
 				expect(result.status).toBe(1);
 				expect(result.stderr).toContain("project-local relative subtree");
 			}
@@ -498,7 +758,7 @@ describe("agent-session create and start", () => {
 			);
 			writeConfig(fixture.checkout, fakeAgent);
 
-			const result = runCli(fixture.checkout, ["start", "not-ignored"]);
+			const result = runCli(fixture.checkout, ["not-ignored", "start"]);
 
 			expect(result.status).toBe(1);
 			expect(result.stderr).toContain("must be Git-ignored");
@@ -506,6 +766,382 @@ describe("agent-session create and start", () => {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
 	});
+});
+
+describe("read-only doctor", () => {
+	it("reports healthy bindings as one versioned JSON document and offers human diagnostics", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			git(worktree, "branch", "-m", "feat/renamed-doctor");
+			const result = runCli(fixture.checkout, ["doctor", "--json"]);
+			expect(result.status).toBe(0);
+			expect(result.stderr).toBe("");
+			const report = JSON.parse(result.stdout);
+			expect(report.version).toBe(1);
+			expect(report.command).toBe("doctor");
+			expect(report.ok).toBe(true);
+			expect(report.checks.some((check) => check.id === "binding" && check.slug === "git-hygiene" && check.status === "ok")).toBe(true);
+			expect(report.checks.some((check) => check.id === "shell-parent" && check.status === "info")).toBe(true);
+			const nested = join(worktree, "nested");
+			mkdirSync(nested);
+			const current = runCli(nested, [".", "doctor", "--json"]);
+			expect(current.status).toBe(0);
+			expect(JSON.parse(current.stdout).slug).toBe("git-hygiene");
+			const human = runCli(fixture.checkout, ["doctor"]);
+			expect(human.status).toBe(0);
+			expect(human.stdout).toContain("Doctor: no errors");
+			expect(human.stdout).toContain("git-hygiene");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("diagnoses absent or invalid configuration and non-repository contexts without leaking values", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const secret = "DO_NOT_PRINT_CONFIG_SECRET";
+			for (const contents of ["", `{\"${secret}\":`, JSON.stringify({ version: 1, worktree_root: "../unsafe", agent_command: [secret], prepare_command: [], local_links: [] })]) {
+				writeFileSync(runtimeConfigPath(fixture.checkout), contents);
+				const result = runCli(fixture.checkout, ["doctor", "--json"]);
+				expect(result.status).toBe(1);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "configuration" && check.status === "error")).toBe(true);
+				expect((result.stdout + result.stderr).includes(secret)).toBe(false);
+			}
+			const missing = runCli(fixture.checkout, ["doctor", "--json"], { AGENT_SESSION_CONFIG: join(fixture.root, "absent") });
+			expect(missing.status).toBe(1);
+			expect(JSON.parse(missing.stdout).ok).toBe(false);
+			const outside = runCli(fixture.root, ["doctor", "--json"]);
+			expect(outside.status).toBe(1);
+			expect(JSON.parse(outside.stdout).checks.some((check) => check.id === "repository" && check.status === "error")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reports malformed, unsafe, missing and unrecorded bindings without repair and scopes named reports", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const path = sessionMetadataPath(fixture.checkout, "git-hygiene");
+			const original = readFileSync(path, "utf8");
+			for (const contents of ["null", "TOKEN_SECRET", JSON.stringify({ ...JSON.parse(original), worktreePath: fixture.seed })]) {
+				writeFileSync(path, contents);
+				const result = runCli(fixture.checkout, ["git-hygiene", "doctor", "--json"]);
+				expect(result.status).toBe(1);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "binding" && check.status === "error")).toBe(true);
+				expect(readFileSync(path, "utf8")).toBe(contents);
+				const current = runCli(worktree, [".", "doctor", "--json"]);
+				expect(current.status).toBe(1);
+				expect(JSON.parse(current.stdout).ok).toBe(false);
+				expect((current.stdout + current.stderr).includes("TOKEN_SECRET")).toBe(false);
+			}
+			writeFileSync(path, original);
+			git(worktree, "branch", "-m", "feat/unrecorded-doctor");
+			rmSync(path);
+			const unrecorded = runCli(fixture.checkout, ["doctor", "--json"]);
+			expect(unrecorded.status).toBe(1);
+			expect(JSON.parse(unrecorded.stdout).checks.some((check) => check.slug === "git-hygiene" && check.status === "error")).toBe(true);
+			expect(existsSync(path)).toBe(false);
+			writeFileSync(path, original);
+			const unknown = runCli(fixture.checkout, ["unknown", "doctor", "--json"]);
+			expect(unknown.status).toBe(1);
+			expect(JSON.parse(unknown.stdout).checks.some((check) => check.slug === "git-hygiene")).toBe(false);
+			git(fixture.checkout, "worktree", "remove", "--force", worktree);
+			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(1);
+			expect(readFileSync(path, "utf8")).toBe(original);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("checks link targets without reading secret contents or modifying missing and conflicting links", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const configPath = runtimeConfigPath(fixture.checkout);
+			const config = JSON.parse(readFileSync(configPath, "utf8"));
+			config.local_links = [".private-local", ".optional-absent"];
+			writeFileSync(configPath, JSON.stringify(config));
+			const source = join(fixture.checkout, ".private-local");
+			const target = join(worktree, ".private-local");
+			writeFileSync(source, "DO_NOT_PRINT_LOCAL_SECRET");
+			symlinkSync(source, target);
+			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(0);
+			for (const conflict of ["absent", "file", "wrong-link"]) {
+				rmSync(target, { force: true });
+				if (conflict === "file") writeFileSync(target, "preserve user work");
+				if (conflict === "wrong-link") symlinkSync(join(fixture.root, "missing"), target);
+				const result = runCli(fixture.checkout, ["doctor", "--json"]);
+				expect(result.status).toBe(1);
+				expect(result.stdout.includes("DO_NOT_PRINT_LOCAL_SECRET")).toBe(false);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "local-link" && check.status === "error")).toBe(true);
+				if (conflict === "file") expect(readFileSync(target, "utf8")).toBe("preserve user work");
+				if (conflict === "absent") expect(existsSync(target)).toBe(false);
+			}
+			config.local_links = ["../unsafe"];
+			writeFileSync(configPath, JSON.stringify(config));
+			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(1);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("warns about existing and unreadable locks without acquiring, removing or claiming ownership", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture);
+			const lock = join(fixture.checkout, ".git", "agent-session", "operation.lock");
+			mkdirSync(lock);
+			const owner = join(lock, "owner.json");
+			for (const contents of [JSON.stringify({ pid: process.pid, command: "DO_NOT_PRINT_LOCK_SECRET", createdAt: new Date().toISOString() }), "broken owner"]) {
+				writeFileSync(owner, contents);
+				const result = runCli(fixture.checkout, ["doctor", "--json"]);
+				expect(result.status).toBe(0);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "lock" && check.status === "warning")).toBe(true);
+				expect(result.stdout.includes("DO_NOT_PRINT_LOCK_SECRET")).toBe(false);
+				expect(readFileSync(owner, "utf8")).toBe(contents);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("distinguishes shell artifacts from parent-shell state and keeps other checks when artifacts are missing", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture);
+			const result = runCli(fixture.checkout, ["doctor", "--json"], { AGENT_SESSION_SHELL_ROOT: join(fixture.root, "missing"), AGENT_SESSION_COMPLETION_ROOT: "" });
+			expect(result.status).toBe(1);
+			const checks = JSON.parse(result.stdout).checks;
+			expect(checks.some((check) => check.id === "shell-artifacts" && check.status === "error")).toBe(true);
+			expect(checks.some((check) => check.id === "completion-artifacts" && check.status === "warning")).toBe(true);
+			expect(checks.some((check) => check.id === "binding" && check.status === "ok")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("uses only local read-only Git queries and leaves work, metadata, refs, index and locks byte-identical", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree, agentLog } = startManagedSession(fixture);
+			writeFileSync(join(fixture.checkout, "dirty-primary"), "preserve primary");
+			writeFileSync(join(worktree, "dirty-session"), "preserve session");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			const configPath = runtimeConfigPath(fixture.checkout);
+			const config = JSON.parse(readFileSync(configPath, "utf8"));
+			config.agent_command = ["DO_NOT_EXECUTE_AGENT_SECRET"];
+			config.prepare_command = ["DO_NOT_EXECUTE_PREPARE_SECRET"];
+			writeFileSync(configPath, JSON.stringify(config));
+			const snapshot = (root: string): string => {
+				const entries: string[] = [];
+				const visit = (path: string) => {
+					const stat = lstatSync(path);
+					if (stat.isSymbolicLink()) entries.push(`${path}:${readlinkSync(path)}`);
+					else if (stat.isDirectory()) { entries.push(`${path}/`); for (const name of readdirSync(path).sort()) visit(join(path, name)); }
+					else entries.push(`${path}:${readFileSync(path).toString("base64")}`);
+				};
+				visit(root);
+				return JSON.stringify(entries);
+			};
+			const before = snapshot(fixture.checkout);
+			const realGit = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const bin = join(fixture.root, "audit-bin");
+			mkdirSync(bin);
+			const log = join(fixture.root, "git-audit");
+			writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${tomlString(log)}\ncase "$1" in rev-parse) ;; worktree) [ "$2" = list ] || exit 99 ;; check-ignore) ;; *) exit 99 ;; esac\nexec ${tomlString(realGit)} "$@"\n`);
+			chmodSync(join(bin, "git"), 0o755);
+			const result = runCli(fixture.checkout, ["doctor", "--json"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(0);
+			expect(JSON.parse(result.stdout).ok).toBe(true);
+			expect(result.stdout.includes("DO_NOT_EXECUTE")).toBe(false);
+			expect(readFileSync(log, "utf8").includes("check-ignore")).toBe(true);
+			expect(snapshot(fixture.checkout) === before).toBe(true);
+			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(1);
+			for (const option of ["--fix", "--repair", "--refresh"]) expect(runCli(fixture.checkout, ["doctor", option]).status).toBe(64);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+describe("explicit current-session targeting", () => {
+	it("resolves roots and nested directories offline by verified path rather than the current branch name", () => {
+		const fixture = createRepositoryFixture("agent current session ");
+		try {
+			const { worktree, agentLog } = startManagedSession(fixture);
+			const original = readFileSync(sessionMetadataPath(fixture.checkout, "git-hygiene"), "utf8");
+			git(worktree, "branch", "-m", "feat/renamed-current");
+			const nested = join(worktree, "nested", "directory");
+			mkdirSync(nested, { recursive: true });
+			writeFileSync(join(fixture.checkout, "unfinished"), "primary work");
+			writeFileSync(join(worktree, "unfinished"), "session work");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			for (const cwd of [worktree, nested]) {
+				const status = runCli(cwd, [".", "status", "--json"]);
+				expect(status.status).toBe(0);
+				const session = JSON.parse(status.stdout).sessions[0];
+				expect(session.slug).toBe("git-hygiene");
+				expect(session.currentBranch).toBe("feat/renamed-current");
+				const path = runCli(cwd, [".", "cd"]);
+				expect(path.status).toBe(0);
+				expect(path.stdout).toBe(`${worktree}\n`);
+				expect(runCli(cwd, ["--", ".", "cd"]).stdout).toBe(`${worktree}\n`);
+				expect(runCli(cwd, ["__complete", "targets"]).stdout.split("\n").includes(".")).toBe(true);
+				const commands = runCli(cwd, ["__complete", "current-commands"]).stdout.split("\n");
+				expect(commands.includes("run")).toBe(true);
+				expect(commands.includes("create")).toBe(false);
+				expect(commands.includes("start")).toBe(false);
+				expect(commands.includes("repair")).toBe(false);
+			}
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "git-hygiene"), "utf8")).toBe(original);
+			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(1);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("rejects primary, unmanaged, same-basename and nested-repository contexts without falling back", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const outside = join(fixture.root, "unmanaged");
+			const sameName = join(fixture.root, "outside", "git-hygiene");
+			git(fixture.checkout, "worktree", "add", "--detach", outside, "origin/master");
+			git(fixture.checkout, "worktree", "add", "--detach", sameName, "origin/master");
+			const nestedRepo = join(worktree, "nested-repository");
+			git(worktree, "init", nestedRepo);
+			for (const cwd of [fixture.checkout, outside, sameName, nestedRepo, fixture.root]) {
+				for (const command of ["status", "cd"]) {
+					const result = runCli(cwd, [".", command]);
+					expect(result.status === 0).toBe(false);
+					expect(result.stdout).toBe("");
+				}
+				expect(runCli(cwd, ["__complete", "targets"]).stdout.split("\n").includes(".")).toBe(false);
+			}
+			expect(existsSync(worktree)).toBe(true);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(true);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("requires a recorded valid binding and does not repair or execute on a guessed target", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const path = sessionMetadataPath(fixture.checkout, "git-hygiene");
+			const original = readFileSync(path, "utf8");
+			rmSync(path);
+			const unrecorded = runCli(worktree, [".", "status", "--json"]);
+			expect(unrecorded.status).toBe(1);
+			expect(unrecorded.stderr).toContain("no recorded managed session");
+			expect(existsSync(path)).toBe(false);
+			expect(runCli(worktree, ["__complete", "targets"]).stdout.split("\n").includes(".")).toBe(false);
+			const bin = join(fixture.root, "bin");
+			mkdirSync(bin);
+			const executed = join(fixture.root, "unexpected-command");
+			writeFileSync(join(bin, "devenv"), `#!/usr/bin/env bash\ntouch ${tomlString(executed)}\n`);
+			chmodSync(join(bin, "devenv"), 0o755);
+			for (const change of [{ worktreePath: fixture.seed }, { slug: "another-session" }]) {
+				writeFileSync(path, JSON.stringify({ ...JSON.parse(original), ...change }));
+				expect(runCli(worktree, [".", "run", "true"], { PATH: `${bin}:${process.env.PATH}` }).status).toBe(1);
+				expect(existsSync(executed)).toBe(false);
+			}
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("requires explicit slugs for creation, startup and metadata repair", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree, agentLog } = startManagedSession(fixture);
+			const original = readFileSync(sessionMetadataPath(fixture.checkout, "git-hygiene"), "utf8");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			for (const command of ["create", "start", "repair"]) {
+				const result = runCli(worktree, [".", command]);
+				expect(result.status).toBe(64);
+				expect(result.stderr).toContain("requires an explicit slug");
+			}
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "git-hygiene"), "utf8")).toBe(original);
+			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(1);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("preserves the invoking-worktree cleanup guard even for previews and forced finish", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const nested = join(worktree, "nested");
+			mkdirSync(nested);
+			for (const flags of [[], ["--dry-run", "--json"], ["--keep-branch", "--yes"], ["--force", "--yes"]]) {
+				const result = runCli(nested, [".", "finish", ...flags]);
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain("Cannot remove the worktree containing the current shell");
+				expect(existsSync(worktree)).toBe(true);
+				expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(true);
+			}
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("uses the current binding for launch and resume without allocating another session", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree, agentLog } = startManagedSession(fixture);
+			const nested = join(worktree, "nested");
+			mkdirSync(nested);
+			expect(runCli(nested, [".", "launch"]).status).toBe(0);
+			expect(runCli(nested, [".", "resume"]).status).toBe(0);
+			expect(readFileSync(agentLog, "utf8")).toBe(`${worktree}\n${worktree}\n${worktree}\n`);
+			expect(readFileSync(`${agentLog}.args`, "utf8")).toBe("\n\n--continue\n");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	for (const shell of ["bash", "zsh", "fish"]) {
+		it(`changes the current ${shell} directory from a nested current-session target`, () => {
+			const fixture = createRepositoryFixture("agent current session ");
+			try {
+				const { worktree } = startManagedSession(fixture);
+				const nested = join(worktree, "nested");
+				mkdirSync(nested);
+				const bin = installFixtureCLI(fixture);
+				const script = shell === "fish"
+					? 'source "$INTEGRATION"; as . cd; or exit; as -- . cd; or exit; printf "%s\\n" "$PWD"'
+					: 'source "$INTEGRATION"; as . cd || exit; as -- . cd || exit; printf "%s\\n" "$PWD"';
+				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "bash" ? "--noprofile" : "-f", "-c", script], {
+					cwd: nested,
+					encoding: "utf8",
+					env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, INTEGRATION: installedShellIntegration(shell), AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				});
+				expect(result.status).toBe(0);
+				expect(result.stdout).toBe(`${worktree}\n`);
+			} finally {
+				rmSync(fixture.root, { recursive: true, force: true });
+			}
+		});
+
+		it(`offers only existing-session actions after the dot in ${shell}`, () => {
+			const fixture = createRepositoryFixture();
+			try {
+				const { worktree } = startManagedSession(fixture);
+				const bin = installFixtureCLI(fixture);
+				const directory = join(fixture.root, "completions");
+				mkdirSync(directory);
+				const completion = runCli(worktree, ["completion", shell]);
+				const path = join(directory, shell === "zsh" ? "_agent_session" : "completion");
+				writeFileSync(path, completion.stdout.replaceAll("-c agent-session ", "-c as "));
+				const script = shell === "fish" ? 'source "$COMPLETION"; complete -C "as . "'
+					: shell === "bash" ? 'source "$COMPLETION"; COMP_WORDS=(as . ""); COMP_CWORD=2; _agent_session; printf "%s\\n" "${COMPREPLY[@]}"'
+					: 'fpath=("$COMPLETION_DIR" $fpath); autoload -Uz compinit; compinit -D -i; _describe() { local name=$2; print -rl -- "${(@P)name}"; }; words=(as . ""); CURRENT=3; _agent_session';
+				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "bash" ? "--noprofile" : "-f", "-c", script], {
+					cwd: worktree,
+					encoding: "utf8",
+					env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, COMPLETION: path, COMPLETION_DIR: directory, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				});
+				expect(result.status).toBe(0);
+				expect(result.stdout).toContain("run");
+				expect(result.stdout.includes("create")).toBe(false);
+				expect(result.stdout.includes("start")).toBe(false);
+				expect(result.stdout.includes("repair")).toBe(false);
+			} finally {
+				rmSync(fixture.root, { recursive: true, force: true });
+			}
+		});
+	}
 });
 
 describe("agent-session cd and run", () => {
@@ -517,7 +1153,7 @@ describe("agent-session cd and run", () => {
 			writeFileSync(join(worktree, "unfinished"), "session work");
 			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
 			for (const cwd of [fixture.checkout, worktree]) {
-				const result = runCli(cwd, ["cd", "git-hygiene"]);
+				const result = runCli(cwd, ["git-hygiene", "cd"]);
 				expect(result.status).toBe(0);
 				expect(result.stdout).toBe(`${worktree}\n`);
 				expect(result.stderr).toBe("");
@@ -533,23 +1169,23 @@ describe("agent-session cd and run", () => {
 		const fixture = createRepositoryFixture();
 		try {
 			const { worktree } = startManagedSession(fixture);
-			expect(runCli(fixture.checkout, ["cd", "unknown"]).status).toBe(1);
-			expect(runCli(fixture.checkout, ["cd", "../escape"]).status).toBe(64);
+			expect(runCli(fixture.checkout, ["unknown", "cd"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["../escape", "cd"]).status).toBe(64);
 			const metadataFile = sessionMetadataPath(fixture.checkout, "git-hygiene");
 			const original = readFileSync(metadataFile, "utf8");
 			writeFileSync(metadataFile, JSON.stringify({ ...JSON.parse(original), worktreePath: fixture.seed }));
-			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "cd"]).status).toBe(1);
 			writeFileSync(metadataFile, original);
 			// A nested directory is not the registered worktree, even in the same repository.
 			const child = join(worktree, "child");
 			mkdirSync(child);
 			writeFileSync(metadataFile, JSON.stringify({ ...JSON.parse(original), worktreePath: child }));
-			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "cd"]).status).toBe(1);
 			writeFileSync(metadataFile, original);
 			git(fixture.checkout, "worktree", "remove", "--force", worktree);
-			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "cd"]).status).toBe(1);
 			mkdirSync(worktree);
-			expect(runCli(fixture.checkout, ["cd", "git-hygiene"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "cd"]).status).toBe(1);
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
@@ -574,7 +1210,7 @@ process.exit(result.status ?? 1);
 			chmodSync(join(bin, "devenv"), 0o755);
 			const log = join(fixture.root, "devenv.json");
 			const command = ["node", "-e", "process.stdout.write(JSON.stringify(process.argv.slice(1))); process.stderr.write('command stderr\\n'); process.exit(23)", "", "two words", "$(not-evaluated)", "; not evaluated"];
-			const result = runCli(worktree, ["run", "git-hygiene", ...command], {
+			const result = runCli(worktree, ["git-hygiene", "run", ...command], {
 				PATH: `${bin}:${process.env.PATH}`,
 				DEVENV_LOG: log,
 			});
@@ -585,7 +1221,19 @@ process.exit(result.status ?? 1);
 			expect(invoked.cwd).toBe(worktree);
 			expect(JSON.stringify(invoked.args)).toBe(JSON.stringify(["-q", "shell", "--", ...command]));
 			expect(readFileSync(join(worktree, "unfinished"), "utf8")).toBe("session work");
-			const invalid = runCli(fixture.checkout, ["run", "unknown", ...command]);
+			const nested = join(worktree, "nested");
+			mkdirSync(nested);
+			const current = runCli(nested, [".", "run", ...command], {
+				PATH: `${bin}:${process.env.PATH}`,
+				DEVENV_LOG: log,
+			});
+			expect(current.status).toBe(23);
+			expect(current.stdout).toBe(result.stdout);
+			expect(current.stderr).toBe(result.stderr);
+			const currentInvocation = JSON.parse(readFileSync(log, "utf8"));
+			expect(currentInvocation.cwd).toBe(worktree);
+			expect(JSON.stringify(currentInvocation.args)).toBe(JSON.stringify(invoked.args));
+			const invalid = runCli(fixture.checkout, ["unknown", "run", ...command]);
 			expect(invalid.status).toBe(1);
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
@@ -593,14 +1241,14 @@ process.exit(result.status ?? 1);
 	});
 
 	it("diagnoses missing parent-shell integration instead of pretending the executable can cd", () => {
-		const result = spawnSync("as", ["cd", "example"], { encoding: "utf8" });
+		const result = spawnSync("as", ["example", "cd"], { encoding: "utf8" });
 		expect(result.status).toBe(64);
 		expect(result.stdout).toBe("");
 		expect(result.stderr).toContain("shell integration");
 	});
 
 	it("requires an explicit slug and a command for run", () => {
-		for (const args of [["cd"], ["cd", "task", "extra"], ["run"], ["run", "task"]]) {
+		for (const args of [["cd"], ["task", "cd", "extra"], ["run"], ["task", "run"]]) {
 			expect(runCli(resolve("."), args).status).toBe(64);
 		}
 	});
@@ -614,16 +1262,16 @@ process.exit(result.status ?? 1);
 				const integration = installedShellIntegration(shell);
 				const script = shell === "fish" ? `
 source "$INTEGRATION"
-as cd git-hygiene; or exit 11
+as git-hygiene cd; or exit 11
 test "$PWD" = "$EXPECTED"; or exit 12
-as cd unknown 2>/dev/null; and exit 13
+as unknown cd 2>/dev/null; and exit 13
 test "$PWD" = "$EXPECTED"; or exit 14
 as __complete cd | string match -q git-hygiene; or exit 15
 ` : `
 source "$INTEGRATION"
-as cd git-hygiene || exit 11
+as git-hygiene cd || exit 11
 [ "$PWD" = "$EXPECTED" ] || exit 12
-if as cd unknown 2>/dev/null; then exit 13; fi
+if as unknown cd 2>/dev/null; then exit 13; fi
 [ "$PWD" = "$EXPECTED" ] || exit 14
 [ "$(as __complete cd)" = git-hygiene ] || exit 15
 `;
@@ -641,6 +1289,28 @@ if as cd unknown 2>/dev/null; then exit 13; fi
 	}
 
 	for (const shell of ["bash", "zsh", "fish"]) {
+		it(`navigates to an escaped command-word slug in ${shell}`, () => {
+			const fixture = createRepositoryFixture();
+			try {
+				writeConfig(fixture.checkout, "true");
+				expect(runCli(fixture.checkout, ["--", "status", "create"]).status).toBe(0);
+				const expected = join(realpathSync(fixture.worktrees), "status");
+				const bin = installFixtureCLI(fixture);
+				const script = shell === "fish"
+					? 'source "$INTEGRATION"; as -- status cd; or exit; printf "%s\\n" "$PWD"'
+					: 'source "$INTEGRATION"; as -- status cd || exit; printf "%s\\n" "$PWD"';
+				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "bash" ? "--noprofile" : "-f", "-c", script], {
+					cwd: fixture.checkout,
+					encoding: "utf8",
+					env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, INTEGRATION: installedShellIntegration(shell), AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				});
+				expect(result.status).toBe(0);
+				expect(result.stdout).toBe(`${expected}\n`);
+			} finally {
+				rmSync(fixture.root, { recursive: true, force: true });
+			}
+		});
+
 		it(`preserves the executable as outside enabled projects in ${shell}`, () => {
 			const root = mkdtempSync(join(tmpdir(), "agent-shell-fallback-"));
 			try {
@@ -665,6 +1335,7 @@ if as cd unknown 2>/dev/null; then exit 13; fi
 			try {
 				startManagedSession(fixture);
 				const bin = installFixtureCLI(fixture);
+				expect(runCli(fixture.checkout, ["--", "status", "create"]).status).toBe(0);
 				writeFileSync(join(bin, "git-completion-test"), "#!/usr/bin/env bash\nexit 0\n");
 				chmodSync(join(bin, "git-completion-test"), 0o755);
 				const completion = runCli(fixture.checkout, ["completion", shell]);
@@ -673,14 +1344,25 @@ if as cd unknown 2>/dev/null; then exit 13; fi
 				writeFileSync(path, completion.stdout.replaceAll("-c agent-session ", "-c as "));
 				const script = shell === "fish" ? `
 source "$COMPLETION"
-complete -C 'as cd git-' | string replace -r '^' 'slug:'
-complete -C 'as run git-hygiene git-' | string replace -r '^' 'command:'
+complete -C 'as git-' | string replace -r '^' 'slug:'
+complete -C 'as git-hygiene r' | string replace -r '^' 'action:'
+complete -C 'as git-hygiene run git-' | string replace -r '^' 'command:'
+complete -C 'as -- sta' | string replace -r '^' 'escaped:'
+complete -C 'as -- status run git-' | string replace -r '^' 'escaped-command:'
+complete -c git-completion-test -l marker-flag
+complete -C 'as -- status run git-completion-test --marker' | string replace -r '^' 'escaped-option:'
 ` : `
 source "$COMPLETION"
-COMP_WORDS=(as cd git-); COMP_CWORD=2; _agent_session
+COMP_WORDS=(as git-); COMP_CWORD=1; _agent_session
 printf 'slug:%s\\n' "\${COMPREPLY[@]}"
-COMP_WORDS=(as run git-hygiene git-); COMP_CWORD=3; _agent_session
+COMP_WORDS=(as git-hygiene r); COMP_CWORD=2; _agent_session
+printf 'action:%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as git-hygiene run git-); COMP_CWORD=3; _agent_session
 printf 'command:%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as -- sta); COMP_CWORD=2; _agent_session
+printf 'escaped:%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as -- status run git-); COMP_CWORD=4; _agent_session
+printf 'escaped-command:%s\\n' "\${COMPREPLY[@]}"
 `;
 				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : "--noprofile", "-c", script], {
 					cwd: fixture.checkout,
@@ -689,8 +1371,12 @@ printf 'command:%s\\n' "\${COMPREPLY[@]}"
 				});
 				expect(result.status).toBe(0);
 				expect(result.stdout).toContain("slug:git-hygiene");
+				expect(result.stdout).toContain("action:run");
 				expect(result.stdout).toContain("command:git-completion-test");
 				expect(result.stdout.includes("command:git-hygiene")).toBe(false);
+				expect(result.stdout).toContain("escaped:status");
+				expect(result.stdout).toContain("escaped-command:git-completion-test");
+				if (shell === "fish") expect(result.stdout).toContain("escaped-option:--marker-flag");
 			} finally {
 				rmSync(fixture.root, { recursive: true, force: true });
 			}
@@ -706,12 +1392,15 @@ fpath=("$COMPLETION" $fpath)
 autoload -Uz compinit
 compinit -D -i
 _normal() { print -r -- "$CURRENT:\${(j:|:)words}"; }
-words=(as run git-hygiene git-completion-test --arg)
+words=(as git-hygiene run git-completion-test --arg)
 CURRENT=5
+_agent_session
+words=(as -- status run git-completion-test --arg)
+CURRENT=6
 _agent_session
 `], { encoding: "utf8", env: { ...process.env, COMPLETION: root } });
 			expect(result.status).toBe(0);
-			expect(result.stdout).toBe("2:git-completion-test|--arg\n");
+			expect(result.stdout).toBe("2:git-completion-test|--arg\n2:git-completion-test|--arg\n");
 		} finally {
 			rmSync(root, { recursive: true, force: true });
 		}
@@ -721,7 +1410,7 @@ _agent_session
 		const fixture = createRepositoryFixture();
 		try {
 			startManagedSession(fixture);
-			for (const command of ["cd", "run"]) {
+			for (const command of ["run", "cd"]) {
 				expect(runCli(fixture.checkout, ["__complete", command]).stdout).toBe("git-hygiene\n");
 			}
 		} finally {
@@ -771,7 +1460,7 @@ describe("agent-session status, launch, and resume", () => {
 			};
 			expect(refreshedPayload.sessions[0]?.fresh).toBe(false);
 
-			const human = runCli(worktree, ["status", "git-hygiene"]);
+			const human = runCli(worktree, ["git-hygiene", "status"]);
 			expect(human.status).toBe(0);
 			expect(human.stdout).toContain("git-hygiene");
 			expect(human.stdout).toContain("DIRTY");
@@ -787,19 +1476,19 @@ describe("agent-session status, launch, and resume", () => {
 			const { worktree } = startManagedSession(fixture);
 			git(fixture.checkout, "worktree", "remove", "--force", worktree);
 
-			const human = runCli(fixture.checkout, ["status", "git-hygiene"]);
+			const human = runCli(fixture.checkout, ["git-hygiene", "status"]);
 			expect(human.status).toBe(0);
 			expect(human.stdout).toContain(
 				"git-hygiene  agent/git-hygiene  ORPHANED",
 			);
 			expect(human.stderr).toContain("Managed worktree is missing");
 			expect(human.stderr).toContain(
-				"agent-session finish git-hygiene --force",
+				"agent-session git-hygiene finish --force",
 			);
 
 			const json = runCli(fixture.checkout, [
-				"status",
 				"git-hygiene",
+				"status",
 				"--json",
 			]);
 			expect(json.status).toBe(0);
@@ -817,8 +1506,8 @@ describe("agent-session status, launch, and resume", () => {
 			);
 			rmSync(sessionMetadataPath(fixture.checkout, "unrecorded"));
 			const unrecorded = runCli(unrecordedWorktree, [
-				"status",
 				"unrecorded",
+				"status",
 				"--json",
 			]);
 			expect(unrecorded.status).toBe(0);
@@ -837,12 +1526,12 @@ describe("agent-session status, launch, and resume", () => {
 				"Session metadata is missing",
 			);
 
-			const repaired = runCli(unrecordedWorktree, ["repair", "unrecorded"]);
+			const repaired = runCli(unrecordedWorktree, ["unrecorded", "repair"]);
 			expect(repaired.status).toBe(0);
 			expect(repaired.stdout).toContain("Session metadata repaired");
 			const repairedStatus = runCli(fixture.checkout, [
-				"status",
 				"unrecorded",
+				"status",
 				"--json",
 			]);
 			const repairedPayload = JSON.parse(repairedStatus.stdout) as {
@@ -861,7 +1550,7 @@ describe("agent-session status, launch, and resume", () => {
 			const { worktree } = startManagedSession(fixture);
 			git(worktree, "switch", "feat/pre-existing");
 
-			const result = runCli(fixture.checkout, ["status", "git-hygiene"]);
+			const result = runCli(fixture.checkout, ["git-hygiene", "status"]);
 
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("CONFLICT");
@@ -874,8 +1563,8 @@ describe("agent-session status, launch, and resume", () => {
 			);
 
 			const json = runCli(fixture.checkout, [
-				"status",
 				"git-hygiene",
+				"status",
 				"--json",
 			]);
 			const payload = JSON.parse(json.stdout) as {
@@ -902,7 +1591,7 @@ describe("agent-session status, launch, and resume", () => {
 			writeFileSync(join(worktree, "unfinished.txt"), "keep me\n");
 			advanceRemoteDefault(fixture);
 
-			const result = runCli(worktree, ["launch", "git-hygiene"]);
+			const result = runCli(worktree, ["git-hygiene", "launch"]);
 
 			expect(result.status).toBe(0);
 			expect(result.stderr).toContain("Launching agent/git-hygiene");
@@ -913,7 +1602,7 @@ describe("agent-session status, launch, and resume", () => {
 			);
 			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(2);
 
-			const resumed = runCli(worktree, ["resume", "git-hygiene"]);
+			const resumed = runCli(worktree, ["git-hygiene", "resume"]);
 			expect(resumed.status).toBe(0);
 			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(3);
 			expect(readFileSync(`${agentLog}.args`, "utf8")).toBe("\n\n--continue\n");
@@ -929,8 +1618,8 @@ describe("agent-session finish", () => {
 		try {
 			const { worktree } = startManagedSession(fixture);
 			const preview = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--keep-branch",
 				"--dry-run",
 				"--json",
@@ -945,8 +1634,8 @@ describe("agent-session finish", () => {
 				JSON.stringify({ ...metadata, createdAt: "2099-01-01T00:00:00.000Z" }),
 			);
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--keep-branch",
 				"--yes",
 				"--expected",
@@ -977,7 +1666,10 @@ describe("agent-session finish", () => {
 				],
 				["--all", "--keep-branch", "--expected", "a".repeat(64)],
 			]) {
-				const result = runCli(fixture.checkout, ["finish", ...args, "--yes"]);
+				const invocation = args[0]?.startsWith("--")
+					? ["finish", ...args, "--yes"]
+					: [args[0] ?? "", "finish", ...args.slice(1), "--yes"];
+				const result = runCli(fixture.checkout, invocation);
 				expect(result.status).toBe(64);
 				expect(existsSync(worktree)).toBe(true);
 			}
@@ -993,8 +1685,8 @@ describe("agent-session finish", () => {
 			writeFileSync(join(worktree, "unfinished.txt"), "unfinished\n");
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1015,8 +1707,8 @@ describe("agent-session finish", () => {
 			const { worktree } = startManagedSession(fixture);
 
 			const result = runCli(worktree, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--force",
 				"--yes",
 			]);
@@ -1038,8 +1730,8 @@ describe("agent-session finish", () => {
 			writeFileSync(join(worktree, "discard-me.txt"), "unfinished\n");
 
 			const unconfirmed = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--force",
 			]);
 			expect(unconfirmed.status).toBe(1);
@@ -1047,8 +1739,8 @@ describe("agent-session finish", () => {
 			expect(existsSync(worktree)).toBe(true);
 
 			const forced = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--force",
 				"--yes",
 			]);
@@ -1075,8 +1767,8 @@ describe("agent-session finish", () => {
 			rmSync(survivor, { recursive: true, force: true });
 
 			const forced = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--force",
 				"--yes",
 			]);
@@ -1112,8 +1804,8 @@ describe("agent-session finish", () => {
 			);
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--dry-run",
 				"--json",
 			]);
@@ -1149,8 +1841,8 @@ describe("agent-session finish", () => {
 			commitSessionWork(worktree);
 
 			const unpublished = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 			expect(unpublished.status).toBe(1);
@@ -1168,8 +1860,8 @@ describe("agent-session finish", () => {
 			commitSessionWork(worktree);
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--keep-branch",
 				"--yes",
 			]);
@@ -1263,8 +1955,8 @@ describe("agent-session finish", () => {
 			mergeSessionAndDeleteRemoteBranch(fixture);
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1325,8 +2017,8 @@ describe("agent-session finish", () => {
 			advanceRemoteDefault(fixture);
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1353,8 +2045,8 @@ describe("agent-session finish", () => {
 			git(worktree, "push", "-u", "origin", "HEAD");
 
 			const preview = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--dry-run",
 				"--json",
 			]);
@@ -1368,8 +2060,8 @@ describe("agent-session finish", () => {
 			);
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1425,8 +2117,8 @@ describe("agent-session finish", () => {
 
 		it("preserves a pre-existing branch that was only checked out in the worktree", () => {
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1459,8 +2151,8 @@ describe("agent-session finish", () => {
 
 		it("rejects cleanup when any session-created branch has unpublished work", () => {
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1496,8 +2188,8 @@ describe("agent-session finish", () => {
 
 		it("force-removes every session-created branch with unpublished work", () => {
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--force",
 				"--yes",
 			]);
@@ -1522,8 +2214,8 @@ describe("agent-session finish", () => {
 			git(worktree, "switch", "-c", "fix/preserved-second", "origin/master");
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--keep-branch",
 				"--yes",
 			]);
@@ -1551,14 +2243,14 @@ describe("agent-session finish", () => {
 			commitSessionWork(worktree);
 			git(worktree, "push", "-u", "origin", "HEAD");
 
-			const unconfirmed = runCli(fixture.checkout, ["finish", "git-hygiene"]);
+			const unconfirmed = runCli(fixture.checkout, ["git-hygiene", "finish"]);
 			expect(unconfirmed.status).toBe(1);
 			expect(unconfirmed.stderr).toContain("Confirmation required");
 			expect(existsSync(worktree)).toBe(true);
 
 			const result = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 
@@ -1589,15 +2281,15 @@ describe("agent-session finish", () => {
 
 describe("agent-session diagnostics and completions", () => {
 	it("suggests corrections for unknown commands and options", () => {
-		const unknownCommand = runCli(resolve("."), ["finnish"]);
+		const unknownCommand = runCli(resolve("."), ["example", "finnish"]);
 		expect(unknownCommand.status).toBe(64);
 		expect(unknownCommand.stderr).toContain(
 			"Unknown command 'finnish'. Did you mean 'finish'?",
 		);
 
 		const unknownOption = runCli(resolve("."), [
-			"finish",
 			"example",
+			"finish",
 			"--froce",
 		]);
 		expect(unknownOption.status).toBe(64);
@@ -1611,7 +2303,7 @@ describe("agent-session diagnostics and completions", () => {
 		expect(missingSlug.status).toBe(64);
 		expect(missingSlug.stderr).toContain("Missing <task-slug> for 'create'.");
 
-		const conflicting = runCli(resolve("."), ["finish", "example", "--all"]);
+		const conflicting = runCli(resolve("."), ["example", "finish", "--all"]);
 		expect(conflicting.status).toBe(64);
 		expect(conflicting.stderr).toContain(
 			"Choose exactly one finish selector: <task-slug>, --all, or --gone.",
@@ -1649,7 +2341,7 @@ CURRENT=2
 			);
 
 			expect(invocation.status).toBe(0);
-			expect(invocation.stdout).toBe("command\n");
+			expect(invocation.stdout).toBe("session or command\n");
 		} finally {
 			rmSync(completionDirectory, { recursive: true, force: true });
 		}
@@ -1742,7 +2434,7 @@ describe("agent-session hardening", () => {
 			writeConfig(fixture.checkout, fakeAgent);
 			writeFileSync(join(fixture.checkout, "user-work.txt"), "do not touch\n");
 
-			const result = runCli(fixture.checkout, ["start", "dirty-primary"]);
+			const result = runCli(fixture.checkout, ["dirty-primary", "start"]);
 
 			expect(result.status).toBe(1);
 			expect(result.stderr).toContain("Primary checkout must be clean");
@@ -1763,7 +2455,7 @@ describe("agent-session hardening", () => {
 			);
 			writeConfig(fixture.checkout, fakeAgent, ["false"]);
 
-			const result = runCli(fixture.checkout, ["start", "setup-failure"]);
+			const result = runCli(fixture.checkout, ["setup-failure", "start"]);
 			const worktree = join(fixture.worktrees, "setup-failure");
 
 			expect(result.status).toBe(1);
@@ -1788,7 +2480,7 @@ describe("agent-session hardening", () => {
 			chmodSync(failingAgent, 0o755);
 			writeConfig(fixture.checkout, failingAgent);
 
-			const started = runCli(fixture.checkout, ["start", "agent-failure"]);
+			const started = runCli(fixture.checkout, ["agent-failure", "start"]);
 			expect(started.status).toBe(23);
 			expect(started.stderr).toContain("remains available to resume");
 			expect(
@@ -1796,8 +2488,8 @@ describe("agent-session hardening", () => {
 			).toBe(true);
 
 			const status = runCli(fixture.checkout, [
-				"status",
 				"agent-failure",
+				"status",
 				"--json",
 			]);
 			expect(status.status).toBe(0);
@@ -1817,7 +2509,7 @@ describe("agent-session hardening", () => {
 			writeConfig(fixture.checkout, fakeAgent);
 			git(fixture.checkout, "branch", "agent/collision");
 
-			const result = runCli(fixture.checkout, ["start", "collision"]);
+			const result = runCli(fixture.checkout, ["collision", "start"]);
 
 			expect(result.status).toBe(1);
 			expect(result.stderr).toContain("Refusing to modify unmanaged assets");
@@ -1845,16 +2537,16 @@ describe("agent-session hardening", () => {
 			expect(status.stdout).toContain('"state":"broken"');
 
 			const finish = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--yes",
 			]);
 			expect(finish.status).toBe(1);
 			expect(finish.stderr).toContain("Unsafe session metadata");
 
 			const forced = runCli(fixture.checkout, [
-				"finish",
 				"git-hygiene",
+				"finish",
 				"--force",
 				"--yes",
 			]);
@@ -1891,7 +2583,7 @@ describe("agent-session hardening", () => {
 			expect(status.status).toBe(0);
 			expect(status.stdout).toContain('"command":"resume"');
 
-			const started = runCli(fixture.checkout, ["start", "collision"]);
+			const started = runCli(fixture.checkout, ["collision", "start"]);
 			expect(started.status).toBe(1);
 			expect(started.stderr).toContain(
 				"Another agent-session operation is active",
@@ -1904,7 +2596,7 @@ describe("agent-session hardening", () => {
 				join(lockDirectory, "owner.json"),
 				`${JSON.stringify({ pid: 2_147_483_647, command: "stale", createdAt: new Date(0).toISOString() })}\n`,
 			);
-			const recovered = runCli(fixture.checkout, ["start", "recovered"]);
+			const recovered = runCli(fixture.checkout, ["recovered", "start"]);
 			expect(recovered.status).toBe(0);
 			expect(existsSync(lockDirectory)).toBe(false);
 		} finally {
