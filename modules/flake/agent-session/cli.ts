@@ -4,6 +4,7 @@ import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showStatus } from "./inspection.ts";
+import { doctor } from "./doctor.ts";
 import { finish, finishBulk } from "./finish.ts";
 import {
 	commandNames,
@@ -13,6 +14,7 @@ import {
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
+	parseDoctorArguments,
 	parseRequiredSlug,
 	parseInvocation,
 	legacySessionSyntax,
@@ -88,6 +90,11 @@ export function main(args: string[]): number {
 				options.refresh,
 			);
 			return 0;
+		}
+		if (command === "doctor") {
+			const options = parseDoctorArguments(rest);
+			if (invocation.global && options.slug) throw legacySessionSyntax(command);
+			return doctor(options.slug, options.json);
 		}
 		if (command === "repair") {
 			const slug = parseRequiredSlug("repair", rest);

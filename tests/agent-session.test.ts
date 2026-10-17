@@ -20,6 +20,10 @@ import {
 	chmodSync,
 	existsSync,
 	mkdirSync,
+	lstatSync,
+	readdirSync,
+	readlinkSync,
+	symlinkSync,
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
@@ -285,7 +289,7 @@ describe("subject-first invocation", () => {
 	it("requires an explicit escape for slugs that collide with command words", () => {
 		const fixture = createRepositoryFixture();
 		try {
-			for (const slug of ["status", "finish", "create", "run", "completion"]) {
+			for (const slug of ["status", "doctor", "finish", "create", "run", "completion"]) {
 				expect(runCli(fixture.checkout, ["--", slug, "create"]).status).toBe(0);
 				const result = runCli(fixture.checkout, ["--", slug, "status", "--json"]);
 				expect(result.status).toBe(0);
@@ -328,6 +332,11 @@ describe("agent-session create and start", () => {
 			expect(current.stderr).toBe("");
 			expect(current.status).toBe(0);
 			expect(JSON.parse(current.stdout).sessions[0].slug).toBe("installed-package");
+			const diagnosis = installed("as", [".", "doctor", "--json"], nested);
+			expect(diagnosis.status).toBe(0);
+			expect(JSON.parse(diagnosis.stdout).slug).toBe("installed-package");
+			expect(installed("as", ["doctor", "--json"]).status).toBe(0);
+			expect(installed("as", ["doctor", "cd"]).stderr).toContain("Session commands use <task-slug> <command>");
 			expect(installed("agent-session", [".", "cd"], nested).stdout).toBe(`${worktree}\n`);
 			rmSync(nested, { recursive: true });
 			const status = installed("as", ["installed-package", "status", "--json"]);
@@ -756,6 +765,190 @@ child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); proce
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("read-only doctor", () => {
+	it("reports healthy bindings as one versioned JSON document and offers human diagnostics", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			git(worktree, "branch", "-m", "feat/renamed-doctor");
+			const result = runCli(fixture.checkout, ["doctor", "--json"]);
+			expect(result.status).toBe(0);
+			expect(result.stderr).toBe("");
+			const report = JSON.parse(result.stdout);
+			expect(report.version).toBe(1);
+			expect(report.command).toBe("doctor");
+			expect(report.ok).toBe(true);
+			expect(report.checks.some((check) => check.id === "binding" && check.slug === "git-hygiene" && check.status === "ok")).toBe(true);
+			expect(report.checks.some((check) => check.id === "shell-parent" && check.status === "info")).toBe(true);
+			const nested = join(worktree, "nested");
+			mkdirSync(nested);
+			const current = runCli(nested, [".", "doctor", "--json"]);
+			expect(current.status).toBe(0);
+			expect(JSON.parse(current.stdout).slug).toBe("git-hygiene");
+			const human = runCli(fixture.checkout, ["doctor"]);
+			expect(human.status).toBe(0);
+			expect(human.stdout).toContain("Doctor: no errors");
+			expect(human.stdout).toContain("git-hygiene");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("diagnoses absent or invalid configuration and non-repository contexts without leaking values", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const secret = "DO_NOT_PRINT_CONFIG_SECRET";
+			for (const contents of ["", `{\"${secret}\":`, JSON.stringify({ version: 1, worktree_root: "../unsafe", agent_command: [secret], prepare_command: [], local_links: [] })]) {
+				writeFileSync(runtimeConfigPath(fixture.checkout), contents);
+				const result = runCli(fixture.checkout, ["doctor", "--json"]);
+				expect(result.status).toBe(1);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "configuration" && check.status === "error")).toBe(true);
+				expect((result.stdout + result.stderr).includes(secret)).toBe(false);
+			}
+			const missing = runCli(fixture.checkout, ["doctor", "--json"], { AGENT_SESSION_CONFIG: join(fixture.root, "absent") });
+			expect(missing.status).toBe(1);
+			expect(JSON.parse(missing.stdout).ok).toBe(false);
+			const outside = runCli(fixture.root, ["doctor", "--json"]);
+			expect(outside.status).toBe(1);
+			expect(JSON.parse(outside.stdout).checks.some((check) => check.id === "repository" && check.status === "error")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reports malformed, unsafe, missing and unrecorded bindings without repair and scopes named reports", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const path = sessionMetadataPath(fixture.checkout, "git-hygiene");
+			const original = readFileSync(path, "utf8");
+			for (const contents of ["null", "TOKEN_SECRET", JSON.stringify({ ...JSON.parse(original), worktreePath: fixture.seed })]) {
+				writeFileSync(path, contents);
+				const result = runCli(fixture.checkout, ["git-hygiene", "doctor", "--json"]);
+				expect(result.status).toBe(1);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "binding" && check.status === "error")).toBe(true);
+				expect(readFileSync(path, "utf8")).toBe(contents);
+				const current = runCli(worktree, [".", "doctor", "--json"]);
+				expect(current.status).toBe(1);
+				expect(JSON.parse(current.stdout).ok).toBe(false);
+				expect((current.stdout + current.stderr).includes("TOKEN_SECRET")).toBe(false);
+			}
+			writeFileSync(path, original);
+			git(worktree, "branch", "-m", "feat/unrecorded-doctor");
+			rmSync(path);
+			const unrecorded = runCli(fixture.checkout, ["doctor", "--json"]);
+			expect(unrecorded.status).toBe(1);
+			expect(JSON.parse(unrecorded.stdout).checks.some((check) => check.slug === "git-hygiene" && check.status === "error")).toBe(true);
+			expect(existsSync(path)).toBe(false);
+			writeFileSync(path, original);
+			const unknown = runCli(fixture.checkout, ["unknown", "doctor", "--json"]);
+			expect(unknown.status).toBe(1);
+			expect(JSON.parse(unknown.stdout).checks.some((check) => check.slug === "git-hygiene")).toBe(false);
+			git(fixture.checkout, "worktree", "remove", "--force", worktree);
+			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(1);
+			expect(readFileSync(path, "utf8")).toBe(original);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("checks link targets without reading secret contents or modifying missing and conflicting links", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture);
+			const configPath = runtimeConfigPath(fixture.checkout);
+			const config = JSON.parse(readFileSync(configPath, "utf8"));
+			config.local_links = [".private-local", ".optional-absent"];
+			writeFileSync(configPath, JSON.stringify(config));
+			const source = join(fixture.checkout, ".private-local");
+			const target = join(worktree, ".private-local");
+			writeFileSync(source, "DO_NOT_PRINT_LOCAL_SECRET");
+			symlinkSync(source, target);
+			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(0);
+			for (const conflict of ["absent", "file", "wrong-link"]) {
+				rmSync(target, { force: true });
+				if (conflict === "file") writeFileSync(target, "preserve user work");
+				if (conflict === "wrong-link") symlinkSync(join(fixture.root, "missing"), target);
+				const result = runCli(fixture.checkout, ["doctor", "--json"]);
+				expect(result.status).toBe(1);
+				expect(result.stdout.includes("DO_NOT_PRINT_LOCAL_SECRET")).toBe(false);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "local-link" && check.status === "error")).toBe(true);
+				if (conflict === "file") expect(readFileSync(target, "utf8")).toBe("preserve user work");
+				if (conflict === "absent") expect(existsSync(target)).toBe(false);
+			}
+			config.local_links = ["../unsafe"];
+			writeFileSync(configPath, JSON.stringify(config));
+			expect(runCli(fixture.checkout, ["doctor", "--json"]).status).toBe(1);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("warns about existing and unreadable locks without acquiring, removing or claiming ownership", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture);
+			const lock = join(fixture.checkout, ".git", "agent-session", "operation.lock");
+			mkdirSync(lock);
+			const owner = join(lock, "owner.json");
+			for (const contents of [JSON.stringify({ pid: process.pid, command: "DO_NOT_PRINT_LOCK_SECRET", createdAt: new Date().toISOString() }), "broken owner"]) {
+				writeFileSync(owner, contents);
+				const result = runCli(fixture.checkout, ["doctor", "--json"]);
+				expect(result.status).toBe(0);
+				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "lock" && check.status === "warning")).toBe(true);
+				expect(result.stdout.includes("DO_NOT_PRINT_LOCK_SECRET")).toBe(false);
+				expect(readFileSync(owner, "utf8")).toBe(contents);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("distinguishes shell artifacts from parent-shell state and keeps other checks when artifacts are missing", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture);
+			const result = runCli(fixture.checkout, ["doctor", "--json"], { AGENT_SESSION_SHELL_ROOT: join(fixture.root, "missing"), AGENT_SESSION_COMPLETION_ROOT: "" });
+			expect(result.status).toBe(1);
+			const checks = JSON.parse(result.stdout).checks;
+			expect(checks.some((check) => check.id === "shell-artifacts" && check.status === "error")).toBe(true);
+			expect(checks.some((check) => check.id === "completion-artifacts" && check.status === "warning")).toBe(true);
+			expect(checks.some((check) => check.id === "binding" && check.status === "ok")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("uses only local read-only Git queries and leaves work, metadata, refs, index and locks byte-identical", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree, agentLog } = startManagedSession(fixture);
+			writeFileSync(join(fixture.checkout, "dirty-primary"), "preserve primary");
+			writeFileSync(join(worktree, "dirty-session"), "preserve session");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
+			const configPath = runtimeConfigPath(fixture.checkout);
+			const config = JSON.parse(readFileSync(configPath, "utf8"));
+			config.agent_command = ["DO_NOT_EXECUTE_AGENT_SECRET"];
+			config.prepare_command = ["DO_NOT_EXECUTE_PREPARE_SECRET"];
+			writeFileSync(configPath, JSON.stringify(config));
+			const snapshot = (root: string): string => {
+				const entries: string[] = [];
+				const visit = (path: string) => {
+					const stat = lstatSync(path);
+					if (stat.isSymbolicLink()) entries.push(`${path}:${readlinkSync(path)}`);
+					else if (stat.isDirectory()) { entries.push(`${path}/`); for (const name of readdirSync(path).sort()) visit(join(path, name)); }
+					else entries.push(`${path}:${readFileSync(path).toString("base64")}`);
+				};
+				visit(root);
+				return JSON.stringify(entries);
+			};
+			const before = snapshot(fixture.checkout);
+			const realGit = spawnSync("bash", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const bin = join(fixture.root, "audit-bin");
+			mkdirSync(bin);
+			const log = join(fixture.root, "git-audit");
+			writeFileSync(join(bin, "git"), `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${tomlString(log)}\ncase "$1" in rev-parse) ;; worktree) [ "$2" = list ] || exit 99 ;; check-ignore) ;; *) exit 99 ;; esac\nexec ${tomlString(realGit)} "$@"\n`);
+			chmodSync(join(bin, "git"), 0o755);
+			const result = runCli(fixture.checkout, ["doctor", "--json"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(0);
+			expect(JSON.parse(result.stdout).ok).toBe(true);
+			expect(result.stdout.includes("DO_NOT_EXECUTE")).toBe(false);
+			expect(readFileSync(log, "utf8").includes("check-ignore")).toBe(true);
+			expect(snapshot(fixture.checkout) === before).toBe(true);
+			expect(readFileSync(agentLog, "utf8").trim().split("\n").length).toBe(1);
+			for (const option of ["--fix", "--repair", "--refresh"]) expect(runCli(fixture.checkout, ["doctor", option]).status).toBe(64);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 });
 

@@ -9,13 +9,14 @@ export const commandNames = [
 	"start",
 	"resume",
 	"status",
+	"doctor",
 	"repair",
 	"finish",
 	"completion",
 ];
 
 export const sessionCommandNames = commandNames.filter((name) => name !== "completion");
-export const globalCommandNames = ["status", "completion", "finish"];
+export const globalCommandNames = ["status", "doctor", "completion", "finish"];
 export const currentSessionCommandNames = sessionCommandNames.filter((name) => !["create", "start", "repair"].includes(name));
 
 export function sessionCommand(slug: string, command: string): string {
@@ -227,6 +228,18 @@ export function parseStatusArguments(args: string[]): {
 	return { slug, json, refresh };
 }
 
+export function parseDoctorArguments(args: string[]): { slug?: string; json: boolean } {
+	let slug: string | undefined;
+	let json = false;
+	for (const argument of args) {
+		if (argument === "--json") json = true;
+		else if (argument.startsWith("-")) throw unknownOption("doctor", argument, ["--json"]);
+		else if (!slug) slug = argument;
+		else throw argumentError(`Unexpected argument '${argument}' for 'doctor'.`);
+	}
+	return { slug, json };
+}
+
 export function parseRequiredSlug(command: string, args: string[]): string {
 	if (args.length === 0) {
 		throw argumentError(`Missing <task-slug> for '${command}'.`);
@@ -256,7 +269,8 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
-		"  agent-session . <cd|run|launch|resume|status|finish> (current managed worktree)",
+		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
+		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session status [--json] [--refresh]",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",

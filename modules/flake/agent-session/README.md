@@ -43,7 +43,7 @@ as my-task finish                   # guarded local cleanup, with confirmation
 ## Command grammar and migration
 
 Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
-Repository-wide commands remain command-first: `as status`,
+Repository-wide commands remain command-first: `as status`, `as doctor`,
 `as finish --all|--gone`, and `as completion bash|zsh|fish`.
 
 Command words are reserved in the first position so old command-first calls cannot
@@ -89,12 +89,55 @@ rejected from the primary checkout, unmanaged worktrees, and unrecorded or inval
 bindings. A nested Git repository is a separate context, not its outer session.
 Use an explicit slug to inspect or repair missing metadata. Creation, `start`,
 and `repair` require explicit slugs; `.` supports only `cd`, `run`, `launch`,
-`resume`, `status`, and `finish`. The escape form `as -- . status` also works.
+`resume`, `status`, `doctor`, and `finish`. The escape form `as -- . status` also works.
 
 The existing invoking-worktree cleanup guard still rejects `as . finish`, even
 with `--force` or `--dry-run`. Move to the primary checkout and finish by slug.
 Bash, Zsh, and Fish offer `.` only for a valid current binding and filter its
 action completions to existing-session commands.
+
+## Read-only diagnostics
+
+```sh
+as doctor
+as doctor --json
+as my-task doctor --json
+as . doctor --json
+```
+
+Doctor checks module configuration, ignored worktree-root policy, installed shell
+and completion files, recorded bindings and registered managed slots, configured
+local symlinks, and lifecycle locks. It also finds registered slots whose metadata
+is missing after a branch rename. Named reports restrict binding/link checks to
+that slug; repository/configuration/integration/lock checks remain project-wide.
+An unresolved `.` reports a `current-target` error and skips binding/link checks
+rather than guessing or falling back. Use a named or repository-wide report to
+inspect a broken binding.
+
+Doctor never fetches, probes remotes, executes agent/preparation commands, calls
+credential helpers, acquires/removes locks, repairs state, or deletes files. Its
+Git queries are limited to local topology and ignore policy; it does not run
+`git status`, refresh the index, or invoke fsmonitor. It does not read local-link
+file contents or print configuration commands, metadata values, remote URLs, or
+raw parse errors. Optional absent local sources do not require links; existing
+sources require matching, non-dangling symlinks in valid sessions.
+
+JSON is one newline-terminated document with `version: 1`, `command: "doctor"`,
+`ok`, and a `checks` array. Scoped reports contain `slug` unless the current
+target could not be resolved.
+Each check has `id`, `status` (`ok`, `info`, `warning`, or `error`), and `message`;
+binding/link checks can include `slug` and a project-relative link `path`.
+Exit status is `0` with no errors (warnings are allowed), `1` for diagnostic
+errors, and `64` for invalid CLI arguments. Valid diagnostic requests still
+return JSON when configuration or repository context is missing.
+
+Installed files cannot prove that the parent shell loaded its functions or
+completions; the `shell-parent` informational check asks you to verify `type as`
+there. Lock warnings report only stored owner information, not process liveness
+or proven ownership. Neither a successful report nor a warning grants authority
+to repair or remove anything. Use `status` for dirtiness, freshness, publication,
+and branch-ownership diagnostics; doctor is not a replacement for cleanup guards.
+There are no `--fix`, `--repair`, or `--refresh` options.
 
 ## JSON creation receipts
 
@@ -225,6 +268,7 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `sessions.ts` | Configuration, session records, locks, discovery, and path validation |
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
 | `inspection.ts` | Local session state, branch ownership, and status reporting |
+| `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
 | `finish.ts` | Cleanup previews, receipts, confirmations, and guarded removal |
 | `runtime.ts` | Shared command errors, subprocess execution, and progress output |

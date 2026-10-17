@@ -12,6 +12,8 @@ const commandOptions: Record<string, string[]> = {
 	create: ["--dry-run", "--json"],
 	start: ["--no-agent"],
 	status: ["--json", "--refresh"],
+	doctor: ["--json"],
+	"global-doctor": ["--json"],
 	finish: ["--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
 	"global-status": ["--json", "--refresh"],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],
