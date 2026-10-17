@@ -26,6 +26,7 @@ import {
 } from "./inspection.ts";
 import {
 	CliError,
+	confirm,
 	progressReporter,
 	runPhase,
 	writeCommandResult,
@@ -82,8 +83,7 @@ function forceFinishUnlocked(
 				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`,
 			);
 		}
-		const answer = prompt("Discard local session assets? [y/N]") ?? "";
-		if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+		if (!confirm("Discard local session assets? [y/N]")) {
 			throw new CliError("Cleanup cancelled.");
 		}
 	}
@@ -210,8 +210,7 @@ function finishUnlocked(
 				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --yes`,
 			);
 		}
-		const answer = prompt("Delete local worktree and branch? [y/N]") ?? "";
-		if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+		if (!confirm(keepBranch ? "Remove local worktree and preserve branches? [y/N]" : "Delete local worktree and branch? [y/N]")) {
 			throw new CliError("Cleanup cancelled.");
 		}
 	}
@@ -362,8 +361,7 @@ function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean) {
 			`Confirmation required. Re-run: agent-session finish --${mode} --yes`,
 		);
 	}
-	const answer = prompt(`Finish ${count} local session(s)? [y/N]`) ?? "";
-	if (!["y", "yes"].includes(answer.trim().toLowerCase())) {
+	if (!confirm(`Finish ${count} local session(s)? [y/N]`)) {
 		throw new CliError("Finish cancelled.");
 	}
 }
