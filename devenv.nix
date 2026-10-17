@@ -38,6 +38,14 @@ in
   imports = [ ./modules/flake/agent-session/devenv.nix ];
   agentSession = {
     enable = true;
+    agentCommand = [ "pi" ];
+    # Keep local settings explicit; do not link credential stores or Pi state.
+    localLinks = [
+      ".envrc.local"
+      "devenv.local.nix"
+      "devenv.local.yaml"
+      ".workon-assistant"
+    ];
   };
 
   # Bun is only needed for the migrated regression suite, not everyday shells.
