@@ -1,6 +1,8 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
+  agentSession.enable = true;
+
   packages = with pkgs; [
     # Pharo development tools
     pharo

@@ -11,3 +11,5 @@ inputs:
   agent-marketplace:
     url: github:behaghel/nixos-config
     flake: false
+imports:
+  - agent-marketplace/modules/flake/agent-session

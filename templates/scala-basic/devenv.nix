@@ -1,6 +1,8 @@
 { pkgs, lib, config, inputs, ... }:
 
 {
+  agentSession.enable = true;
+
   languages.scala = {
     enable = true;
     package = pkgs.scala_3;
@@ -66,6 +68,9 @@
         cp -r scala-basic/* . 2>/dev/null || true
         cp -r scala-basic/.* . 2>/dev/null || true
         rm -rf scala-basic
+        # Generated dotfiles can replace the template's worktree ignore rule.
+        grep -qxF '/.worktrees/' .gitignore ||
+          printf '\n# Managed coding-agent worktrees\n/.worktrees/\n' >> .gitignore
         echo "  ✓ Project files moved to root and scala-basic/ cleaned up"
       fi
       

@@ -55,6 +55,17 @@ in
     };
   };
 
+  imports = [ ./modules/flake/agent-session/devenv.nix ];
+  agentSession = {
+    enable = true;
+  };
+
+  # Bun is only needed for the migrated regression suite, not everyday shells.
+  profiles.agent-session-tests.module = { pkgs, lib, ... }: {
+    packages = [ pkgs.bun pkgs.nodejs_24 pkgs.zsh pkgs.fish ];
+    outputs.agent-session-tests = import ./tests/agent-session.nix { inherit pkgs lib; };
+  };
+
   packages = with pkgs; [
     bats
     just

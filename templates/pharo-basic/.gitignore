@@ -1,4 +1,7 @@
 
+# Managed coding-agent worktrees
+/.worktrees/
+
 # Pharo image files (local development)
 /pharo-local/
 *.image

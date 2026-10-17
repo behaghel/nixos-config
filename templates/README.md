@@ -24,6 +24,29 @@ After creating a project from a template:
 3. The project will be automatically bootstrapped using community best practices on first visit
 4. Start developing!
 
+## Coding-agent sessions
+
+All devenv templates enable [`agent-session`](../modules/flake/agent-session/README.md)
+by default, including its `as` shorthand and Bash, Zsh, and Fish completions. They
+reuse this repository's existing input and ignore `/.worktrees/`.
+
+After committing the initial setup and configuring an upstream default branch:
+
+```sh
+as create my-task                 # create a worktree without launching an agent
+as start my-task                  # create a worktree and launch Pi
+as status                        # inspect existing sessions
+as finish my-task --dry-run       # preview cleanup
+```
+
+Pi must be available on your PATH, or set `agentSession.agentCommand` to another
+agent. Set `agentSession.enable = false;` to opt out. Projects created outside
+these templates can adopt the same module using the linked setup instructions.
+Zsh completion updates in an already-running direnv shell use this repository's
+managed shell integration; no project-specific shell aliases are needed.
+
+Existing projects remain pinned until their corresponding input is updated.
+
 ## Available Templates
 
 | Template | Description | Key Features |

@@ -7,3 +7,4 @@ inputs:
     flake: false
 imports:
   - nixos-config/modules/flake/mele-app
+  - nixos-config/modules/flake/agent-session
