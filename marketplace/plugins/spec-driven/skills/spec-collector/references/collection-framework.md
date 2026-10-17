@@ -29,15 +29,15 @@ The 6-phase framework for collecting spec information. Each phase produces speci
 **The agent reads the codebase to surface:**
 
 - Files and modules that will likely need changes
-- Existing patterns and conventions in the affected area
-- Related tests that act as implicit specifications
+- Existing patterns and conventions in the affected area (not automatically requirements)
+- Related tests that reveal behavior to assess, not automatically contracts to preserve
 - APIs, services, or systems this change interacts with
 - Recent changes to the same area (potential conflicts)
 
 **Questions to confirm with the human:**
 
-- "I see the codebase uses [pattern X] for similar functionality. Should we follow this?"
-- "There are existing tests in [path]. Should these continue to pass as-is?"
+- "I see the codebase uses [pattern X]. What failure does it address, and could the simpler baseline work here?"
+- "These tests cover [behavior]. Which guarantee matters, and which tests merely encode the old mechanism?"
 - "This area interacts with [service/API]. Any known constraints?"
 
 **Output:** Context section of the spec. Seeds for the Scope and Invariants sections.
@@ -50,10 +50,13 @@ The 6-phase framework for collecting spec information. Each phase produces speci
 
 For each decision point, present:
 
-1. What needs to be decided
-2. The options with trade-offs
-3. What the codebase conventions suggest
-4. Ask for a ruling
+1. The smallest credible design using existing capabilities
+2. Any concrete failure, domain contract, or authority boundary it cannot satisfy
+3. Alternatives and trade-offs, including the cost of extra states, handoffs, restrictions, or records
+4. Which constraints came from the human and which were inherited from implementation
+5. Ask for a ruling; add machinery only with a reason the simpler choice cannot meet the outcome
+
+When later evidence warrants a material amendment or more complex design, record an ADR with the baseline, evidence, choice, simpler alternatives, consequences, and revisit/removal conditions. Link it from the relevant spec; do not put decision history into normative domain or system specs. Follow the project's ADR convention, or agree on a location if none exists. Do not require an ADR for routine edits.
 
 **Common decision categories:**
 
@@ -114,7 +117,7 @@ If the scope is broad, break it into phases with tighter scopes per phase.
 
 Non-negotiable rules that hold regardless of implementation approach:
 
-- **Existing tests:** All tests in [paths] continue to pass
+- **Existing tests:** Preserve tests for required behavior; replace or remove tests that only encode superseded machinery
 - **API contracts:** No changes to public response shapes
 - **Performance:** No regression beyond [threshold]
 - **Security:** No new surface area (hardcoded secrets, exposed endpoints)

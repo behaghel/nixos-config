@@ -6,7 +6,7 @@ Spec-driven development toolkit — move the human checkpoint upstream from code
 
 The spec is the source of truth. Code is its artifact. When an AI agent implements a well-collected spec, you don't need to review the code — you review the spec, and the verification plan proves correctness.
 
-This plugin helps you collect the right information, structure it into the correct corpus, and validate it before implementation begins.
+This plugin helps you collect the right information, structure it into the correct corpus, and validate it before implementation begins. Start from the simplest credible design; require a concrete failure or authority boundary for added machinery. Record material later decisions to amend or complexify that baseline in linked ADRs, not in normative spec history.
 
 When `domains.yaml` exists, domain specifications are the default. Temporary acceptance and verification work becomes a non-normative iteration spec; only durable requirements irreducible to one domain become RFC 2119 system specs. This keeps delivery concerns out of the domain wiki.
 

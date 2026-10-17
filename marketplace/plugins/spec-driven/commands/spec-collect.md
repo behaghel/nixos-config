@@ -17,6 +17,7 @@ When this command is invoked:
 3. Use iteration mode only for temporary delivery scope, acceptance criteria, and verification.
 4. Use system mode only for durable RFC 2119 requirements that subsidiarity cannot assign to one domain.
 5. Honor an explicit `--mode domain|iteration|system` request.
+6. Start from the simplest credible design using existing capabilities. Distinguish the human's requested outcomes from inherited implementation choices; require concrete evidence or an authority boundary before adding machinery. Material later decisions to amend or complexify the baseline belong in linked ADRs, not normative decision history.
 
 For domain mode, update the normative domain corpus with present-tense responsibilities, boundaries, ubiquitous language, behavior, invariants, and contracts. Exclude problem history, project management, implementation sequencing, rollout, migration, progress, legacy comparisons, temporary workarounds, and verification plans.
 
@@ -54,10 +55,10 @@ For iteration mode, or when no domain manifest exists, use the following six-pha
    - Where multiple valid approaches exist
    - Where the user's description is ambiguous
 2. For each decision, present:
-   - What needs deciding
-   - Options with trade-offs
-   - What the codebase suggests
-3. Record each ruling with rationale in the Decisions table
+   - The simplest credible choice using existing capabilities
+   - What concrete failure or authority boundary (if any) requires something more complex
+   - Alternatives and trade-offs; existing code is context, not a constraint by default
+3. Record each ruling with rationale in the Decisions table. Link an ADR for a material later amendment or added complexity; use the project's ADR convention, or agree on a location if none exists.
 
 ### Phase 4: Acceptance Criteria
 

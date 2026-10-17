@@ -20,6 +20,12 @@ When `domains.yaml` exists, default to the owning **domain specification**. Use 
 
 Never put iteration concerns into domain or system corpora.
 
+## Simplicity first; evolve through decisions
+
+Start from the smallest credible design that delivers the outcome using existing capabilities. Ask what concrete failure, domain contract, or authority boundary justifies each proposed workflow stage, state, adapter, queue, approval, or restriction. Existing machinery is evidence to investigate, not a requirement to preserve. Do not turn hypothetical risks, implementation convenience, or testability into unstated human requirements. Keep necessary safety and authorization guarantees while challenging the mechanism that currently provides them.
+
+During collection, distinguish the human's requested outcomes and constraints from architectural choices the implementation introduced. Present the simple baseline first; add complexity only when a specific counterexample or measured need shows why the baseline is insufficient and why a simpler alternative cannot satisfy it. Document material *subsequent* decisions that amend or complexify that baseline in an Architecture Decision Record (ADR): context/evidence, the earlier baseline, the change and rejected simpler alternatives, consequences, and the conditions for revisiting or removing it. Link the ADR from the relevant spec instead of embedding decision history in normative domain/system pages. Use an existing project ADR convention; if none exists, agree on a location rather than inventing a framework. Routine edits do not need ADRs.
+
 ## When to Collect a Spec
 
 - Before writing any code for a new feature, fix, or refactor
@@ -43,7 +49,7 @@ Iteration and standalone collection use a 6-phase conversation that moves from f
 |-------|------|------------|
 | 1. Problem | Why does this need to exist? | Human |
 | 2. Context | What code, patterns, and systems are relevant? | Agent (reads codebase) |
-| 3. Decisions | What architectural choices need to be made? | Collaborative |
+| 3. Decisions | What must depart from the simplest credible design, and why? | Collaborative |
 | 4. Criteria | What does "done" look like? | Human (agent assists) |
 | 5. Boundaries | What can be touched? What must not break? | Collaborative |
 | 6. Verification | How do we prove each criterion is met? | Agent proposes, human approves |
@@ -67,7 +73,7 @@ Temporary iteration and conventional standalone development specs follow this st
 ## Decisions
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| [What was decided] | [The choice] | [Why this over alternatives] |
+| [What was decided] | [The simplest justified choice] | [Why this; evidence for any added complexity] |
 
 ## Acceptance Criteria
 - [ ] AC-1: Given [context], when [action], then [observable outcome]
@@ -102,7 +108,7 @@ Write under a path declared by `system-specs`, with `system` and `status` frontm
 ## What belongs in an iteration or standalone development spec
 
 1. **Problem statement** — why this exists, not what it does
-2. **Decisions with rationale** — the choices that aren't self-evident, with WHY
+2. **Decisions with rationale** — the simplest viable choices and evidence for any additional machinery; link later material amendments to ADRs
 3. **Acceptance criteria** — observable, testable outcomes (Given/When/Then)
 4. **Invariants** — what must never break
 5. **Scope boundaries** — what the implementor may and may not touch
@@ -126,6 +132,8 @@ Before including any line:
 - **"Is this durable domain truth, an irreducible system requirement, or temporary iteration context?"** → Put it in exactly one corpus.
 - **"Can a narrower domain own this?"** → Prefer subsidiarity over a system spec.
 - **"Does this resolve an ambiguity?"** → If no ambiguity exists, cut it.
+- **"What fails with the simpler design?"** → If no concrete case or authority boundary fails, do not add the machinery.
+- **"Was this constraint requested by the human, or inherited from code?"** → Do not promote inherited implementation into normative requirements without agreement.
 - **"Would removing this cause the wrong thing to be built?"** → If no, cut it.
 - **"Is this a decision or an implementation detail?"** → If detail, cut it.
 - **"Can the implementor find this in the linked reference?"** → If yes, link instead.
