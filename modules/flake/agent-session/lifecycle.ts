@@ -68,11 +68,17 @@ function executeConfigured(
 	command: string[],
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
+	stdio: "pipe" | "inherit" = "inherit",
 ): number {
 	if (command.length === 0) return 0;
 	const [executable, ...args] = command;
 	if (!executable) return 0;
-	return run(executable, args, cwd, "inherit", environment).status;
+	const result = run(executable, args, cwd, stdio, environment);
+	if (stdio === "pipe" && result.status !== 0) {
+		const diagnostic = result.stderr || result.stdout;
+		throw new CliError(`Configured command exited with status ${result.status}.${diagnostic ? `\n${diagnostic}` : ""}`);
+	}
+	return result.status;
 }
 
 function launchAgent(
@@ -271,6 +277,7 @@ function createSession(
 	root: string,
 	slug: string,
 	report: ProgressReporter = progressReporter("create", false),
+	json = false,
 ): { config: AgentSessionConfig; metadata: SessionMetadata } {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -283,9 +290,10 @@ function createSession(
 		throw new CliError("Primary checkout must be on a branch.");
 	const remote = upstreamRemote(root, currentBranch);
 	const defaultBranch = runPhase(report, "remote-sync", () => {
-		const fetch = run("git", ["fetch", "--prune", remote], root, "inherit");
+		const fetch = run("git", ["fetch", "--prune", remote], root, json ? "pipe" : "inherit");
 		if (fetch.status !== 0) {
-			throw new CliError(`Failed to fetch remote ${remote}.`);
+			const diagnostic = fetch.stderr || fetch.stdout;
+			throw new CliError(`Failed to fetch remote ${remote}.${diagnostic ? `\n${diagnostic}` : ""}`);
 		}
 		return remoteDefaultBranch(root, remote);
 	});
@@ -358,16 +366,17 @@ function createSession(
 					`${remote}/${defaultBranch}`,
 				],
 				root,
-				"inherit",
+				json ? "pipe" : "inherit",
 			);
 			if (added.status !== 0) {
-				throw new CliError("Could not create the agent worktree.");
+				const diagnostic = added.stderr || added.stdout;
+				throw new CliError(`Could not create the agent worktree.${diagnostic ? `\n${diagnostic}` : ""}`);
 			}
 		});
 		created = true;
 		runPhase(report, "worktree-prepare", () => {
 			linkLocalFiles(root, worktreePath, config.local_links);
-			if (executeConfigured(config.prepare_command, worktreePath) !== 0) {
+			if (executeConfigured(config.prepare_command, worktreePath, process.env, json ? "pipe" : "inherit") !== 0) {
 				throw new CliError("Worktree preparation failed.");
 			}
 		});
@@ -391,18 +400,20 @@ function createSession(
 				"git",
 				["worktree", "remove", "--force", worktreePath],
 				root,
-				"inherit",
+				json ? "pipe" : "inherit",
 			);
-			run("git", ["branch", "-D", branch], root, "inherit");
+			run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
 		}
 	}
 
-	process.stderr.write(`Agent worktree ready: ${branch}\n`);
+	if (!json) process.stderr.write(`Agent worktree ready: ${branch}\n`);
 	return { config, metadata: readMetadata(root, slug) };
 }
 
-function reportCreated(metadata: SessionMetadata): void {
-	process.stdout.write(
+function reportCreated(metadata: SessionMetadata, json = false): void {
+	writeCommandResult(
+		{ version: 1, command: "create", dryRun: false, session: metadata },
+		json,
 		`Session created without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n`,
 	);
 }
@@ -424,9 +435,9 @@ export function create(
 		return 0;
 	}
 	const prepared = withOperationLock(root, "create", () =>
-		createSession(root, slug, report),
+		createSession(root, slug, report, json),
 	);
-	reportCreated(prepared.metadata);
+	reportCreated(prepared.metadata, json);
 	return 0;
 }
 

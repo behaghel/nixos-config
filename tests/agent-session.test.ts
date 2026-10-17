@@ -315,9 +315,13 @@ describe("agent-session create and start", () => {
 				cwd: fixture.checkout,
 				encoding: "utf8",
 			});
-			const created = installed("as", ["installed-package", "create"]);
+			const created = installed("as", ["installed-package", "create", "--json"]);
 			expect(created.status).toBe(0);
+			const creationReceipt = JSON.parse(created.stdout);
+			expect(creationReceipt.version).toBe(1);
+			expect(creationReceipt.dryRun).toBe(false);
 			const worktree = join(realpathSync(fixture.worktrees), "installed-package");
+			expect(creationReceipt.session.worktreePath).toBe(worktree);
 			const status = installed("as", ["installed-package", "status", "--json"]);
 			expect(status.status).toBe(0);
 			const catalog = JSON.parse(status.stdout);
@@ -447,6 +451,124 @@ describe("agent-session create and start", () => {
 			expect(
 				existsSync(sessionMetadataPath(fixture.checkout, "agent-friendly")),
 			).toBe(true);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("returns one persisted creation receipt with JSON progress despite subprocess output", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const launched = join(fixture.root, "agent-launched");
+			const prepared = join(fixture.root, "prepared");
+			writeConfig(fixture.checkout, createFakeAgent(fixture.root, launched), [
+				"bash", "-c", `printf 'preparation stdout\\n'; printf 'preparation stderr\\n' >&2; printf '%s' "$PWD" > ${tomlString(prepared)}`,
+			]);
+			const result = runCli(fixture.checkout, ["json-created", "create", "--json"]);
+			expect(result.status).toBe(0);
+			const payload = JSON.parse(result.stdout);
+			expect(payload.version).toBe(1);
+			expect(payload.command).toBe("create");
+			expect(payload.dryRun).toBe(false);
+			expect(payload.session.slug).toBe("json-created");
+			expect(payload.session.branch).toBe("agent/json-created");
+			expect(payload.session.worktreePath).toBe(join(realpathSync(fixture.worktrees), "json-created"));
+			expect(JSON.stringify(payload.session)).toBe(JSON.stringify(JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "json-created"), "utf8"))));
+			expect(result.stdout.trim().split("\n").length).toBe(1);
+			expect(readFileSync(prepared, "utf8")).toBe(payload.session.worktreePath);
+			expect(existsSync(launched)).toBe(false);
+			const events = result.stderr.trim().split("\n").map((line) => JSON.parse(line));
+			expect(events.every((event) => event.version === 1 && event.type === "progress" && event.command === "create")).toBe(true);
+			expect(events.filter((event) => event.status === "completed").map((event) => event.phase).join(",")).toBe("remote-sync,worktree-create,worktree-prepare,metadata-record");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("emits no creation receipt and rolls back a failed JSON preparation", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true", ["bash", "-c", "printf 'failed preparation stdout\\n'; printf 'failed preparation stderr\\n' >&2; exit 7"]);
+			const result = runCli(fixture.checkout, ["json-failed", "create", "--json"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toContain("failed preparation stderr");
+			const events = result.stderr.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+			expect(events.some((event) => event.phase === "worktree-prepare" && event.status === "failed")).toBe(true);
+			expect(events.some((event) => event.phase === "metadata-record")).toBe(false);
+			expect(existsSync(join(fixture.worktrees, "json-failed"))).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "json-failed"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/json-failed")).toBe("");
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain").includes("json-failed")).toBe(false);
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("retains captured Git failure diagnostics without emitting a JSON creation receipt", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "missing-remote.git"));
+			const result = runCli(fixture.checkout, ["json-fetch-failed", "create", "--json"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toBe("");
+			const events = result.stderr.split("\n").filter((line) => line.startsWith("{")).map((line) => JSON.parse(line));
+			const failed = events.find((event) => event.phase === "remote-sync" && event.status === "failed");
+			expect(failed?.detail.includes("missing-remote.git")).toBe(true);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "json-fetch-failed"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/json-fetch-failed")).toBe("");
+		} finally {
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("flushes large status JSON completely through source and installed entrypoints", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			const directory = join(fixture.checkout, ".git", "agent-session", "sessions");
+			mkdirSync(directory, { recursive: true });
+			for (let index = 0; index < 48; index++) {
+				const slug = `large-session-${String(index).padStart(2, "0")}`;
+				writeFileSync(join(directory, `${slug}.json`), JSON.stringify({
+					version: 1, slug, branch: `agent/${slug}`, worktreePath: join(fixture.worktrees, slug),
+					remote: "origin", defaultBranch: "master", createdAt: "2026-01-01T00:00:00.000Z", conversation: null,
+					preexistingBranches: Array.from({ length: 128 }, (_, branch) => `feat/topic-${branch}-${"a".repeat(32)}`),
+				}));
+			}
+			// Pause the reader until output arrives, then delay draining the pipe.
+			// This makes truncation deterministic instead of relying on scheduling.
+			const slowReader = `
+import { spawn } from 'node:child_process';
+const [entry, ...args] = process.argv.slice(1);
+const child = spawn(entry, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+const chunks = [];
+child.stdout.once('readable', () => setTimeout(() => {
+  child.stdout.on('data', (chunk) => chunks.push(chunk));
+  child.stdout.resume();
+}, 100));
+child.stderr.on('data', (chunk) => process.stderr.write(chunk));
+child.on('error', (error) => { process.stderr.write(String(error)); process.exitCode = 1; });
+child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); process.exitCode = code ?? 1; });
+`;
+			const results = [["node", cliScript], ["as"]].map((entry) =>
+				spawnSync("node", ["--input-type=module", "-e", slowReader, ...entry, "status", "--json"], {
+					cwd: fixture.checkout,
+					encoding: "utf8",
+					env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+				}),
+			);
+			for (const result of results) {
+				expect(result.status).toBe(0);
+				expect(result.stdout.length > 128 * 1024).toBe(true);
+				expect(result.stdout.endsWith("\n")).toBe(true);
+				const payload = JSON.parse(result.stdout);
+				expect(payload.version).toBe(1);
+				expect(payload.sessions.length).toBe(48);
+				expect(payload.sessions.at(-1).slug).toBe("large-session-47");
+				expect(payload.sessions.at(-1).preexistingBranches.length).toBe(128);
+			}
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}

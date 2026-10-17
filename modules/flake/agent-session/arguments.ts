@@ -115,9 +115,6 @@ export function parseCreateArguments(args: string[]): {
 		}
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'create'.");
-	if (json && !dryRun) {
-		throw new CliError("create --json requires --dry-run.", 64);
-	}
 	return { slug, dryRun, json };
 }
 
@@ -248,7 +245,7 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
-		"  agent-session <task-slug> create [--dry-run [--json]]",
+		"  agent-session <task-slug> create [--dry-run] [--json]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent]",
 		"  agent-session <task-slug> resume",

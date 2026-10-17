@@ -59,12 +59,48 @@ as -- status run bun test
 The separator is valid for any slug. Legacy forms such as `as create my-task` and
 `as status my-task` fail with migration hints before any Git mutation or execution.
 Update scripts and their pinned input together; older pins keep their old grammar.
-Session metadata, JSON schemas, and cleanup receipts are unchanged. In this version,
-creation still supports `--json` only with `--dry-run`.
+Session metadata, existing JSON schemas, and cleanup receipts are unchanged.
+Creation supports both preview JSON and an actual creation receipt.
 
 Session metadata remains in the shared Git directory at
 `agent-session/sessions/`. Existing Herbert sessions need no data migration.
 Cleanup preserves remote assets and refuses unsafe work unless explicitly forced.
+
+## JSON creation receipts
+
+```sh
+as my-task create --json
+as my-task create --dry-run --json
+```
+
+Actual creation writes one newline-terminated JSON document to stdout:
+
+| Field | Value |
+|-------|-------|
+| `version` | `1` |
+| `command` | `"create"` |
+| `dryRun` | `false` |
+| `session` | The persisted session metadata |
+| `session.slug` | The requested slug |
+| `session.branch` | The initial `agent/<slug>` branch |
+| `session.worktreePath` | The canonical absolute worktree path |
+
+The receipt also retains the metadata's remote, default branch, creation time,
+and preexisting branch snapshot. Consumers can use the returned binding without
+parsing human output or discovering it through another status call. It describes
+what was recorded at creation, not a fresh inspection of its current state.
+
+Lifecycle progress is newline-delimited JSON on stderr. Successful Git and
+preparation output is captured rather than streamed in JSON mode, so it cannot
+corrupt stdout or progress records. Failed commands retain their diagnostic text
+in failed-phase records and stderr diagnostics. A failed preparation emits no
+creation receipt and rolls back only the worktree and branch created by that
+attempt. Creation still prepares without launching the configured agent.
+
+Preview output is unchanged: `dryRun` is `true`, and `plan` describes the proposed
+creation without fetching or modifying Git. Human-readable creation and agent
+startup output are unchanged. The entrypoint drains pending stdout/stderr writes
+before exiting, including JSON responses larger than a pipe buffer.
 
 ## Project settings
 

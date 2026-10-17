@@ -140,5 +140,7 @@ export function main(args: string[]): number {
 }
 
 if (import.meta.main) {
-	process.exit(main(process.argv.slice(2)));
+	// Let pending stdout/stderr writes drain before Node exits, including JSON
+	// responses larger than a pipe buffer. An immediate exit can truncate them.
+	process.exitCode = main(process.argv.slice(2));
 }
