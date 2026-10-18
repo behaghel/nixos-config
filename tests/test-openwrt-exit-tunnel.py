@@ -39,6 +39,7 @@ elif n == "uci":
             "firewall.@defaults[0].flow_offloading": "0",
             "firewall.@defaults[0].flow_offloading_hw": "0",
             "tailscale.settings.masq": "1",
+            "tailscale.settings.enabled": "1",
             "firewall.tailscale0.masq": "1",
             "dhcp.@dnsmasq[0].server": s.get("actual_dns", "9.9.9.9"),
             "dhcp.@dnsmasq[0].localuse": "0",
@@ -96,7 +97,9 @@ elif n == "tailscale":
                           "ExitNodeAllowLANAccess": s["lan"],
                           "CorpDNS": s.get("corp_dns", False)}))
     elif a == ["status", "--json"]:
-        print(json.dumps({"Peer": {"peer": {
+        print(json.dumps({"MagicDNSSuffix": s.get("suffix", "tail21d416.ts.net"),
+                          "CurrentTailnet": {"MagicDNSEnabled": s.get("magic_dns", True)},
+                          "Peer": {"peer": {
             "ID": s.get("peer_id", "nJDM8knVvy11CNTRL"),
             "TailscaleIPs": ["100.115.20.65"],
             "ExitNodeOption": s.get("approved", True),
@@ -173,6 +176,9 @@ class TunnelTests(unittest.TestCase):
         text = text.replace("/var/run/nixos-exit-applied", str(self.root / "stamp"))
         text = text.replace("/tmp/resolv.conf", str(self.root / "resolv.conf"))
         (self.root / "resolv.conf").symlink_to(self.root / "resolv.conf.d/resolv.conf.auto")
+        self.native_conf = self.root / "dnsmasq.conf"
+        self.native_conf.write_text("server=/tail21d416.ts.net/100.100.100.100\n")
+        text = text.replace("/etc/dnsmasq.conf", str(self.native_conf))
         self.controller.write_text(text)
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
                         FIXTURE_STATE=str(self.state))
@@ -289,6 +295,21 @@ class TunnelTests(unittest.TestCase):
         self.run_mode("on", success=False)
         self.assertEqual(self.load()["nft"], self.profile("armed"))
 
+    def test_broad_magicdns_forwarder_rearms_ready_policy(self):
+        self.run_mode("on")
+        self.native_conf.write_text("server=/ts.net/100.100.100.100\n")
+        self.run_mode("reconcile", success=False)
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+
+    def test_changed_tailnet_or_disabled_magicdns_never_releases_traffic(self):
+        for changes in ({"suffix": "another.ts.net"}, {"magic_dns": False}):
+            with self.subTest(changes=changes):
+                self.update(suffix="tail21d416.ts.net", magic_dns=True)
+                self.update(**changes)
+                self.run_mode("on", success=False)
+                self.assertEqual(self.load()["nft"], self.profile("armed"))
+                self.assertEqual(self.load()["exit"], "")
+
     def test_route_mismatch_does_not_release_armed_profile(self):
         self.update(wrong_dns_route=True)
         self.run_mode("on", success=False)
@@ -375,6 +396,57 @@ class TunnelTests(unittest.TestCase):
         self.assertLess(output.index("meta skuid 453 udp dport 53 counter reject"),
                         output.index("udp dport 53 accept"))
         self.assertNotIn("5354", on)
+
+    def scope(self, operation, text):
+        return subprocess.run(
+            ["lua", str(self.base / "native-dns.lua"), operation,
+             "tail21d416.ts.net"], input=text, text=True, capture_output=True)
+
+    def test_scope_preserves_other_settings_and_narrows_vendor_forwarder(self):
+        original = "# existing\nlocal=/lan/\nserver=/ts.net/100.100.100.100\n"
+        expected = original.replace("/ts.net/", "/tail21d416.ts.net/")
+        result = self.scope("scope", original)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, expected)
+        self.assertEqual(self.scope("scope", expected).stdout, expected)
+        self.assertEqual(self.scope("scope-check", expected).returncode, 0)
+        self.assertNotEqual(self.scope("scope-check", original).returncode, 0)
+        # The vendor's presence check must recognize the scoped line too.
+        self.assertIn("ts.net/100.100.100.100", result.stdout)
+
+    def test_scope_consolidates_only_known_duplicate_forwarders(self):
+        broad = "server=/ts.net/100.100.100.100\n"
+        scoped = "server=/tail21d416.ts.net/100.100.100.100\n"
+        self.assertEqual(self.scope("scope", broad + scoped).stdout, scoped)
+        self.assertNotEqual(self.scope("scope-check", broad + scoped).returncode, 0)
+
+    def test_missing_magicdns_forwarder_is_not_silently_invented(self):
+        for operation in ("scope", "scope-check"):
+            result = self.scope(operation, "local=/lan/\n")
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, "")
+
+    def test_scope_refuses_unmanaged_quad100_forwarders(self):
+        text = "server=/external.example/100.100.100.100\n"
+        result = self.scope("scope", text)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(result.stdout, "")
+
+    def test_direct_quad100_queries_are_blocked_before_tunnel_accept(self):
+        forward = re.search(r"chain forward \{(.*?)\n\s*\}",
+                            self.profile("on"), re.S)[1]
+        for protocol in ("udp", "tcp"):
+            rule = f"ip daddr 100.100.100.100 {protocol} dport 53 counter reject"
+            self.assertIn(rule, forward)
+            self.assertLess(forward.index(rule),
+                            forward.index('oifname "tailscale0" accept'))
+
+    def test_native_resolver_can_query_scoped_magicdns(self):
+        on = self.profile("on")
+        for protocol in ("udp", "tcp"):
+            self.assertIn('meta skuid 453 ip daddr 100.100.100.100 '
+                          f'oifname "tailscale0" {protocol} dport 53 counter accept',
+                          on)
 
     def test_native_dns_payload_preserves_unrelated_settings(self):
         original = {"result": {"mode": "auto", "provider": "preserve-me",

@@ -12,6 +12,8 @@ let
       chain forward {
         type filter hook forward priority -10; policy accept;
         ${lib.optionalString protected ''
+          ip daddr 100.100.100.100 udp dport 53 counter reject
+          ip daddr 100.100.100.100 tcp dport 53 counter reject
           iifname { ${localInterfaces} } oifname { ${localInterfaces} } accept
           meta nfproto ipv6 counter reject
           ${lib.optionalString ready ''
@@ -29,6 +31,8 @@ let
           ${lib.optionalString ready ''
             meta skuid 453 ip daddr ${cfg.dnsAddress} oifname "tailscale0" udp dport 53 counter accept
             meta skuid 453 ip daddr ${cfg.dnsAddress} oifname "tailscale0" tcp dport 53 counter accept
+            meta skuid 453 ip daddr 100.100.100.100 oifname "tailscale0" udp dport 53 counter accept
+            meta skuid 453 ip daddr 100.100.100.100 oifname "tailscale0" tcp dport 53 counter accept
           ''}
           meta skuid 453 udp dport 53 counter reject
           meta skuid 453 tcp dport 53 counter reject
@@ -52,6 +56,7 @@ let
       ${marker}
       exit_ip=${lib.escapeShellArg cfg.exitNode.address}
       exit_id=${lib.escapeShellArg cfg.exitNode.id}
+      tailnet_suffix=${lib.escapeShellArg cfg.tailnetSuffix}
       dns_address=${lib.escapeShellArg cfg.dnsAddress}
       on_hash=${builtins.hashString "sha256" files."/etc/nixos-exit/on.nft".text}
       armed_hash=${builtins.hashString "sha256" files."/etc/nixos-exit/armed.nft".text}
@@ -110,6 +115,10 @@ in
       default = [ "lan" "guest" "iot" ];
       description = "Native client zones allowed outbound to Tailscale; absent zones are skipped.";
     };
+    tailnetSuffix = lib.mkOption {
+      type = lib.types.strMatching "[a-z0-9-]+\\.ts\\.net";
+      description = "Authoritative MagicDNS suffix; Quad100 must not proxy public names.";
+    };
     dnsAddress = lib.mkOption {
       type = lib.types.strMatching "[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+";
       default = "9.9.9.9";
@@ -132,7 +141,10 @@ in
     system.build.exitTunnelFiles = files;
     system.build.exitTunnelInstallText = ''
       #!/bin/sh
+      exit_ip=${lib.escapeShellArg cfg.exitNode.address}
+      exit_id=${lib.escapeShellArg cfg.exitNode.id}
       dns_address=${lib.escapeShellArg cfg.dnsAddress}
+      tailnet_suffix=${lib.escapeShellArg cfg.tailnetSuffix}
       downstream_zones=${lib.escapeShellArg (lib.concatStringsSep " " cfg.downstreamZones)}
       ${builtins.readFile ./exit-tunnel-native.sh}
       ${builtins.readFile ./exit-tunnel-install.sh}

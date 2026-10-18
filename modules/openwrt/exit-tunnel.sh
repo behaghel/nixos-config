@@ -129,6 +129,7 @@ if [ "$operation" = check ]; then
     native_ready || fail 'native DNS/NAT drift'
     if [ "$mode" = on ]; then
         prerequisites
+        peer_ready || fail 'exit identity/approval or MagicDNS scope drift'
         get_exit && [ "$selected" = "$exit_id" ] && [ "$lan" = true ] && [ "$corp_dns" = false ] || fail 'exit/DNS preference drift; guard retained'
         ip -4 route get "$dns_address" uid 453 | grep -q 'dev tailscale0' || fail 'client DNS route is not the tunnel'
     elif get_exit; then
@@ -157,10 +158,11 @@ if [ "$mode" = on ]; then
         fail 'native DNS/NAT not ready; blocking policy retained'
     fi
     get_exit || fail 'local Tailscale unavailable; guard retained'
+    if ! peer_ready; then
+        guard armed apply || fail 'could not restore blocking policy'
+        fail 'exit identity/approval or MagicDNS scope mismatch; blocking policy retained'
+    fi
     if [ "$selected" != "$exit_id" ] || [ "$lan" != true ]; then
-        peer=$(timeout 5 tailscale status --json) || fail 'peer state unavailable; guard retained'
-        printf '%s' "$peer" | lua "$base/native-dns.lua" peer-check "$exit_ip" "$exit_id" ||
-            fail 'exit identity/approval mismatch; guard retained'
         timeout 5 tailscale set "--exit-node=$exit_ip" --exit-node-allow-lan-access=true --accept-dns=false || fail 'exit unavailable; guard retained'
         changed=1
         get_exit && [ "$selected" = "$exit_id" ] && [ "$lan" = true ] && [ "$corp_dns" = false ] || fail 'unexpected exit identity/preferences; guard retained'

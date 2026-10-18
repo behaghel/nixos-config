@@ -111,8 +111,10 @@ Do not use it for sensitive traffic until the packet tests below pass. The
 physical switch is not assigned by this module.
 
 Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
-check-only nftables capability probe passed; the complete generated profiles and
-native DNS integration still need validation on the router. Requalify after a
+generated armed/ON/OFF profiles passed the router's check-only nftables validation.
+The scoped native DNS configuration also passed native dnsmasq syntax validation
+using a temporary copy. No rules/settings were installed; actual DNS integration
+and packet-level behavior still need live acceptance. Requalify after a
 firmware upgrade rather than assuming the same firewall lifecycle.
 
 - Disable **Network Acceleration**, then reboot before deployment. Persistent
@@ -130,6 +132,14 @@ firmware upgrade rather than assuming the same firewall lifecycle.
   integration does not compete with native DNS. Health checks inspect the actual
   dnsmasq server and router resolver link, not just the admin UI metadata. There
   is no second DNS daemon.
+- Native MagicDNS forwarding is narrowed from all `ts.net` to the declared
+  `tailnetSuffix`. Tailscale [answers this local domain authoritatively](https://github.com/tailscale/tailscale/blob/v1.92.5/net/dns/resolver/tsdns.go),
+  including NXDOMAIN for unknown local names, without upstream DNS forwarding.
+  Only the native resolver gets the Quad100 exception; direct client DNS queries
+  to Quad100 are blocked. Keep native Tailscale and MagicDNS enabled and requalify
+  before changing the Tailnet suffix. The scoped line satisfies the vendor's
+  existing presence check, so normal enabled-state restarts do not re-add its
+  broader forwarder. A scope/capability mismatch blocks protected traffic.
 - **ON:** initially block external forwarding and resolver upstream requests;
   verify MeLE's identity and exit approval before releasing tunnel traffic.
   External IPv6 forwarding is blocked. Unavailable MeLE means no WAN fallback.
@@ -181,3 +191,11 @@ or the absence of packet leaks.
 
 Only after these pass should the preserved vendor switch dispatcher be wired to
 explicit ON/OFF operations.
+
+### Deferred home repeater issue
+
+On firmware 4.11.0, the DIGI H3600 V9 home Wi-Fi associates on both bands but
+repeatedly fails to obtain a DHCP lease, including with Factory MAC. Home Ethernet
+and the phone's Wi-Fi hotspot both obtain leases. This Wi-Fi-specific issue is
+unresolved, not a diagnosed driver bug; use Ethernet for management and cellular
+hotspot for isolated tunnel tests until it is investigated separately.

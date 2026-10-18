@@ -25,6 +25,25 @@ fi
 /usr/sbin/nixos-exit-node guard || fail 'could not establish requested guard'
 [ "$(uci -q get firewall.tailscale0)" = zone ] || fail 'enable native Tailscale first'
 [ "$(uci -q get firewall.tailscale0.name)" = tailscale0 ] || fail 'native Tailscale zone changed'
+[ "$(uci -q get tailscale.settings.enabled)" = 1 ] || fail 'native Tailscale must remain enabled'
+peer_ready || fail 'exit identity/approval or MagicDNS scope unavailable; no DNS settings changed'
+scope_changed=0
+dns_restarted=0
+if ! lua "$base/native-dns.lua" scope-check "$tailnet_suffix" < /etc/dnsmasq.conf; then
+    [ -f /etc/dnsmasq.conf ] && [ ! -L /etc/dnsmasq.conf ] || fail 'unsupported native DNS file'
+    scoped=$(mktemp /etc/dnsmasq.conf.nixos-exit.XXXXXX)
+    trap 'rm -f "$scoped"' EXIT
+    trap 'exit 1' HUP INT TERM
+    cp -p /etc/dnsmasq.conf "$scoped"
+    if ! lua "$base/native-dns.lua" scope "$tailnet_suffix" < /etc/dnsmasq.conf > "$scoped"; then
+        rm -f "$scoped"; fail 'inspect unmanaged MagicDNS forwarding'
+    fi
+    if ! dnsmasq --test --conf-file="$scoped"; then
+        rm -f "$scoped"; fail 'invalid scoped native DNS configuration'
+    fi
+    mv "$scoped" /etc/dnsmasq.conf
+    scope_changed=1
+fi
 prefs=$(timeout 5 tailscale debug prefs) || fail 'native Tailscale unavailable'
 corp_dns=$(printf '%s' "$prefs" | jsonfilter -e '@.CorpDNS') || fail 'unexpected Tailscale DNS schema'
 if [ "$corp_dns" != false ]; then
@@ -75,6 +94,10 @@ if ! printf '%s' "$before" | lua "$base/native-dns.lua" check "$dns_address"; th
         timeout 15 ubus call gl-session call "$restore" >/dev/null || true
         fail 'native DNS configuration failed; previous settings restoration attempted'
     fi
+    dns_restarted=1
+fi
+if [ "$scope_changed" = 1 ] && [ "$dns_restarted" = 0 ]; then
+    /etc/init.d/dnsmasq restart
 fi
 native_ready || fail 'native DNS/NAT/forwarding validation failed; requested guard retained'
 /etc/init.d/nixos-exit enable

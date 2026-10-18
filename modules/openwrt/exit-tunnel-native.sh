@@ -13,9 +13,15 @@ native_zones() {
 native_dns_get() {
     timeout 10 ubus call gl-session call '{"module":"dns","func":"get_config"}'
 }
+peer_ready() {
+    peer=$(timeout 5 tailscale status --json) || return 1
+    printf '%s' "$peer" | lua "$base/native-dns.lua" peer-check "$exit_ip" "$exit_id" "$tailnet_suffix"
+}
 native_ready() {
     dns=$(native_dns_get) || return 1
     printf '%s' "$dns" | lua "$base/native-dns.lua" check "$dns_address" || return 1
+    lua "$base/native-dns.lua" scope-check "$tailnet_suffix" < /etc/dnsmasq.conf || return 1
+    [ "$(uci -q get tailscale.settings.enabled)" = 1 ] || return 1
     [ "$(uci -q get dhcp.@dnsmasq[0].server)" = "$dns_address" ] || return 1
     [ "$(uci -q get dhcp.@dnsmasq[0].localuse)" = 0 ] || return 1
     [ "$(uci -q get dhcp.@dnsmasq[0].queryport || printf '0')" = 0 ] || return 1
