@@ -1,0 +1,3 @@
+{
+  networking.hostName = "beryl-ax";
+}
