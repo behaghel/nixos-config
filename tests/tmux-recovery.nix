@@ -19,9 +19,13 @@ let
     if pkgs.stdenv.isDarwin then
       cfg.launchd.agents.tmux-snapshot.config.StartInterval == 300
       && cfg.launchd.agents.tmux-snapshot.config.ProgramArguments == [ "${snapshot}/bin/tmux-snapshot" ]
+      && cfg.launchd.agents.tmux-snapshot-health.config.StartInterval == 300
+      && cfg.launchd.agents.tmux-snapshot-health.config.ProgramArguments == [ "${snapshot}/bin/tmux-snapshot" "--check" ]
     else
       cfg.systemd.user.timers.tmux-snapshot.Timer.OnUnitActiveSec == "5m"
-      && cfg.systemd.user.services.tmux-snapshot.Service.ExecStart == [ "${snapshot}/bin/tmux-snapshot" ];
+      && cfg.systemd.user.services.tmux-snapshot.Service.ExecStart == [ "${snapshot}/bin/tmux-snapshot" ]
+      && cfg.systemd.user.timers.tmux-snapshot-health.Timer.OnUnitActiveSec == "5m"
+      && cfg.systemd.user.services.tmux-snapshot-health.Service.ExecStart == [ "${snapshot}/bin/tmux-snapshot --check" ];
 in
 assert lib.assertMsg scheduler "snapshot scheduler must run independently every five minutes";
 assert lib.assertMsg
@@ -29,10 +33,16 @@ assert lib.assertMsg
   "Continuum must not also schedule saves";
 pkgs.runCommand "tmux-recovery-tests"
 {
-  nativeBuildInputs = [ pkgs.bash pkgs.tmux pkgs.coreutils pkgs.diffutils pkgs.gnugrep pkgs.hostname ];
+  nativeBuildInputs = with pkgs;
+    [ bash tmux python3 coreutils diffutils gnugrep hostname gnused gawk findutils gnutar gzip ]
+    ++ lib.optionals stdenv.isDarwin [ darwin.ps ]
+    ++ lib.optionals stdenv.isLinux [ procps ];
+  SNAPSHOT_SOURCE = ../modules/home/tmux/snapshot.py;
+  SAVE_SCRIPT = "${pkgs.tmuxPlugins.resurrect}/share/tmux-plugins/resurrect/scripts/save.sh";
   SNAPSHOT = "${snapshot}/bin/tmux-snapshot";
   RESURRECT = "${pkgs.tmuxPlugins.resurrect}/share/tmux-plugins/resurrect";
 } ''
   bash ${./tmux-recovery.sh}
+  python3 ${./test-tmux-snapshot.py}
   touch $out
 ''

@@ -8,16 +8,18 @@ let
   # environments — lives under here so a server can be found and restored
   # across terminal crashes and reboots.
   tmuxDataDir = "${config.xdg.dataHome}/tmux";
+  hubNotify = import ../notify/package.nix { inherit pkgs; };
   snapshot = pkgs.writeShellApplication {
     name = "tmux-snapshot";
     runtimeInputs = with pkgs;
-      [ tmux bash coreutils findutils gnused gnugrep gawk gnutar gzip hostname ]
+      [ tmux bash python3 coreutils findutils gnused gnugrep gawk gnutar gzip hostname ]
       ++ lib.optionals stdenv.isDarwin [ darwin.ps ]
       ++ lib.optionals stdenv.isLinux [ procps ];
     text = ''
       export TMUX_SNAPSHOT_ROOT=${lib.escapeShellArg tmuxDataDir}
       export TMUX_SNAPSHOT_SAVE_SCRIPT=${pkgs.tmuxPlugins.resurrect}/share/tmux-plugins/resurrect/scripts/save.sh
-      ${builtins.readFile ./snapshot.sh}
+      export TMUX_SNAPSHOT_NOTIFY=${hubNotify}/bin/hub-notify
+      exec python3 ${./snapshot.py} "$@"
     '';
   };
 in
@@ -43,6 +45,33 @@ in
       StandardOutPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
       StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
     };
+  };
+
+  # A separate watchdog still reports stale backups when saving stops working.
+  launchd.agents.tmux-snapshot-health = lib.mkIf pkgs.stdenv.isDarwin {
+    enable = true;
+    config = {
+      Label = "org.nixos.tmux-snapshot-health";
+      ProgramArguments = [ "${snapshot}/bin/tmux-snapshot" "--check" ];
+      StartInterval = 300;
+      StandardOutPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
+      StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
+    };
+  };
+
+  systemd.user.services.tmux-snapshot-health = lib.mkIf pkgs.stdenv.isLinux {
+    Unit.Description = "Warn about stale tmux backups";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${snapshot}/bin/tmux-snapshot --check";
+    };
+  };
+  systemd.user.timers.tmux-snapshot-health = lib.mkIf pkgs.stdenv.isLinux {
+    Timer = {
+      OnStartupSec = "5m";
+      OnUnitActiveSec = "5m";
+    };
+    Install.WantedBy = [ "timers.target" ];
   };
 
   systemd.user.services.tmux-snapshot = lib.mkIf pkgs.stdenv.isLinux {
@@ -82,6 +111,9 @@ in
         plugin = resurrect;
         extraConfig = ''
           set -g @resurrect-dir '${tmuxDataDir}/resurrect'
+          # Keep the manual shortcut on the same validated save path. A space
+          # suppresses resurrect's default binding without triggering its fallback.
+          set -g @resurrect-save ' '
           set -g @resurrect-capture-pane-contents 'on'
           set -g @resurrect-strategy-nvim 'session'
         '';
@@ -200,6 +232,9 @@ in
 
       # Rename current window with prefix + l
       bind l command-prompt -I "#W" "rename-window '%%'"
+
+      # Manual snapshots use the same validation and failure protection as timers.
+      bind C-s run-shell '${snapshot}/bin/tmux-snapshot --socket "#{socket_path}"'
 
       # Extra paste shortcut: prefix + Ctrl-y
       bind C-y paste-buffer
