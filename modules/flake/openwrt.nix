@@ -14,6 +14,8 @@
         })
         hosts;
       activations = lib.mapAttrs (_: cfg: cfg.system.build.activate) hosts;
+      tunnels = lib.mapAttrs (_: cfg: cfg.system.build.tunnel)
+        (lib.filterAttrs (_: cfg: cfg.services.exitTunnel.enable) hosts);
       packageSet = suffix: packages: lib.mapAttrs'
         (name: package: lib.nameValuePair "${name}-${suffix}" package)
         packages;
@@ -26,9 +28,11 @@
         packages;
     in
     {
-      packages = packageSet "bootstrap" bootstraps // packageSet "activate" activations;
+      packages = packageSet "bootstrap" bootstraps // packageSet "activate" activations
+        // packageSet "tunnel" tunnels;
       apps = appSet "bootstrap" "Print native public-key bootstrap for" bootstraps
-        // appSet "activate" "Check or apply native naming and SSH policy for" activations;
+        // appSet "activate" "Check or apply native naming and SSH policy for" activations
+        // appSet "tunnel" "Select protected manual tunnel mode for" tunnels;
       checks.openwrt = import ../../tests/openwrt.nix { inherit pkgs lib inputs; };
     };
 }

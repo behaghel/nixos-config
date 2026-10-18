@@ -50,9 +50,9 @@ devenv -q shell -- beryl-ax:activate --check --target 100.101.32.55
 The address above is the currently verified router address, not a stored default.
 The normal tool target is `beryl-ax`; an override still verifies the same pinned
 host identity. Native UCI changes awaiting commit block application, so unrelated
-pending settings cannot accidentally be committed. Only native Dropbear listeners
-are reloaded when needed; existing sessions are retained. Networking and
-Tailscale are not restarted. A compliant second apply does not reload anything.
+pending settings cannot accidentally be committed. The identity/SSH phase only reloads native Dropbear listeners when needed;
+existing sessions are retained. The exit-tunnel phase below additionally manages
+native DNS/firewall settings. A compliant second apply avoids service reloads.
 
 After renaming, manually activate the Mac's system configuration with
 `nix run .#activate` to refresh Tailnet-backed aliases, and its Home Manager
@@ -104,4 +104,80 @@ and ordinary LAN internet. The inspected `sysupgrade -l` includes system,
 Dropbear configuration/keys, and Tailscale state; verify after firmware upgrades
 or reapply instead of assuming vendor upgrades preserve policy.
 
-No exit-node, DNS, forwarding, firewall, or toggle changes are included.
+## Exit tunnel — pending live acceptance
+
+The current declaration also enables an **unaccepted manual tunnel prototype**.
+Do not use it for sensitive traffic until the packet tests below pass. The
+physical switch is not assigned by this module.
+
+Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
+check-only nftables capability probe passed; the complete generated profiles and
+native DNS integration still need validation on the router. Requalify after a
+firmware upgrade rather than assuming the same firewall lifecycle.
+
+- Disable **Network Acceleration**, then reboot before deployment. Persistent
+  flow offload must also remain disabled; configuration checks alone do not prove
+  that previously accelerated connections have stopped bypassing netfilter.
+- Leave native **Custom Exit Nodes** off: vendor network events reset Tailscale
+  preferences, and the controller owns selecting MeLE and restoring that choice.
+- Native IP Masquerading handles client NAT. Owned native forwardings allow the
+  declared LAN/guest/IoT zones outbound to Tailscale, without adding reverse
+  forwardings. Masqueraded clients share the router's Tailnet identity/ACLs;
+  this is not an additional guest-to-Tailnet isolation policy.
+- Native DNS uses Quad9 `9.9.9.9` for clients in **both** modes. Native router-DNS
+  separation keeps router bootstrap resolution on uplink DNS; local dnsmasq
+  names remain available. Tailscale's `accept-dns` stays false so its OS resolver
+  integration does not compete with native DNS. Health checks inspect the actual
+  dnsmasq server and router resolver link, not just the admin UI metadata. There
+  is no second DNS daemon.
+- **ON:** initially block external forwarding and resolver upstream requests;
+  verify MeLE's identity and exit approval before releasing tunnel traffic.
+  External IPv6 forwarding is blocked. Unavailable MeLE means no WAN fallback.
+- **OFF:** clear the exit preference and release the owned guard; Quad9 then
+  uses direct WAN. A dead local daemon has a bounded preference-clear attempt
+  followed by removal of only its exit-default routes, preserving overlay routes.
+- A dedicated `inet nixos_exit_guard` nftables table is atomically replaced.
+  Profile content must match digests embedded in the generated controller;
+  missing/truncated files cannot turn replacement into a delete-only operation.
+  Native fw3 rules are not its ownership boundary. Boot protection starts before
+  networking; stopping the watcher does not remove kernel protection.
+- Native VLAN additions require declaring their firewall zone and local link in
+  `downstreamZones`/`localInterfaces`, then acceptance testing. Unknown links do
+  not gain a WAN exception from the guard, but local services may remain blocked.
+
+When cleared for deployment, use the pinned LAN transport and retain web-admin
+access plus a root recovery session. Initial activation starts OFF and may reload
+native firewall/DNS services. The saved original DNS API result stays root-only
+at `/etc/nixos-exit/dns-before.json`; it is not copied into the repository.
+
+```sh
+# Human-run only, after prerequisites and generated-profile validation.
+devenv -q shell -- beryl-ax:activate --apply --target 192.168.8.1
+devenv -q shell -- beryl-ax:tunnel check
+devenv -q shell -- beryl-ax:tunnel on
+devenv -q shell -- beryl-ax:tunnel off
+```
+
+### Mandatory packet acceptance
+
+Use phone cellular tethering with phone Wi-Fi off, and disconnect the Mac's home
+Ethernet/other uplinks. Record the direct cellular public IP before selecting an
+exit. Mock tests and `tunnel check` verify orchestration/policy, **not** connectivity
+or the absence of packet leaks.
+
+1. OFF: ordinary client internet works with the cellular public IP.
+2. ON: client public IP matches MeLE's home egress, not cellular. Test fresh UDP
+   and TCP DNS queries; inspect native resolver counters and capture traffic to
+   establish Quad9 via Tailscale with no client-DNS WAN fallback. Router bootstrap
+   DNS is an intentional separate exception. Check local names/admin access.
+3. ON: interrupt MeLE/Tailscale reachability while continuously probing from a
+   client; neither existing nor new flows may fall back to WAN. Repeat DNS and
+   IPv6 probes and verify blocking rather than accepting timeouts as leak proof.
+4. ON: repeat during fw3 reload/restart, router reboot, and uplink reconnect.
+   Confirm the independent guard is retained and the correct exit reconverges.
+5. Repeat on wired and guest clients; test any configured additional VLAN.
+6. OFF with MeLE unavailable: direct cellular internet and DNS recover. Repeat
+   ON/OFF and check that unrelated native settings and guest isolation remain.
+
+Only after these pass should the preserved vendor switch dispatcher be wired to
+explicit ON/OFF operations.

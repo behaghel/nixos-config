@@ -12,6 +12,7 @@ let
     cfg.clientOptions);
 in
 {
+  imports = [ ./exit-tunnel.nix ];
   options = {
     networking.hostName = mkOption {
       type = types.strMatching "[a-z0-9]([a-z0-9-]*[a-z0-9])?";
@@ -113,6 +114,11 @@ in
     (
       ${builtins.readFile ./ssh-policy.sh}
     )
+    ${lib.optionalString config.services.exitTunnel.enable ''
+      (
+        ${config.system.build.exitTunnelInstallText}
+      )
+    ''}
   '';
   config.system.build.activate = pkgs.writeShellApplication {
     name = "${name}-activate";

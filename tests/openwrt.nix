@@ -13,6 +13,13 @@ let
   valid = cfg.system.build.bootstrapScript;
   naming = cfg.system.build.namingScript;
   activation = cfg.system.build.activate;
+  tunnelFiles = cfg.system.build.exitTunnelFiles;
+  tunnelBundle = pkgs.linkFarm "exit-tunnel-fixtures" (lib.mapAttrsToList
+    (path: file: {
+      name = builtins.baseNameOf path;
+      path = pkgs.writeText (builtins.baseNameOf path) file.text;
+    })
+    tunnelFiles);
   sshConfig = pkgs.writeText "managed-ssh-config"
     (inputs.home-manager.lib.homeManagerConfiguration {
       inherit pkgs;
@@ -42,7 +49,7 @@ assert lib.assertMsg (builtins.all (x: x) assertions)
   "OpenWrt identity and public-key module invariants";
 pkgs.runCommand "openwrt-bootstrap-tests"
 {
-  nativeBuildInputs = [ pkgs.python3 pkgs.openssh ];
+  nativeBuildInputs = [ pkgs.python3 pkgs.openssh (pkgs.lua5_1.withPackages (ps: [ ps.lua-cjson ])) ];
   TEST_PUBLIC_KEY = me.sshKey;
 } ''
   # Check the actual generated artifact, not only the source template.
@@ -55,6 +62,10 @@ pkgs.runCommand "openwrt-bootstrap-tests"
   sh -n ${cfg.system.build.sshPolicyScript}
   python3 ${./test-openwrt-naming.py} ${naming} ${lib.getExe activation}
   python3 ${./test-openwrt-ssh-policy.py} ${cfg.system.build.sshPolicyScript}
+  sh -n ${cfg.system.build.exitTunnelInstall}
+  ${lib.concatStringsSep "\n" (lib.mapAttrsToList (path: file:
+    lib.optionalString (file.mode == "0755") "sh -n ${tunnelBundle}/${builtins.baseNameOf path}") tunnelFiles)}
+  python3 ${./test-openwrt-exit-tunnel.py} ${tunnelBundle} ${lib.getExe cfg.system.build.tunnel} ${cfg.system.build.exitTunnelInstall}
   ssh -G -F ${sshConfig} beryl-ax > effective
   grep -Fx 'user root' effective
   grep -Fx 'hostname beryl-ax' effective
