@@ -52,6 +52,14 @@
 
     checks.agent-session = import ../../tests/agent-session.nix { inherit pkgs lib; };
     checks.gpg-module = import ../../tests/gpg-module.nix { inherit pkgs lib inputs; };
+    checks.yknotify-context = pkgs.runCommand "yknotify-context-tests"
+      {
+        nativeBuildInputs = [ pkgs.python3 pkgs.git ];
+        YKNOTIFY_CONTEXT_HELPER = ../home/darwin/yknotify/context.py;
+      } ''
+      python3 ${../../tests/test-yknotify-context.py}
+      touch "$out"
+    '';
     checks.file-associations = import ../../tests/file-associations.nix { inherit pkgs lib inputs; };
     checks.marketplace = import ../../tests/marketplace.nix { inherit pkgs lib; };
     checks.opencode-model-config-modes = import ../../tests/opencode-model-config-modes.nix { inherit pkgs lib inputs; };

@@ -3,6 +3,12 @@
 let
   cfg = config.hub.yknotify;
   yknotify = pkgs.callPackage ./package.nix { };
+  contextTool = pkgs.writeShellScriptBin "yknotify-context" ''
+    exec ${pkgs.python3}/bin/python3 ${./context.py} "$@"
+  '';
+  gitSigner = pkgs.writeShellScript "yknotify-git-gpg" ''
+    exec ${contextTool}/bin/yknotify-context wrap ${config.programs.gpg.package}/bin/gpg "$@"
+  '';
 in
 {
   options.hub.yknotify = {
@@ -41,41 +47,43 @@ in
   };
 
   config = lib.mkIf (cfg.enable && pkgs.stdenv.isDarwin) {
+    programs.git.settings.gpg.openpgp.program = lib.mkDefault (toString gitSigner);
     launchd.agents =
       let
         yknotifyScript = pkgs.writeShellScript "yknotify-wrapper.sh" ''
-            export PATH=${lib.makeBinPath [
-              yknotify
-              pkgs.jq
-              pkgs.coreutils
-            ]}:${config.home.profileDirectory}/bin:/usr/bin:/bin
+          export PATH=${lib.makeBinPath [
+            yknotify
+            pkgs.jq
+            pkgs.coreutils
+          ]}:${config.home.profileDirectory}/bin:/usr/bin:/bin
 
-            set -eu
+          set -eu
 
-            LAST_EVENT=0
-            LAST_NOTIFY=0
+          LAST_EVENT=0
+          LAST_NOTIFY=0
 
-            ${yknotify}/bin/yknotify | while IFS= read -r line; do
-              NOW="$(date +%s)"
+          ${yknotify}/bin/yknotify | while IFS= read -r line; do
+            NOW="$(date +%s)"
 
-              # New session after enough silence from yknotify.
-              if [ "$LAST_EVENT" -eq 0 ] || [ "$((NOW - LAST_EVENT))" -gt ${toString cfg.sessionTimeoutSeconds} ]; then
-                LAST_NOTIFY=0
-              fi
-              LAST_EVENT="$NOW"
+            # New session after enough silence from yknotify.
+            if [ "$LAST_EVENT" -eq 0 ] || [ "$((NOW - LAST_EVENT))" -gt ${toString cfg.sessionTimeoutSeconds} ]; then
+              LAST_NOTIFY=0
+            fi
+            LAST_EVENT="$NOW"
 
-              # Notify immediately, then periodically while the request persists.
-              if [ "$LAST_NOTIFY" -ne 0 ] && [ "$((NOW - LAST_NOTIFY))" -lt ${toString cfg.reminderSeconds} ]; then
-                continue
-              fi
-              LAST_NOTIFY="$NOW"
+            # Notify immediately, then periodically while the request persists.
+            if [ "$LAST_NOTIFY" -ne 0 ] && [ "$((NOW - LAST_NOTIFY))" -lt ${toString cfg.reminderSeconds} ]; then
+              continue
+            fi
+            LAST_NOTIFY="$NOW"
 
-              msg="$(printf '%s' "$line" | jq -r '.type // "touch"')" || msg="touch"
-              echo "$(date '+%Y-%m-%d %H:%M:%S') notify: $msg"
+            msg="$(printf '%s' "$line" | jq -r '.type // "touch"')" || msg="touch"
+            echo "$(date '+%Y-%m-%d %H:%M:%S') notify: $msg"
 
-              hub-notify --sound "${cfg.sound}" "YubiKey" "Tap your key ($msg)" || true
-            done
-          '';
+            context="$(${contextTool}/bin/yknotify-context describe "$msg")" || context="Requester unknown"
+            hub-notify --sound "${cfg.sound}" "YubiKey" "Tap your key ($msg). $context" || true
+          done
+        '';
 
         yknotifyWakeWatchdog = pkgs.writeShellScript "yknotify-wake-watchdog.sh" ''
           export PATH=${lib.makeBinPath [ pkgs.coreutils ]}:/usr/bin:/bin
@@ -131,7 +139,8 @@ in
             fi
           fi
         '';
-      in {
+      in
+      {
         yknotify = {
           enable = true;
           config = {

@@ -12,6 +12,7 @@ let
       inherit pkgs;
       modules = [
         ../modules/home/gpg.nix
+        ../modules/home/darwin/yknotify
         {
           home.username = "tester";
           home.homeDirectory = "/tmp/tester";
@@ -52,6 +53,17 @@ let
       && !builtins.hasAttr "pcsc-driver" disabledSettings
       && !builtins.hasAttr "disable-application" disabledSettings);
 
+  signingContextCheck = assert' "Git signing context is Darwin-only and follows smartcard enablement"
+    (
+      let
+        path = [ "gpg" "openpgp" "program" ];
+        enabled = smartcardCfg.programs.git.settings;
+        disabled = disabledCfg.programs.git.settings;
+      in
+      (lib.hasAttrByPath path enabled == pkgs.stdenv.isDarwin)
+      && !(lib.hasAttrByPath path disabled)
+    );
+
   agentLifecycleCheck = assert' "Darwin lets GnuPG start its agent on demand"
     (if pkgs.stdenv.isDarwin then
       !smartcardCfg.launchd.agents.gpg-agent.enable
@@ -61,7 +73,7 @@ in
 pkgs.runCommand "gpg-module-tests" { } ''
   cat <<'RESULTS'
   ── GPG Home Manager module ──
-  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}RESULTS
+  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}${signingContextCheck}RESULTS
   echo "All GPG module tests passed."
   echo ok > $out
 ''
