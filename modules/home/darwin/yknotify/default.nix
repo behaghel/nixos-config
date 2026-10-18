@@ -4,8 +4,12 @@ let
   cfg = config.hub.yknotify;
   yknotify = pkgs.callPackage ./package.nix { };
   contextTool = pkgs.writeShellScriptBin "yknotify-context" ''
-    exec ${pkgs.python3}/bin/python3 ${./context.py} "$@"
+    export YKNOTIFY_DIAGNOSTICS=${if cfg.diagnostics.enable then "1" else "0"}
+    exec ${pkgs.python3}/bin/python3 -B ${./.}/context.py "$@"
   '';
+  eventStream = "${yknotify}/bin/yknotify"
+    + lib.optionalString cfg.diagnostics.enable
+    " | ${contextTool}/bin/yknotify-context observe ${toString cfg.sessionTimeoutSeconds}";
   gitSigner = pkgs.writeShellScript "yknotify-git-gpg" ''
     exec ${contextTool}/bin/yknotify-context wrap ${config.programs.gpg.package}/bin/gpg "$@"
   '';
@@ -20,6 +24,11 @@ in
         physical touch (FIDO2 or OpenPGP).
       '';
     };
+
+    diagnostics.enable = lib.mkEnableOption ''
+      private, rotating diagnostic logs of instrumented Git requests and
+      unverified candidate processes around detected touch-request bursts
+    '';
 
     sound = lib.mkOption {
       type = lib.types.str;
@@ -62,7 +71,7 @@ in
           LAST_EVENT=0
           LAST_NOTIFY=0
 
-          ${yknotify}/bin/yknotify | while IFS= read -r line; do
+          ${eventStream} | while IFS= read -r line; do
             NOW="$(date +%s)"
 
             # New session after enough silence from yknotify.

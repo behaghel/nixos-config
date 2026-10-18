@@ -6,6 +6,7 @@ not an authorization boundary or authenticated process identity.
 """
 
 import fcntl
+import hashlib
 import os
 from pathlib import Path
 import signal
@@ -13,6 +14,9 @@ import stat
 import subprocess
 import sys
 import tempfile
+import time
+
+import diagnostics
 
 
 UNKNOWN = "Requester unknown"
@@ -29,11 +33,14 @@ def state_directory(create=False):
     return directory
 
 
-def describe(kind):
-    if kind != "OpenPGP":
-        return UNKNOWN
+def request_id(path):
+    return hashlib.sha256(Path(path).name.encode()).hexdigest()[:16]
+
+
+def pending_requests():
+    """Return opaque live request IDs, or None if state is unavailable."""
     try:
-        count = 0
+        requests = []
         for path in state_directory().glob("request-*"):
             try:
                 fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -41,16 +48,21 @@ def describe(kind):
                     try:
                         fcntl.flock(marker, fcntl.LOCK_EX | fcntl.LOCK_NB)
                     except BlockingIOError:
-                        count += 1
+                        requests.append(request_id(path))
             except FileNotFoundError:
                 continue  # A request completed during the snapshot.
-        if count == 1:
-            return "Git signing pending — touch requester unverified"
-        if count > 1:
-            return ("Multiple Git signing requests pending"
-                    " — touch requester unverified")
+        return sorted(requests)
     except OSError:
-        pass  # Missing or unreadable context is not evidence of ownership.
+        return None
+
+
+def describe(kind):
+    requests = pending_requests() if kind == "OpenPGP" else None
+    if requests and len(requests) == 1:
+        return "Git signing pending — touch requester unverified"
+    if requests and len(requests) > 1:
+        return ("Multiple Git signing requests pending"
+                " — touch requester unverified")
     return UNKNOWN
 
 
@@ -80,8 +92,12 @@ def wrap(command):
             except OSError:
                 pass
         print("yknotify: signing context unavailable", file=sys.stderr)
+        diagnostics.emit("git_context_unavailable", wrapper_pid=os.getpid())
         os.execv(command[0], command)
 
+    identifier = request_id(path)
+    started = time.monotonic()
+    result = None
     child = None
     previous = {}
     pending = []
@@ -98,12 +114,18 @@ def wrap(command):
     try:
         for signum in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
             previous[signum] = signal.signal(signum, forward)
+        diagnostics.emit("git_request_start", request_id=identifier,
+                         evidence="instrumented_request", operation="sign",
+                         wrapper_pid=os.getpid())
         child = subprocess.Popen(command, restore_signals=True)
         for signum in pending:
             forward(signum, None)
         result = child.wait()
         return result if result >= 0 else 128 - result
     finally:
+        diagnostics.emit("git_request_end", request_id=identifier,
+                         evidence="instrumented_request", exit_code=result,
+                         elapsed_ms=int((time.monotonic() - started) * 1000))
         for signum, handler in previous.items():
             signal.signal(signum, handler)
         try:
@@ -118,5 +140,9 @@ if __name__ == "__main__":
         print(describe(sys.argv[2]))
     elif len(sys.argv) >= 3 and sys.argv[1] == "wrap":
         sys.exit(wrap(sys.argv[2:]))
+    elif len(sys.argv) == 3 and sys.argv[1] == "observe":
+        diagnostics.observe_stream(sys.stdin, sys.stdout,
+                                   max(1, float(sys.argv[2])), pending_requests)
     else:
-        sys.exit("usage: context.py describe TYPE | wrap EXECUTABLE [ARGS...]")
+        sys.exit("usage: context.py describe TYPE | wrap EXECUTABLE [ARGS...]"
+                 " | observe SESSION_TIMEOUT")

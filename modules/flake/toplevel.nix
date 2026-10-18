@@ -55,9 +55,11 @@
     checks.yknotify-context = pkgs.runCommand "yknotify-context-tests"
       {
         nativeBuildInputs = [ pkgs.python3 pkgs.git ];
-        YKNOTIFY_CONTEXT_HELPER = ../home/darwin/yknotify/context.py;
+        YKNOTIFY_CONTEXT_HELPER = "${../home/darwin/yknotify}/context.py";
+        PYTHONDONTWRITEBYTECODE = "1";
       } ''
       python3 ${../../tests/test-yknotify-context.py}
+      python3 ${../../tests/test-yknotify-diagnostics.py}
       touch "$out"
     '';
     checks.file-associations = import ../../tests/file-associations.nix { inherit pkgs lib inputs; };
