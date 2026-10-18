@@ -96,6 +96,8 @@ in
       set -g mode-style bg=colour24,fg=colour254
 
       set -ga terminal-overrides ",xterm-256color:RGB"
+      # Forward Pi's OSC 8 file links and advertise support to its renderer.
+      set -as terminal-features ",xterm-ghostty:hyperlinks"
       set -g set-clipboard on
 
       # Splits. workon stores the project root in the window option

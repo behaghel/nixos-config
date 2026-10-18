@@ -54,7 +54,8 @@ let
 
   disabledCheck = assert' "hub.pi disabled leaves no managed agent files"
     (!builtins.hasAttr ".pi/agent/models.json" disabledCfg.home.file
-      && !builtins.hasAttr ".pi/agent/extensions/tmux-attention.ts" disabledCfg.home.file);
+      && !builtins.hasAttr ".pi/agent/extensions/tmux-attention.ts" disabledCfg.home.file
+      && !builtins.hasAttr ".pi/agent/extensions/relative-paths" disabledCfg.home.file);
 
   plainCheck = assert' "hub.pi plain mode does not install Pi by default"
     (!builtins.hasAttr ".pi/agent/models.json" plainCfg.home.file
@@ -77,6 +78,23 @@ let
         && lib.hasInfix "agent_settled" extension
         && lib.hasInfix "process.env.TMUX" extension
         && lib.hasInfix "u0007" extension);
+
+  relativePathsCheck =
+    let
+      files = [ "index.ts" "core.ts" ];
+      installed = cfg: prefix:
+        let source = cfg.home.file."${prefix}/relative-paths".source;
+        in builtins.attrNames (builtins.readDir source) == [ "core.ts" "index.ts" ]
+          && builtins.all
+          (file: builtins.readFile (source + "/${file}")
+            == builtins.readFile (../modules/home/pi/relative-paths + "/${file}"))
+          files;
+    in
+    assert' "Pi and pi-local install the same relative-file-link extension"
+      (installed plainCfg ".pi/agent/extensions"
+        && installed selfManagedCfg ".pi/agent/extensions"
+        && installed localCfg ".local/share/pi-local/agent/extensions"
+        && lib.hasInfix "xterm-ghostty:hyperlinks" tmuxCfg.programs.tmux.extraConfig);
 
   tmuxAttentionCheck =
     let
@@ -110,7 +128,7 @@ in
 pkgs.runCommand "pi-module-tests" { } ''
   cat <<'RESULTS'
   ── Pi Home Manager module ──
-  ${disabledCheck}${plainCheck}${selfManagedCheck}${piAttentionCheck}${tmuxAttentionCheck}${localCheck}${ds4Check}RESULTS
+  ${disabledCheck}${plainCheck}${selfManagedCheck}${piAttentionCheck}${relativePathsCheck}${tmuxAttentionCheck}${localCheck}${ds4Check}RESULTS
   echo "All Pi module tests passed."
   echo ok > $out
 ''

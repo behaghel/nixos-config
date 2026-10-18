@@ -55,6 +55,26 @@ Doctor may identify missing links in older worktrees; metadata `repair` does not
 restore links, and existing files must never be overwritten blindly. Worktrees
 separate Git work, not operating-system permissions or credential access.
 
+### Clickable file references in Pi
+
+With `hub.pi.enable`, Pi and `pi-local` make existing inline-code file paths
+and relative Markdown links in assistant responses clickable. The visible path
+stays relative; its hyperlink targets an absolute `file://` URL. Paths resolve
+from the Git worktree root, even when Pi starts in a subdirectory. Outside Git,
+the window's `workon` root takes precedence over Pi's starting directory.
+Code blocks, images, web links, user messages, and stored history are unchanged.
+This requires a current Pi with `registerMarkdownTransformer` support.
+
+On macOS in Ghostty/tmux, Cmd+Shift+click opens Markdown files through the
+existing Emacs association. After manually activating the configuration, reload
+tmux with prefix + r, detach/reattach the Ghostty client to refresh terminal
+capabilities, and restart Pi or run `/reload`. To smoke-test, start Pi from a
+repository subdirectory and ask it to mention `AGENTS.md` in inline code;
+Cmd+Shift+click should open the file at that worktree's root in Emacs.
+
+The regression suite is `nix build .#checks.aarch64-darwin.pi-relative-paths`
+(use the appropriate system name on other platforms).
+
 ## Agent Skills
 
 - Repo-local agent skills live under `.agents/skills/`.
