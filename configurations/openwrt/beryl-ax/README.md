@@ -111,8 +111,8 @@ Do not use it for sensitive traffic until the packet tests below pass. The
 physical switch is not assigned by this module.
 
 Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
-previous armed/ON/OFF revision passed the router's check-only nftables validation;
-the new guest-isolation revision still needs that check before installation.
+current armed/ON/OFF profiles, including guest/IoT isolation, passed the router's
+check-only nftables validation; the table inventory stayed empty afterward.
 The scoped native DNS configuration passed native dnsmasq syntax validation
 using a temporary copy. No rules/settings were installed; actual DNS integration
 and packet-level behavior still need live acceptance. Requalify after a
