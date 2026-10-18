@@ -48,6 +48,16 @@ in
       readOnly = true;
       description = "Native idempotent hostname and Tailnet naming configuration.";
     };
+    system.build.sshPolicyScript = mkOption {
+      type = types.package;
+      readOnly = true;
+      description = "Native key-only SSH policy, preserving web-admin credentials.";
+    };
+    system.build.activationScript = mkOption {
+      type = types.package;
+      readOnly = true;
+      description = "Native naming and SSH policy, applied only after key authentication.";
+    };
     system.build.activate = mkOption {
       type = types.package;
       readOnly = true;
@@ -87,6 +97,23 @@ in
     desired_name=${lib.escapeShellArg name}
     ${builtins.readFile ./naming.sh}
   '';
+  config.system.build.sshPolicyScript = pkgs.writeText "${name}-ssh-policy.sh" ''
+    #!/bin/sh
+    operator_key=${lib.escapeShellArg me.sshKey}
+    ${builtins.readFile ./ssh-policy.sh}
+  '';
+  config.system.build.activationScript = pkgs.writeText "${name}-activation.sh" ''
+    #!/bin/sh
+    set -eu
+    desired_name=${lib.escapeShellArg name}
+    operator_key=${lib.escapeShellArg me.sshKey}
+    (
+      ${builtins.readFile ./naming.sh}
+    )
+    (
+      ${builtins.readFile ./ssh-policy.sh}
+    )
+  '';
   config.system.build.activate = pkgs.writeShellApplication {
     name = "${name}-activate";
     runtimeInputs = [ pkgs.openssh ];
@@ -106,8 +133,18 @@ in
       case "$target" in
         ""|-*|*[!a-zA-Z0-9.:-]*) echo 'invalid target address' >&2; exit 2 ;;
       esac
-      exec ssh -F /dev/null -l ${lib.escapeShellArg cfg.user} ${sshOptions} \
-        "$target" "sh -s -- $mode" < ${config.system.build.namingScript}
+      run_remote() {
+        ssh -F /dev/null -l ${lib.escapeShellArg cfg.user} ${sshOptions} \
+          "$target" "sh -s -- $1" < ${config.system.build.activationScript}
+      }
+      run_remote "$mode"
+      if [ "$mode" = apply ]; then
+        echo 'Verifying with a second fresh SSH authentication; touch your YubiKey.' >&2
+        if ! run_remote check; then
+          echo 'Fresh-key verification failed; keep the recovery session open.' >&2
+          exit 1
+        fi
+      fi
     '';
   };
   config.system.build.bootstrapScript =

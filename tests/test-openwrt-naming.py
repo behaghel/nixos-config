@@ -132,33 +132,66 @@ p.write_text(json.dumps(s))
 
 
 class TransportTests(unittest.TestCase):
-    def test_generated_wrapper_passes_exact_target_and_read_only_mode(self):
+    def exercise(self, mode, fail=False, fail_check=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             log = root / "args.json"
             ssh = root / "ssh"
             ssh.write_text('''#!/usr/bin/env python3
 import json, os, pathlib, sys
-pathlib.Path(os.environ["ARG_LOG"]).write_text(json.dumps(sys.argv[1:]))
+with pathlib.Path(os.environ["ARG_LOG"]).open("a") as log:
+    log.write(json.dumps(sys.argv[1:]) + "\\n")
+sys.exit(int(os.environ.get("FAIL_SSH", "0")) or
+         (os.environ.get("FAIL_CHECK") == "1" and
+          sys.argv[-1] == "sh -s -- check"))
 ''')
             ssh.chmod(0o755)
             script = root / "activate"
             # Substitute only the transport executable, retaining generated
             # quoting, parsing, options, and the actual input artifact.
             script.write_text(ACTIVATION.replace(
-                "exec ssh ", 'exec "$FIXTURE_SSH" ',
+                "ssh -F ", '"$FIXTURE_SSH" -F ',
             ))
-            env = dict(os.environ, FIXTURE_SSH=str(ssh), ARG_LOG=str(log))
+            env = dict(os.environ, FIXTURE_SSH=str(ssh), ARG_LOG=str(log),
+                       FAIL_SSH="1" if fail else "0",
+                       FAIL_CHECK="1" if fail_check else "0")
             result = subprocess.run(
-                ["bash", str(script), "--check", "--target", "100.101.32.55"],
+                ["bash", str(script), mode, "--target", "100.101.32.55"],
                 env=env, capture_output=True, text=True,
             )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            args = json.loads(log.read_text())
-            self.assertEqual(args[-2:], ["100.101.32.55", "sh -s -- check"])
-            self.assertEqual(args[0:4], ["-F", "/dev/null", "-l", "root"])
-            self.assertIn("HostKeyAlias=beryl-ax", args)
-            self.assertIn("StrictHostKeyChecking=yes", args)
+            return result, [json.loads(line)
+                            for line in log.read_text().splitlines()]
+
+    def test_check_uses_exact_target_and_read_only_mode(self):
+        result, calls = self.exercise("--check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(len(calls), 1)
+        args = calls[0]
+        self.assertEqual(args[-2:], ["100.101.32.55", "sh -s -- check"])
+        self.assertEqual(args[0:4], ["-F", "/dev/null", "-l", "root"])
+        self.assertIn("HostKeyAlias=beryl-ax", args)
+        self.assertIn("StrictHostKeyChecking=yes", args)
+
+    def test_apply_requires_a_second_fresh_key_authentication(self):
+        result, calls = self.exercise("--apply")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([args[-1] for args in calls],
+                         ["sh -s -- apply", "sh -s -- check"])
+        for args in calls:
+            self.assertIn("ControlMaster=no", args)
+            self.assertIn("ControlPath=none", args)
+            self.assertIn("PreferredAuthentications=publickey", args)
+
+    def test_failed_fresh_verification_is_not_reported_as_success(self):
+        result, calls = self.exercise("--apply", fail_check=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("recovery session", result.stderr)
+
+    def test_failed_authentication_stops_the_workflow(self):
+        result, calls = self.exercise("--apply", fail=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(len(calls), 1)
 
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@
     {
       packages = packageSet "bootstrap" bootstraps // packageSet "activate" activations;
       apps = appSet "bootstrap" "Print native public-key bootstrap for" bootstraps
-        // appSet "activate" "Check or apply native naming for" activations;
+        // appSet "activate" "Check or apply native naming and SSH policy for" activations;
       checks.openwrt = import ../../tests/openwrt.nix { inherit pkgs lib inputs; };
     };
 }

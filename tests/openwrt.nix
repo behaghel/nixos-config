@@ -51,7 +51,10 @@ pkgs.runCommand "openwrt-bootstrap-tests"
   ssh-keygen -lf operator.pub
   python3 ${./test-openwrt-bootstrap.py} ${valid}
   sh -n ${naming}
+  sh -n ${cfg.system.build.activationScript}
+  sh -n ${cfg.system.build.sshPolicyScript}
   python3 ${./test-openwrt-naming.py} ${naming} ${lib.getExe activation}
+  python3 ${./test-openwrt-ssh-policy.py} ${cfg.system.build.sshPolicyScript}
   ssh -G -F ${sshConfig} beryl-ax > effective
   grep -Fx 'user root' effective
   grep -Fx 'hostname beryl-ax' effective
