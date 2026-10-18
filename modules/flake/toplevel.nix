@@ -57,6 +57,7 @@
     checks.opencode-model-config-modes = import ../../tests/opencode-model-config-modes.nix { inherit pkgs lib inputs; };
     checks.opencode-context7 = import ../../tests/opencode-context7.nix { inherit pkgs lib inputs; };
     checks.pi-module = import ../../tests/pi-module.nix { inherit pkgs lib inputs; };
+    checks.tmux-recovery = import ../../tests/tmux-recovery.nix { inherit pkgs lib inputs; };
     checks.zsh-direnv-completion = pkgs.runCommand "zsh-direnv-completion-test"
       {
         nativeBuildInputs = [ pkgs.bash pkgs.direnv pkgs.zsh ];
