@@ -5,12 +5,23 @@ let
   data = text: { inherit text; mode = "0644"; };
   executable = text: { inherit text; mode = "0755"; };
   localInterfaces = lib.concatStringsSep ", " (map builtins.toJSON cfg.localInterfaces);
+  untrustedInterfaces = lib.subtractLists cfg.trustedInterfaces cfg.localInterfaces;
+  untrustedNames = lib.concatStringsSep ", " (map builtins.toJSON untrustedInterfaces);
   # Independent of fw3; accepting here still leaves native policy in force.
   nftProfile = protected: ready: data ''
     ${marker}
     table inet nixos_exit_guard {
+      chain isolate_clients {
+        # Return, not accept: replies still traverse mode and native policy.
+        ct direction reply return
+        ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 100.64.0.0/10, 169.254.0.0/16 } counter reject
+        ip6 daddr { fc00::/7, fe80::/10 } counter reject
+      }
       chain forward {
         type filter hook forward priority -10; policy accept;
+        ${lib.optionalString (untrustedInterfaces != [ ]) ''
+          iifname { ${untrustedNames} } jump isolate_clients
+        ''}
         ${lib.optionalString protected ''
           ip daddr 100.100.100.100 udp dport 53 counter reject
           ip daddr 100.100.100.100 tcp dport 53 counter reject
@@ -18,7 +29,7 @@ let
           meta nfproto ipv6 counter reject
           ${lib.optionalString ready ''
             iifname "tailscale0" accept
-            oifname "tailscale0" accept
+            iifname { ${localInterfaces} } oifname "tailscale0" accept
           ''}
           counter reject
         ''}
@@ -50,7 +61,9 @@ let
       }
     }
   '';
-  files = {
+  files = assert lib.assertMsg
+    (builtins.all (name: builtins.elem name cfg.localInterfaces) cfg.trustedInterfaces)
+    "Trusted exit-tunnel interfaces must be qualified local interfaces"; {
     "/usr/sbin/nixos-exit-node" = executable ''
       #!/bin/sh
       ${marker}
@@ -107,6 +120,11 @@ in
       type = lib.types.nonEmptyListOf (lib.types.strMatching "[a-zA-Z0-9_.:-]+");
       default = [ "br-lan" "br-guest" "br-iot" ];
       description = "Qualified local links; add a native VLAN's link and downstream zone before using it.";
+    };
+    trustedInterfaces = lib.mkOption {
+      type = lib.types.listOf (lib.types.strMatching "[a-zA-Z0-9_.:-]+");
+      default = [ "br-lan" ];
+      description = "Qualified local links allowed to initiate routed private/Tailnet traffic in either mode.";
     };
     downstreamZones = lib.mkOption {
       type = lib.types.addCheck

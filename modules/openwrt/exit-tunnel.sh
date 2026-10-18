@@ -171,8 +171,8 @@ if [ "$mode" = on ]; then
     guard on apply || fail 'could not release verified tunnel traffic'
 else
     clear_exit
-    # OFF deliberately releases client restrictions without a remote peer or
-    # an active DNS/Tailscale control service being required.
+    # OFF releases the exit gate without a remote peer or an active control
+    # service; the off profile still enforces untrusted-client isolation.
     [ "$changed" = 0 ] || clean_dns_flows
     guard off apply || fail 'could not release owned guard'
 fi

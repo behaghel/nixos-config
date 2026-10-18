@@ -111,8 +111,9 @@ Do not use it for sensitive traffic until the packet tests below pass. The
 physical switch is not assigned by this module.
 
 Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
-generated armed/ON/OFF profiles passed the router's check-only nftables validation.
-The scoped native DNS configuration also passed native dnsmasq syntax validation
+previous armed/ON/OFF revision passed the router's check-only nftables validation;
+the new guest-isolation revision still needs that check before installation.
+The scoped native DNS configuration passed native dnsmasq syntax validation
 using a temporary copy. No rules/settings were installed; actual DNS integration
 and packet-level behavior still need live acceptance. Requalify after a
 firmware upgrade rather than assuming the same firewall lifecycle.
@@ -124,8 +125,15 @@ firmware upgrade rather than assuming the same firewall lifecycle.
   preferences, and the controller owns selecting MeLE and restoring that choice.
 - Native IP Masquerading handles client NAT. Owned native forwardings allow the
   declared LAN/guest/IoT zones outbound to Tailscale, without adding reverse
-  forwardings. Masqueraded clients share the router's Tailnet identity/ACLs;
-  this is not an additional guest-to-Tailnet isolation policy.
+  forwardings. Masqueraded clients share the router's Tailnet identity/ACLs, so
+  the guard separately restricts untrusted client interfaces in **both modes**.
+- Only `trustedInterfaces` (default `br-lan`) may initiate routed connections to
+  private/Tailnet destinations. Other qualified local links (guest and IoT by
+  default) are blocked from RFC1918, CGNAT/Tailnet, IPv4 link-local, IPv6 ULA and
+  IPv6 link-local destinations, including established original-direction flows.
+  Replies to connections initiated by trusted LAN still traverse the normal
+  mode/native firewall rules. Router DHCP/DNS and native input/L2 isolation remain
+  unchanged; these rules govern routed traffic, not same-link client isolation.
 - Native DNS uses Quad9 `9.9.9.9` for clients in **both** modes. Native router-DNS
   separation keeps router bootstrap resolution on uplink DNS; local dnsmasq
   names remain available. Tailscale's `accept-dns` stays false so its OS resolver
@@ -143,8 +151,8 @@ firmware upgrade rather than assuming the same firewall lifecycle.
 - **ON:** initially block external forwarding and resolver upstream requests;
   verify MeLE's identity and exit approval before releasing tunnel traffic.
   External IPv6 forwarding is blocked. Unavailable MeLE means no WAN fallback.
-- **OFF:** clear the exit preference and release the owned guard; Quad9 then
-  uses direct WAN. A dead local daemon has a bounded preference-clear attempt
+- **OFF:** clear the exit preference and release exit-specific restrictions;
+  guest/IoT private-destination isolation remains active. Quad9 then uses direct WAN. A dead local daemon has a bounded preference-clear attempt
   followed by removal of only its exit-default routes, preserving overlay routes.
 - A dedicated `inet nixos_exit_guard` nftables table is atomically replaced.
   Profile content must match digests embedded in the generated controller;
@@ -153,7 +161,8 @@ firmware upgrade rather than assuming the same firewall lifecycle.
   networking; stopping the watcher does not remove kernel protection.
 - Native VLAN additions require declaring their firewall zone and local link in
   `downstreamZones`/`localInterfaces`, then acceptance testing. Unknown links do
-  not gain a WAN exception from the guard, but local services may remain blocked.
+  not gain a WAN exception or ON-mode tunnel forwarding before qualification.
+  Newly qualified links are untrusted unless explicitly added to `trustedInterfaces`.
 
 When cleared for deployment, use the pinned LAN transport and retain web-admin
 access plus a root recovery session. Initial activation starts OFF and may reload
@@ -162,10 +171,10 @@ at `/etc/nixos-exit/dns-before.json`; it is not copied into the repository.
 
 ```sh
 # Human-run only, after prerequisites and generated-profile validation.
-devenv -q shell -- beryl-ax:activate --apply --target 192.168.8.1
-devenv -q shell -- beryl-ax:tunnel check
-devenv -q shell -- beryl-ax:tunnel on
-devenv -q shell -- beryl-ax:tunnel off
+as beryl-ax-init run beryl-ax:activate --apply --target 192.168.8.1
+as beryl-ax-init run beryl-ax:tunnel check
+as beryl-ax-init run beryl-ax:tunnel on
+as beryl-ax-init run beryl-ax:tunnel off
 ```
 
 ### Mandatory packet acceptance
@@ -186,7 +195,13 @@ or the absence of packet leaks.
 4. ON: repeat during fw3 reload/restart, router reboot, and uplink reconnect.
    Confirm the independent guard is retained and the correct exit reconverges.
 5. Repeat on wired and guest clients; test any configured additional VLAN.
-6. OFF with MeLE unavailable: direct cellular internet and DNS recover. Repeat
+6. In both ON and OFF, guest/IoT attempts to reach private LAN, MeLE's Tailnet
+   address and private/link-local test addresses fail; public internet and local
+   router DNS/DHCP still work. Test an already-established guest-private flow as
+   well as new connections. Trusted LAN retains its previous private access;
+   replies to trusted-LAN-initiated IoT connections remain subject to normal
+   mode/native firewall policy.
+7. OFF with MeLE unavailable: direct cellular internet and DNS recover. Repeat
    ON/OFF and check that unrelated native settings and guest isolation remain.
 
 Only after these pass should the preserved vendor switch dispatcher be wired to

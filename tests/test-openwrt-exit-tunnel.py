@@ -1,5 +1,6 @@
 """Controller orchestration tests, not proof of packet-level leak prevention."""
 
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -383,6 +384,61 @@ class TunnelTests(unittest.TestCase):
         (self.base / "mode").write_text("invalid\n")
         self.run_mode("guard")
         self.assertEqual(self.load()["nft"], self.profile("armed"))
+
+    def test_guest_isolation_applies_before_mode_routing_in_every_profile(self):
+        for mode in ("armed", "on", "off"):
+            with self.subTest(mode=mode):
+                forward = re.search(r"chain forward \{(.*?)\n\s*\}",
+                                    self.profile(mode), re.S)[1]
+                dispatch = re.search(
+                    r'iifname \{([^}]+)\} jump isolate_clients', forward)
+                self.assertIsNotNone(dispatch)
+                self.assertEqual(set(re.findall(r'"([^"]+)"', dispatch[1])),
+                                 {"br-guest", "br-iot"})
+                if mode != "off":
+                    self.assertLess(forward.index("jump isolate_clients"),
+                                    forward.index('oifname "tailscale0" accept')
+                                    if mode == "on" else forward.index("counter reject"))
+
+    def test_private_destination_sets_cover_guest_targets_not_public_internet(self):
+        for mode in ("armed", "on", "off"):
+            text = self.profile(mode)
+            chain = re.search(r"chain isolate_clients \{(.*?)\n\s*\}",
+                              text, re.S)
+            self.assertIsNotNone(chain, mode)
+            prefixes = []
+            for group in re.findall(r"ip6? daddr \{([^}]+)\} counter reject", chain[1]):
+                prefixes.extend(ipaddress.ip_network(p.strip())
+                                for p in group.split(","))
+            for address in ("10.0.0.1", "172.16.0.1", "192.168.1.199",
+                            "100.115.20.65", "169.254.169.254", "fd7a:115c:a1e0::1",
+                            "fe80::1"):
+                ip = ipaddress.ip_address(address)
+                self.assertTrue(any(ip in p for p in prefixes if p.version == ip.version),
+                                (mode, address))
+            for address in ("9.9.9.9", "1.1.1.1", "2606:4700:4700::1111"):
+                ip = ipaddress.ip_address(address)
+                self.assertFalse(any(ip in p for p in prefixes if p.version == ip.version),
+                                 (mode, address))
+
+    def test_guest_reply_exception_returns_to_normal_guard_without_accepting(self):
+        for mode in ("armed", "on", "off"):
+            text = self.profile(mode)
+            chain = re.search(r"chain isolate_clients \{(.*?)\n\s*\}", text, re.S)
+            self.assertIsNotNone(chain)
+            statements = [line.strip() for line in chain[1].splitlines()
+                          if line.strip() and not line.strip().startswith("#")]
+            self.assertEqual(statements[0], "ct direction reply return")
+            self.assertFalse(any("accept" in line for line in statements))
+            # Original-direction packets remain denied even if established;
+            # untracked packets cannot bypass the unconditional address checks.
+            self.assertNotIn("ct state new", chain[1])
+            self.assertNotIn("hook input", text)
+
+    def test_unknown_ingress_is_not_given_on_mode_tunnel_access(self):
+        forward = re.search(r"chain forward \{(.*?)\n\s*\}",
+                            self.profile("on"), re.S)[1]
+        self.assertRegex(forward, r'iifname \{[^}]+\} oifname "tailscale0" accept')
 
     def test_profiles_are_interface_independent_for_external_forwarding(self):
         on = self.profile("on")
