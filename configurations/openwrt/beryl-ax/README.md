@@ -114,8 +114,8 @@ Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
 current armed/ON/OFF profiles, including guest/IoT isolation, passed the router's
 check-only nftables validation; the table inventory stayed empty afterward.
 The scoped native DNS configuration passed native dnsmasq syntax validation
-using a temporary copy. No rules/settings were installed; actual DNS integration
-and packet-level behavior still need live acceptance. Requalify after a
+using a temporary copy. These check-only validations did not install settings;
+installation is a separate step and packet-level behavior still needs acceptance. Requalify after a
 firmware upgrade rather than assuming the same firewall lifecycle.
 
 - Disable **Network Acceleration**, then reboot before deployment. Persistent
@@ -138,8 +138,14 @@ firmware upgrade rather than assuming the same firewall lifecycle.
   separation keeps router bootstrap resolution on uplink DNS; local dnsmasq
   names remain available. Tailscale's `accept-dns` stays false so its OS resolver
   integration does not compete with native DNS. Health checks inspect the actual
-  dnsmasq server and router resolver link, not just the admin UI metadata. There
-  is no second DNS daemon.
+  dnsmasq server and router resolver link, not just the admin UI metadata. Native
+  manual DNS uses `noresolv=1`; unset `localuse` then defaults to zero and is valid.
+  An explicit `localuse=1` or resolver-file fallback is rejected. There is no
+  second DNS daemon.
+- ON also requires an independent router-bootstrap DNS route among the first
+  three configured resolvers. A route into Tailscale/loopback is not independent;
+  missing resolvers keep ON blocked. This is a route check, not proof that a DNS
+  server answers. OFF installation/recovery does not depend on this prerequisite.
 - Native MagicDNS forwarding is narrowed from all `ts.net` to the declared
   `tailnetSuffix`. Tailscale [answers this local domain authoritatively](https://github.com/tailscale/tailscale/blob/v1.92.5/net/dns/resolver/tsdns.go),
   including NXDOMAIN for unknown local names, without upstream DNS forwarding.
@@ -165,7 +171,10 @@ firmware upgrade rather than assuming the same firewall lifecycle.
   Newly qualified links are untrusted unless explicitly added to `trustedInterfaces`.
 
 When cleared for deployment, use the pinned LAN transport and retain web-admin
-access plus a root recovery session. Initial activation starts OFF and may reload
+access plus a root recovery session. If application fails, assume partial state;
+do not reboot until the boot guard has been enabled and verified. Retrying after
+an inspected/fixed failure must preserve compliant native settings.
+Initial activation starts OFF and may reload
 native firewall/DNS services. The saved original DNS API result stays root-only
 at `/etc/nixos-exit/dns-before.json`; it is not copied into the repository.
 
@@ -214,3 +223,10 @@ repeatedly fails to obtain a DHCP lease, including with Factory MAC. Home Ethern
 and the phone's Wi-Fi hotspot both obtain leases. This Wi-Fi-specific issue is
 unresolved, not a diagnosed driver bug; use Ethernet for management and cellular
 hotspot for isolated tunnel tests until it is investigated separately.
+
+The home ISP also supplies DNS servers `100.90.1.1` and `100.100.1.1`. The vendor's
+main-table `100.64.0.0/10` Tailscale route captures them, including protected
+router-originated queries. That bootstrap-routing collision is not repaired by
+changing client DNS to Quad9. ON is blocked if no independent resolver remains;
+the phone hotspot supplies a separately routed DNS server for isolated tests.
+A permanent home-ISP bootstrap-routing fix remains separate work.

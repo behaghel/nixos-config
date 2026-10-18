@@ -17,13 +17,31 @@ peer_ready() {
     peer=$(timeout 5 tailscale status --json) || return 1
     printf '%s' "$peer" | lua "$base/native-dns.lua" peer-check "$exit_ip" "$exit_id" "$tailnet_suffix"
 }
+# Check Tailscale's protected (0x80000) router-originated DNS route. This is
+# not a DNS reachability probe. OFF never depends on this prerequisite.
+bootstrap_ready() {
+    servers=$(awk '$1 == "nameserver" { if (++n <= 3) print $2; else exit }' \
+        /tmp/resolv.conf.d/resolv.conf.auto) || return 1
+    for server in $servers; do
+        case "$server" in ''|*[!0-9.]*) continue ;; esac
+        route=$(ip -4 route get "$server" mark 0x80000 uid 0 2>/dev/null) || continue
+        case " $route " in
+            *" dev tailscale0 "*|*" dev lo "*|*" linkdown "*) ;;
+            *" dev "*) return 0 ;;
+        esac
+    done
+    return 1
+}
 native_ready() {
     dns=$(native_dns_get) || return 1
     printf '%s' "$dns" | lua "$base/native-dns.lua" check "$dns_address" || return 1
     lua "$base/native-dns.lua" scope-check "$tailnet_suffix" < /etc/dnsmasq.conf || return 1
     [ "$(uci -q get tailscale.settings.enabled)" = 1 ] || return 1
     [ "$(uci -q get dhcp.@dnsmasq[0].server)" = "$dns_address" ] || return 1
-    [ "$(uci -q get dhcp.@dnsmasq[0].localuse)" = 0 ] || return 1
+    # Native manual DNS sets noresolv=1 and deletes localuse. The native
+    # dnsmasq service then defaults localuse to 0; an explicit 1 is unsafe.
+    [ "$(uci -q get dhcp.@dnsmasq[0].noresolv)" = 1 ] || return 1
+    case "$(uci -q get dhcp.@dnsmasq[0].localuse || true)" in ''|0) ;; *) return 1 ;; esac
     [ "$(uci -q get dhcp.@dnsmasq[0].queryport || printf '0')" = 0 ] || return 1
     [ "$(readlink /tmp/resolv.conf)" = /tmp/resolv.conf.d/resolv.conf.auto ] || return 1
     [ "$(uci -q get tailscale.settings.masq)" = 1 ] || return 1

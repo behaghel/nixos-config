@@ -129,6 +129,7 @@ if [ "$operation" = check ]; then
     native_ready || fail 'native DNS/NAT drift'
     if [ "$mode" = on ]; then
         prerequisites
+        bootstrap_ready || fail 'router bootstrap DNS has no independent uplink route'
         peer_ready || fail 'exit identity/approval or MagicDNS scope drift'
         get_exit && [ "$selected" = "$exit_id" ] && [ "$lan" = true ] && [ "$corp_dns" = false ] || fail 'exit/DNS preference drift; guard retained'
         ip -4 route get "$dns_address" uid 453 | grep -q 'dev tailscale0' || fail 'client DNS route is not the tunnel'
@@ -148,6 +149,10 @@ if [ "$mode" = on ]; then
         guard on check || guard armed apply || fail 'could not restore protection'
     fi
     prerequisites
+    if ! bootstrap_ready; then
+        guard armed apply || fail 'could not restore blocking policy'
+        fail 'router bootstrap DNS has no independent uplink route; ON blocked'
+    fi
     get_exit || fail 'local Tailscale unavailable; guard retained'
     if [ "$corp_dns" != false ]; then
         timeout 5 tailscale set --accept-dns=false || fail 'could not release native DNS ownership; guard retained'

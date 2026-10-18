@@ -43,7 +43,8 @@ elif n == "uci":
             "tailscale.settings.enabled": "1",
             "firewall.tailscale0.masq": "1",
             "dhcp.@dnsmasq[0].server": s.get("actual_dns", "9.9.9.9"),
-            "dhcp.@dnsmasq[0].localuse": "0",
+            "dhcp.@dnsmasq[0].localuse": s.get("localuse", "0"),
+            "dhcp.@dnsmasq[0].noresolv": s.get("noresolv", "1"),
             "dhcp.@dnsmasq[0].queryport": "0",
         }
         for zone in ("lan", "guest"):
@@ -51,7 +52,7 @@ elif n == "uci":
             values.update({prefix: "forwarding", prefix + ".src": zone,
                            prefix + ".name": "nixos-config exit-tunnel",
                            prefix + ".dest": "tailscale0"})
-        if key in values:
+        if key in values and values[key] is not None:
             print(values[key])
         else:
             rc = 1
@@ -128,8 +129,13 @@ elif n == "jsonfilter":
 elif n == "ip":
     family = "default4" if a[0] == "-4" else "default6"
     if "get" in a:
-        dev = "tailscale0" if s["default4"] and not s.get("wrong_dns_route") else "usb0"
-        print("9.9.9.9 dev " + dev)
+        address = a[a.index("get") + 1]
+        if "mark" in a:
+            dev = s.get("bootstrap_by_server", {}).get(
+                address, s.get("bootstrap_route", "eth0"))
+        else:
+            dev = "tailscale0" if s["default4"] and not s.get("wrong_dns_route") else "usb0"
+        print(address + " dev " + dev)
     elif "del" in a:
         rc = int(not s[family])
         if not rc:
@@ -176,6 +182,8 @@ class TunnelTests(unittest.TestCase):
         text = text.replace("/etc/nixos-exit", str(self.base))
         text = text.replace("/var/run/nixos-exit-applied", str(self.root / "stamp"))
         text = text.replace("/tmp/resolv.conf", str(self.root / "resolv.conf"))
+        (self.root / "resolv.conf.d").mkdir()
+        (self.root / "resolv.conf.d/resolv.conf.auto").write_text("nameserver 1.1.1.1\n")
         (self.root / "resolv.conf").symlink_to(self.root / "resolv.conf.d/resolv.conf.auto")
         self.native_conf = self.root / "dnsmasq.conf"
         self.native_conf.write_text("server=/tail21d416.ts.net/100.100.100.100\n")
@@ -273,6 +281,39 @@ class TunnelTests(unittest.TestCase):
         self.run_mode("on")
         self.update(exit="", default4=False, default6=False, fail_set=True)
         self.run_mode("reconcile", success=False)
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+
+    def test_native_unset_localuse_is_safe_with_noresolv(self):
+        self.update(localuse=None, noresolv="1")
+        self.run_mode("on")
+        self.run_mode("check")
+
+    def test_resolver_fallback_and_explicit_localuse_are_not_accepted(self):
+        for changes in ({"noresolv": "0"}, {"localuse": "1"}):
+            with self.subTest(changes=changes):
+                self.update(noresolv="1", localuse="0")
+                self.update(**changes)
+                self.run_mode("on", success=False)
+                self.assertEqual(self.load()["nft"], self.profile("armed"))
+
+    def test_bootstrap_dns_routed_into_tailscale_keeps_on_blocked(self):
+        self.update(bootstrap_route="tailscale0")
+        self.run_mode("on", success=False)
+        self.assertEqual(self.load()["exit"], "")
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+        self.run_mode("off")
+        self.run_mode("check")
+
+    def test_one_independent_bootstrap_resolver_is_enough(self):
+        (self.root / "resolv.conf.d/resolv.conf.auto").write_text(
+            "nameserver 100.90.1.1\nnameserver 10.46.218.10\n")
+        self.update(bootstrap_route="tailscale0",
+                    bootstrap_by_server={"10.46.218.10": "apcli0"})
+        self.run_mode("on")
+
+    def test_missing_bootstrap_resolvers_do_not_claim_on_ready(self):
+        (self.root / "resolv.conf.d/resolv.conf.auto").write_text("")
+        self.run_mode("on", success=False)
         self.assertEqual(self.load()["nft"], self.profile("armed"))
 
     def test_native_dns_drift_rearms_without_changing_vendor_settings(self):
