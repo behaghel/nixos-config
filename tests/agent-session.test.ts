@@ -366,7 +366,7 @@ describe("agent-session create and start", () => {
 	it("adopts the local module with explicit Pi and ignored local configuration links", () => {
 		const devenv = readFileSync("devenv.nix", "utf8");
 		const ignore = readFileSync(".gitignore", "utf8").split("\n");
-		expect(devenv).toContain("imports = [ ./modules/flake/agent-session/devenv.nix ];");
+		expect(devenv).toMatch(/imports\s*=\s*\[[^\]]*\.\/modules\/flake\/agent-session\/devenv\.nix(?:\s|\])/);
 		expect(devenv).toContain('agentCommand = [ "pi" ];');
 		expect(devenv).toContain("localLinks = [");
 		for (const name of [".envrc.local", "devenv.local.nix", "devenv.local.yaml", ".workon-assistant"]) {

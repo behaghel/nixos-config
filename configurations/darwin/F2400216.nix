@@ -1,4 +1,4 @@
-{ flake, pkgs, ... }:
+{ flake, pkgs, lib, ... }:
 
 let
   inherit (flake) inputs;
@@ -29,7 +29,10 @@ in
 
   # Resolve MeLE from Tailscale during activation so `hub@mele` follows the
   # tailnet node instead of a manually maintained IP address.
-  hub.localNetwork.tailscaleAliases.mele = "mele-hub";
+  hub.localNetwork.tailscaleAliases = {
+    mele = "mele-hub";
+  } // lib.mapAttrs (_: host: host.networking.hostName)
+    (import ../../modules/openwrt/hosts.nix { inherit pkgs lib; });
 
   hub.darwin.openSourceTailscale.enable = true;
 

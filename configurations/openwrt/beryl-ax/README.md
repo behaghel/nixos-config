@@ -30,6 +30,40 @@ strict checking fails; do not disable host-key verification. A missing card or
 withheld touch must not authenticate a fresh connection. Stop if it does: inspect
 the offered agent identity and token touch policy before hardening.
 
-Naming, the `ssh beryl-ax` alias, password cutover, and `beryl-ax:activate` follow
-only after this fresh-key access checkpoint and native service inspection. No
-exit-node or toggle configuration is included in this slice.
+## Naming and the client alias
+
+After fresh-key acceptance, the generated tool checks/applies only native and
+Tailnet naming. Its SSH connection pins the verified host key, selects the public
+operator identity, and never falls back to a password or reuses a connection.
+
+```sh
+# Read-only: exits nonzero until all names agree.
+devenv -q shell -- beryl-ax:activate --check --target 100.101.32.55
+# Human-approved rename; retains the existing Tailnet registration.
+devenv -q shell -- beryl-ax:activate --apply --target 100.101.32.55
+# Repeat check, then apply again to verify no further semantic changes.
+devenv -q shell -- beryl-ax:activate --check --target 100.101.32.55
+```
+
+The address above is the currently verified router address, not a stored default.
+The normal tool target is `beryl-ax`; an override still verifies the same pinned
+host identity. Native UCI changes awaiting commit block application, so unrelated
+pending settings cannot accidentally be committed. No service restart is needed.
+
+After renaming, manually activate the Mac's system configuration with
+`nix run .#activate` to refresh Tailnet-backed aliases, and its Home Manager
+configuration with `nix run` to install the SSH client block. Then verify:
+
+```sh
+ssh beryl-ax 'uci -q get system.@system[0].hostname'
+devenv -q shell -- beryl-ax:activate --check
+```
+
+GL.iNet runs `tailscale up --reset` on network events. The persisted native
+hostname supplies the matching default when the explicit Tailscale hostname
+preference is reset; vendor scripts stay untouched. Confirm names after the next
+approved reconnect/reboot. A conflicting or manually overridden Tailnet DNS label
+fails verification instead of silently accepting a different name.
+
+SSH password cutover and reboot acceptance remain the next slice. No exit-node,
+DNS, forwarding, firewall, or toggle changes are included.

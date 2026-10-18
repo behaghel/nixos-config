@@ -1,4 +1,4 @@
-{ pkgs, lib }:
+{ pkgs, lib, inputs }:
 let
   me = (import ../config.nix).me;
   evaluate = extra: (lib.evalModules {
@@ -11,6 +11,20 @@ let
   }).config;
   cfg = evaluate { };
   valid = cfg.system.build.bootstrapScript;
+  naming = cfg.system.build.namingScript;
+  activation = cfg.system.build.activate;
+  sshConfig = pkgs.writeText "managed-ssh-config"
+    (inputs.home-manager.lib.homeManagerConfiguration {
+      inherit pkgs;
+      modules = [
+        ../modules/home/ssh
+        {
+          home.username = "tester";
+          home.homeDirectory = "/tmp/tester";
+          home.stateVersion = "24.11";
+        }
+      ];
+    }).config.home.file.".ssh/config".text;
   fails = extra:
     !(builtins.tryEval (builtins.deepSeq
       (evaluate extra).system.build.bootstrapScript.drvPath
@@ -36,5 +50,24 @@ pkgs.runCommand "openwrt-bootstrap-tests"
   printf '%s\n' "$TEST_PUBLIC_KEY" > operator.pub
   ssh-keygen -lf operator.pub
   python3 ${./test-openwrt-bootstrap.py} ${valid}
+  sh -n ${naming}
+  python3 ${./test-openwrt-naming.py} ${naming} ${lib.getExe activation}
+  ssh -G -F ${sshConfig} beryl-ax > effective
+  grep -Fx 'user root' effective
+  grep -Fx 'hostname beryl-ax' effective
+  grep -Fx 'hostkeyalias beryl-ax' effective
+  grep -Fx 'userknownhostsfile ${cfg.ssh.knownHostsFile}' effective
+  grep -Fx 'preferredauthentications publickey' effective
+  grep -Fx 'batchmode yes' effective
+  grep -Fx 'controlmaster false' effective
+  # OpenSSH represents ControlPath=none by omitting it from -G output.
+  if grep -q '^controlpath ' effective; then
+    echo 'connection sharing path unexpectedly enabled' >&2; exit 1
+  fi
+  grep -Fx 'forwardagent no' effective
+  grep -Fx 'hostkeyalgorithms ssh-ed25519' effective
+  if ${lib.getExe activation} --check --target 'bad target'; then
+    echo 'invalid target was accepted' >&2; exit 1
+  fi
   touch $out
 ''

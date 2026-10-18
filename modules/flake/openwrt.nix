@@ -1,46 +1,34 @@
-{ ... }:
-let
-  hostsDir = ../../configurations/openwrt;
-  entries = builtins.readDir hostsDir;
-  hostNames = builtins.filter (name: entries.${name} == "directory")
-    (builtins.attrNames entries);
-in
+{ inputs, ... }:
 {
   flake.openwrtModules.default = ../openwrt;
 
   perSystem = { pkgs, lib, ... }:
     let
-      hosts = lib.genAttrs hostNames (name:
-        let
-          cfg = (lib.evalModules {
-            specialArgs = { inherit pkgs; };
-            modules = [ ../openwrt (hostsDir + "/${name}") ];
-          }).config;
-        in
-        assert lib.assertMsg (cfg.networking.hostName == name)
-          "OpenWrt configuration directory must match its hostname";
-        cfg);
-      bootstrap = name: cfg: pkgs.writeShellApplication {
-        name = "${name}-bootstrap";
-        runtimeInputs = [ pkgs.coreutils ];
-        # Print only: applying public-key bootstrap requires a trusted session.
-        text = ''exec cat ${cfg.system.build.bootstrapScript}'';
-      };
-      packages = lib.mapAttrs bootstrap hosts;
+      hosts = import ../openwrt/hosts.nix { inherit pkgs lib; };
+      bootstraps = lib.mapAttrs
+        (name: cfg: pkgs.writeShellApplication {
+          name = "${name}-bootstrap";
+          runtimeInputs = [ pkgs.coreutils ];
+          # Print only: applying public-key bootstrap requires a trusted session.
+          text = ''exec cat ${cfg.system.build.bootstrapScript}'';
+        })
+        hosts;
+      activations = lib.mapAttrs (_: cfg: cfg.system.build.activate) hosts;
+      packageSet = suffix: packages: lib.mapAttrs'
+        (name: package: lib.nameValuePair "${name}-${suffix}" package)
+        packages;
+      appSet = suffix: description: packages: lib.mapAttrs'
+        (name: package: lib.nameValuePair "${name}:${suffix}" {
+          type = "app";
+          program = lib.getExe package;
+          meta.description = "${description} ${name}";
+        })
+        packages;
     in
     {
-      packages = lib.mapAttrs'
-        (name: package:
-          lib.nameValuePair "${name}-bootstrap" package)
-        packages;
-      apps = lib.mapAttrs'
-        (name: package:
-          lib.nameValuePair "${name}:bootstrap" {
-            type = "app";
-            program = lib.getExe package;
-            meta.description = "Print native public-key bootstrap for ${name}; does not apply it";
-          })
-        packages;
-      checks.openwrt = import ../../tests/openwrt.nix { inherit pkgs lib; };
+      packages = packageSet "bootstrap" bootstraps // packageSet "activate" activations;
+      apps = appSet "bootstrap" "Print native public-key bootstrap for" bootstraps
+        // appSet "activate" "Check or apply native naming for" activations;
+      checks.openwrt = import ../../tests/openwrt.nix { inherit pkgs lib inputs; };
     };
 }
