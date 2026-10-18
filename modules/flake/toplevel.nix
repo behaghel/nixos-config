@@ -72,6 +72,7 @@
         touch "$out"
       '';
     };
+    checks.tmux-recovery = import ../../tests/tmux-recovery.nix { inherit pkgs lib inputs; };
     checks.zsh-direnv-completion = pkgs.runCommand "zsh-direnv-completion-test"
       {
         nativeBuildInputs = [ pkgs.bash pkgs.direnv pkgs.zsh ];
