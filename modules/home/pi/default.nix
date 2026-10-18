@@ -173,6 +173,15 @@ let
     };
   };
 
+  # Keep relative imports adjacent in one store directory, not separate
+  # per-file symlinks whose realpaths would lose the ./core.ts neighbour.
+  relativePathsExtension = builtins.path {
+    path = ./relative-paths;
+    name = "pi-relative-paths";
+    filter = path: type:
+      type == "directory" || builtins.elem (baseNameOf path) [ "index.ts" "core.ts" ];
+  };
+
   tmuxAttentionExtension = ''
     import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -293,8 +302,10 @@ in
 
     home.file = {
       ".pi/agent/extensions/tmux-attention.ts".text = tmuxAttentionExtension;
+      ".pi/agent/extensions/relative-paths".source = relativePathsExtension;
     } // lib.optionalAttrs cfg.local.enable {
       ".local/share/pi-local/agent/extensions/tmux-attention.ts".text = tmuxAttentionExtension;
+      ".local/share/pi-local/agent/extensions/relative-paths".source = relativePathsExtension;
       ".local/share/pi-local/agent/models.json".text = localModelsJson;
     };
   };
