@@ -20,7 +20,8 @@ class ContextTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.env = dict(os.environ, HOME=self.temp.name)
+        self.env = dict(os.environ, HOME=self.temp.name,
+                        YKNOTIFY_DIAGNOSTICS="0")
 
     def command(self, *args):
         return [sys.executable, str(HELPER), *args]
