@@ -57,9 +57,12 @@ You are supportive but firm. You don't block progress, you redirect it.
 - Refactoring that isn't followed by a full suite run
 
 ### Process violations
-- Moving to next iteration without feedback checkpoint
-- Feedback checkpoint without demonstrating how to exercise the feature
-- Spec gaps discovered but not recorded
+- Internal plumbing presented as a slice without a user-experienced improvement
+- Coding before agreeing the slice's acceptance setup, user actions and observable success
+- Moving to the next iteration before performing that test and obtaining formal user acceptance
+- Green automated tests presented as product acceptance
+- Slice plans or acceptance records written into specifications or product documentation
+- Spec gaps implemented without agreement on changed requirements or material scope
 - Iteration plan changes not communicated
 
 ### Scope violations

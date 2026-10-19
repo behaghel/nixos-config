@@ -14,6 +14,8 @@ When this command is invoked:
 
 ### Step 1: Locate the spec
 
+Use the `tdd-planner` skill as the canonical workflow.
+
 1. If the user provided a path, read that file.
 2. If the user provided a feature name, search `spec/` for a matching file.
 3. If no spec exists, tell the user: "No spec found. Use `/spec-driven:collect-spec` to create one first, or provide a spec path."
@@ -27,14 +29,15 @@ When this command is invoked:
 ### Step 3: Design vertical slices
 
 1. Order criteria into iterations, starting with the **smallest viable end-to-end happy path**.
-2. Apply the vertical-slice rule: every iteration MUST be user-interactive and end-to-end.
+2. Apply the vertical-slice rule: every iteration MUST deliver one small, experientially meaningful user improvement end-to-end, not just callable plumbing.
    - For services: request → handler → logic → observable response
    - For mobile: UI action → network → data → screen update
-   - **Reject** backend-only or frontend-only iterations
+   - **Reject** internal-layer-only iterations without a user-experienced benefit; reliability fixes can qualify without adding a UI
 3. Group related criteria when they naturally belong together (e.g., a validation and its error message).
 4. For each iteration, define:
    - Slice goal (one sentence)
    - User interaction path (how a human exercises it)
+   - Acceptance test (setup, user actions, observable success; agree before coding, perform afterward for formal acceptance)
    - Tests to write first (concrete names)
    - Expected red signal (what failure looks like)
    - Minimal green target (least code to pass)
@@ -49,8 +52,8 @@ When this command is invoked:
 
 ### Step 5: Save the plan
 
-1. If the project has a `spec/` directory, save the plan next to the source spec (e.g., `spec/auth-refresh-tokens.plan.md`).
-2. If not, present it in a code block for the user to save where they choose.
+1. Keep the plan and agreed acceptance tests in the conversation or issue/PR discussion by default.
+2. Save a file only in a user-agreed temporary, non-normative delivery location—not alongside specifications or in product documentation.
 
 ## Rules
 
@@ -58,4 +61,5 @@ When this command is invoked:
 - Start with the simplest possible e2e happy path
 - Do not plan more than 7 iterations — if you need more, the spec scope is probably too large
 - Do not include refactoring-only iterations — refactoring happens within each iteration's green→refactor step
-- Keep iteration 1 trivially small — confidence and momentum matter more than coverage early on
+- Keep iteration 1 small but useful to the user, not merely easy to implement
+- Approval of the plan is not acceptance of its slices; perform the agreed acceptance test and obtain user acceptance before starting the next slice

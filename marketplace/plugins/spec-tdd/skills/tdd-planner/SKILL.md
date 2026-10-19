@@ -10,6 +10,8 @@ Plan implementation from specs, then execute strict red-green-refactor iteration
 
 Load `references/templates.md` when drafting iteration plans or reviewing test value.
 
+Keep slice plans, acceptance procedures, results and progress in the conversation, issue/PR discussion, or a user-agreed temporary non-normative delivery record—not in specifications or product documentation. Link durable requirements rather than copying delivery details into their pages.
+
 ## When to activate
 
 - A spec exists (from `spec-driven` plugin or manual) and the user wants to implement it
@@ -29,6 +31,7 @@ Load `references/templates.md` when drafting iteration plans or reviewing test v
 4. For each iteration, define:
    - **Slice goal** — one sentence describing the user-visible behavior
    - **User interaction path** — how a human exercises this (API call, UI flow, CLI command)
+   - **Acceptance test** — setup, user actions and observable success, agreed before coding and performed afterward for formal user acceptance; automated checks support but do not replace it
    - **Tests to write first** — concrete test names/descriptions
    - **Expected red signal** — what failure looks like before implementation
    - **Minimal green target** — the least code needed to pass
@@ -36,12 +39,12 @@ Load `references/templates.md` when drafting iteration plans or reviewing test v
 
 #### The vertical-slice rule
 
-Every iteration MUST be **user-interactive and end-to-end**. This means:
+Every iteration MUST deliver one small, **experientially meaningful, end-to-end** improvement for the customer or user (including an operator or developer). A callable endpoint is not enough if it only exposes internal plumbing. Reliability and recovery fixes qualify through the user path they improve; no new UI or feature is required. This means:
 - For service work: request shape → handler → service logic → observable API response
 - For mobile work: UI trigger → networking → data flow → screen update (emulator-verified)
 - For full-stack: frontend action → API call → backend processing → visible result
 
-**Reject** iterations that deliver only backend or only frontend work. If a slice can't be exercised by a human, it's not a valid slice.
+**Reject** iterations that deliver only an internal layer or technical checkpoint without an exercisable user benefit. Keep necessary technical substeps within the slice. If its scope grows materially or its acceptance checkpoint recedes, stop to agree a smaller slice or revised scope; do not silently accumulate repairs or weaken safety guarantees.
 
 5. **Pause for explicit plan approval.** Do NOT proceed to implementation until the user approves.
 
@@ -68,17 +71,17 @@ For each approved iteration:
    - Show what was built and how to exercise it.
    - Surface succinct plan status with a checklist: done/current/left.
    - Recommend the next iteration, either confirming the plan or proposing a learned refinement/detour.
-   - Provide concrete acceptance-test guidance when this slice is a useful acceptance checkpoint.
-   - Collect feedback before planning the next iteration.
+   - Perform the agreed acceptance test with the user and record the observed result and their acceptance decision. Report unavailable setup or unperformed acceptance as pending, not success.
+   - Green tests establish implementation progress, not formal acceptance. Wait for user acceptance before starting the next iteration.
    - If feedback changes the plan, update the iteration table.
 
 5. **Spec sync** — If implementation discoveries reveal spec gaps:
-   - Update `spec/` before proceeding.
-   - Flag the change to the user: "I found [X] wasn't covered in the spec. I've added it."
+   - Resolve requirement or material scope changes with the user before implementing them.
+   - Update the owning specification only for agreed durable behavior; keep slice changes and acceptance records in the delivery discussion. Use the existing ADR convention for material design decisions.
 
 ### End-of-slice checkpoint format
 
-At the end of every completed iteration, the final response MUST include:
+At the end of an implementation checkpoint, distinguish **implemented; awaiting acceptance** from **accepted**. Mark an iteration complete only after the agreed test has been performed and the user has accepted it. The final response MUST include:
 
 1. **Plan status** — a compact checklist showing what is done, where we are, and what remains:
    - `[x] Iteration 1 — [done slice goal]`
@@ -92,12 +95,12 @@ At the end of every completed iteration, the final response MUST include:
 3. **Recommended next iteration**:
    - Confirm the original plan if it still looks right, naming the next iteration.
    - Or recommend a refinement/detour/reordering learned from the current slice, with a one-sentence rationale.
-4. **Acceptance-test guidance** when useful:
+4. **Agreed acceptance test and result**:
    - What to run or click.
    - What data/setup is needed.
    - What observable result confirms acceptance.
-   - Whether this is a smoke check, targeted acceptance test, or broader end-to-end validation.
-5. **Feedback request** — ask whether the behavior is acceptable and whether to proceed with the recommended next iteration.
+   - What was actually exercised, any simulation or coverage limits, and whether formal user acceptance is accepted, rejected or pending.
+5. **Acceptance request** — ask for formal acceptance and whether to proceed with the recommended next iteration; do not infer acceptance from a passing suite.
 
 ### Phase 3: Continuous test hygiene
 
@@ -117,13 +120,13 @@ Throughout execution, evaluate tests for ongoing value:
 - Do NOT call an iteration complete unless a human can exercise the behavior end-to-end.
 - Do NOT skip the red step — if tests don't fail first, the iteration has no signal.
 - Do NOT keep tests that add maintenance cost without decision-making value.
-- Do NOT move to the next iteration until the current one is green and feedback is collected.
+- Do NOT move to the next iteration until the current one is green, its agreed acceptance test has been performed, and the user has accepted it.
 
 ## Completion checklist
 
 - [ ] Every planned iteration executed red → green → refactor.
 - [ ] Every iteration delivered a user-interactive end-to-end increment.
-- [ ] `spec/` reflects final agreed behavior (updated if discoveries were made).
-- [ ] Human feedback collected after each iteration.
+- [ ] Owning specs reflect agreed durable behavior, without slice plans or acceptance records.
+- [ ] Agreed acceptance test performed and formal user acceptance recorded for each iteration.
 - [ ] High-value tests remain; brittle low-signal tests pruned or refactored.
 - [ ] Full relevant test suite passes.

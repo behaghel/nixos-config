@@ -100,7 +100,7 @@ This is where humans add the most value. The agent assists by suggesting criteri
 - "Are there rate limits, size limits, or timeout requirements?"
 - "What error messages should the user see?"
 
-**Output:** Acceptance Criteria section of the spec.
+**Output:** Behavioral criteria in the iteration/standalone contract. When handing off to TDD, agree the first thin slice's user benefit and acceptance test (setup, user actions, observable success). Keep that slice-specific procedure and later acceptance results in the delivery discussion or user-agreed temporary record, not in durable specifications or product documentation.
 
 ## Phase 5: Boundaries & Invariants
 
@@ -155,9 +155,9 @@ For each criterion, define:
 | Type check | Structural correctness (TypeScript strict, mypy) |
 | Contract test | API response shapes, schema validation |
 | Linter rule | Convention enforcement |
-| Manual check | Visual/UX verification (minimize these) |
+| Acceptance test | Agreed user experience exercised for formal acceptance; not limited to graphical UI |
 
-**Key principle:** Verification criteria come from the spec, not from the implementation. If the agent writes both the code and the tests, the tests must trace back to human-authored acceptance criteria.
+**Key principle:** Verification criteria come from agreed requirements, not from the implementation. Automated checks support the agreed acceptance test; they do not establish formal user acceptance. Specification approval before coding and acceptance of the working slice afterward are separate checkpoints.
 
 **Output:** Verification Plan table in the spec.
 

@@ -15,11 +15,11 @@ When this command is invoked:
 ### Step 1: Load context
 
 0. Use the `tdd-planner` skill as the canonical workflow. This command is a thin execution wrapper; if this file and the skill differ, follow the skill.
-1. Find the iteration plan — check `spec/*.plan.md` or ask the user for the path.
+1. Find the iteration plan in the conversation, issue/PR discussion or user-agreed temporary delivery location; do not create plans in specifications or product documentation.
 2. Identify which iteration to execute:
    - If the user specified a number, use that.
    - If the user said "next", find the first iteration not yet marked complete.
-3. Read the iteration's definition: slice goal, tests to write, expected red signal, minimal green target.
+3. Read the iteration's user-visible contribution, agreed acceptance test, tests to write, expected red signal and minimal green target. Agree missing acceptance setup, actions or observable success before coding.
 4. Confirm with the user: "Starting iteration [N]: [goal]. Ready?"
 
 ### Step 2: Red — write tests first
@@ -63,14 +63,14 @@ When this command is invoked:
    - Provide a concrete command, API call, or UI action.
    - Show the expected output.
 2. If this is a mobile iteration, install on emulator and demonstrate.
-3. Ask: "Does this behave as expected? Any changes before we move on?"
-4. Record the feedback.
+3. Perform the agreed acceptance test with the user; disclose actual results, simulations and any unperformed checks. Ask for formal acceptance, not just general feedback.
+4. Record the user's decision in the delivery discussion. If the test cannot be performed or acceptance has not been given, report **implemented; awaiting acceptance** and do not start the next slice.
 
 ### Step 6: Spec sync
 
 1. If implementation revealed spec gaps (behaviors not covered, edge cases discovered):
-   - Update the spec file.
-   - Tell the user what changed and why.
+   - Agree requirement or material scope changes with the user before implementing them.
+   - Update the owning spec only for agreed durable behavior, never for slice descriptions, acceptance procedures, results or progress.
 2. If feedback changes the plan:
    - Update the iteration plan.
    - Note what shifted and why.
@@ -83,10 +83,10 @@ When this command is invoked:
 2. Check if any existing tests were made redundant by the new ones.
 3. If you find low-value tests, flag them to the user with a recommendation (keep/refactor/prune).
 
-### Step 8: Mark complete and surface plan status
+### Step 8: Surface implementation and acceptance status
 
 1. Log the iteration using the execution log template from `references/templates.md`.
-2. Update the iteration plan so the completed slice is visibly marked complete (for example, by adding `[x]` to the iteration row/heading or by updating a status section).
+2. Mark the slice complete only after its agreed acceptance test has been performed and the user has accepted it. Otherwise keep acceptance pending, even when automated tests pass.
 3. Present a succinct plan status summary in the final response. Prefer a compact checklist:
    - `[x] Iteration 1 — [done slice goal]`
    - `[x] Iteration N — [current slice goal completed]`
@@ -99,11 +99,11 @@ When this command is invoked:
 5. Recommend the next iteration:
    - If the original plan still looks right, say so and name the next iteration to run.
    - If this iteration revealed a useful refinement, worthwhile detour, or reordered risk, recommend the adjustment and explain why in one sentence.
-6. If the completed iteration is a good opportunity for acceptance testing, give the developer concrete guidance:
+6. Report the agreed acceptance test and its execution:
    - What to run or click.
    - What data/setup is needed.
    - What observable result confirms acceptance.
-   - Whether this is a quick smoke check, a targeted acceptance test, or a broader end-to-end validation.
+   - What actually ran, coverage limits and the user's acceptance decision (or pending status).
 7. Ask the user for feedback and permission to proceed: "Does this behave as expected? Shall we continue with [recommended next iteration]?"
 
 ## Rules
@@ -111,5 +111,6 @@ When this command is invoked:
 - NEVER skip the red step — if tests don't fail first, the iteration is not TDD
 - NEVER implement code that no failing test demands
 - NEVER refactor while tests are red
-- NEVER move to the next iteration without user feedback
-- If you discover the spec is wrong, update the spec BEFORE fixing the code
+- NEVER move to the next iteration before the agreed acceptance test is performed and the user accepts the current slice
+- If scope grows materially or the acceptance checkpoint recedes, agree a smaller slice or revised scope rather than silently accumulating repairs
+- If you discover the spec is wrong, agree the requirement change before updating its durable behavior or implementing the change
