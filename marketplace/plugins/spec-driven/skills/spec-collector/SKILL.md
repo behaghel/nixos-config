@@ -7,7 +7,7 @@ description: "Collect and revalidate requirements separately from design choices
 
 ## Core Shift
 
-The spec is the source of truth. Code is its artifact. The human checkpoint happens here — at the spec — not at the PR.
+The spec records agreed product requirements. Agree what to build before implementation; formally accept the working slice afterward. Specification approval is not product acceptance.
 
 When `domains.yaml` exists, default to the owning **domain specification**. Use an iteration spec only for temporary delivery concerns, or a system spec for durable RFC 2119 requirements that subsidiarity cannot assign to one domain.
 
@@ -25,6 +25,12 @@ Never put iteration concerns into domain or system corpora.
 Start from the smallest credible design that delivers the outcome using existing capabilities. Ask what concrete failure, domain contract, or authority boundary justifies each proposed workflow stage, state, adapter, queue, approval, or restriction. Existing machinery is evidence to investigate, not a requirement to preserve. Do not turn hypothetical risks, implementation convenience, or testability into unstated human requirements. Keep necessary safety and authorization guarantees while challenging the mechanism that currently provides them.
 
 During collection, distinguish the human's requested outcomes and constraints from architectural choices the implementation introduced. Present the simple baseline first; add complexity only when a specific counterexample or measured need shows why the baseline is insufficient and why a simpler alternative cannot satisfy it. Document material *subsequent* decisions that amend or complexify that baseline in an Architecture Decision Record (ADR): context/evidence, the earlier baseline, the change and rejected simpler alternatives, consequences, and the conditions for revisiting or removing it. Link the ADR from the relevant spec instead of embedding decision history in normative domain/system pages. Use an existing project ADR convention; if none exists, agree on a location rather than inventing a framework. Routine edits do not need ADRs.
+
+## From requirements to an acceptable slice
+
+Before handing work to TDD planning, identify the smallest end-to-end contribution the customer or user can experience, and agree its acceptance test: setup, user actions, and observable success. A short scenario or command/output example is sufficient; UX includes CLI, API and operational workflows, not only graphical screens. A technical checkpoint alone is not a slice; a reliability fix qualifies through the user experience it improves. Agree the current slice without requiring detailed acceptance plans for every later increment.
+
+Keep slice descriptions, acceptance procedures, results and progress in the conversation, issue/PR discussion, or an explicitly agreed temporary non-normative delivery record. Do not put them in durable specifications or product documentation. Specs describe the agreed enduring behavior; ADRs explain material design choices, not slice execution history. TDD planning carries the agreed acceptance test forward, and its later execution and the user's acceptance remain distinct from automated test success.
 
 ## Requirements, design choices, and delivery plans
 
