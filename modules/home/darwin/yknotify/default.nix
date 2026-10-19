@@ -7,7 +7,11 @@ let
     export YKNOTIFY_DIAGNOSTICS=${if cfg.diagnostics.enable then "1" else "0"}
     exec ${pkgs.python3}/bin/python3 -B ${./.}/context.py "$@"
   '';
+  # HID queue activity is not evidence of a FIDO user-presence request.
+  # Exclude it at the source, before diagnostics and notification throttling.
   eventStream = "${yknotify}/bin/yknotify"
+    + lib.optionalString (!cfg.fido2.enable)
+    " --predicate ${lib.escapeShellArg ''subsystem CONTAINS "CryptoTokenKit"''}"
     + lib.optionalString cfg.diagnostics.enable
     " | ${contextTool}/bin/yknotify-context observe ${toString cfg.sessionTimeoutSeconds}";
   gitSigner = pkgs.writeShellScript "yknotify-git-gpg" ''
@@ -20,10 +24,16 @@ in
       type = lib.types.bool;
       default = config.programs.gpg.expectSmartcard;
       description = ''
-        Show a macOS notification when the YubiKey is waiting for a
-        physical touch (FIDO2 or OpenPGP).
+        Show macOS notifications for heuristic OpenPGP touch events.
+        FIDO2 detection requires a separate, explicit opt-in.
       '';
     };
+
+    fido2.enable = lib.mkEnableOption ''
+      experimental FIDO2 notifications based on USB HID queue activity.
+      This is not a confirmed touch request and can produce persistent false
+      positives after lock/unlock or sleep/wake, including for other USB devices
+    '';
 
     diagnostics.enable = lib.mkEnableOption ''
       private, rotating diagnostic logs of instrumented Git requests and

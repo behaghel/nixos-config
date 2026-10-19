@@ -7,7 +7,7 @@ let
     if cond then "  ok  ${name}\n"
     else abort "FAIL ${name}";
 
-  evalCfg = expectSmartcard: diagnostics:
+  evalCfg = expectSmartcard: diagnostics: fido2:
     (hm.homeManagerConfiguration {
       inherit pkgs;
       modules = [
@@ -18,6 +18,7 @@ let
           home.homeDirectory = "/tmp/tester";
           home.stateVersion = "24.11";
           hub.yknotify.diagnostics.enable = lib.mkIf diagnostics true;
+          hub.yknotify.fido2.enable = lib.mkIf fido2 true;
           programs.gpg = {
             inherit expectSmartcard;
             useNixGPG = true;
@@ -26,9 +27,10 @@ let
       ];
     }).config;
 
-  smartcardCfg = evalCfg true false;
-  disabledCfg = evalCfg false false;
-  diagnosticCfg = evalCfg true true;
+  smartcardCfg = evalCfg true false false;
+  disabledCfg = evalCfg false false false;
+  diagnosticCfg = evalCfg true true false;
+  fidoCfg = evalCfg true false true;
   smartcardSettings = smartcardCfg.programs.gpg.scdaemonSettings;
   disabledSettings = disabledCfg.programs.gpg.scdaemonSettings;
 
@@ -74,6 +76,10 @@ let
         != diagnosticCfg.programs.git.settings.gpg.openpgp.program
     else true));
 
+  fidoCheck = assert' "unreliable FIDO2 detection is off by default and explicitly opt-in"
+    (!smartcardCfg.hub.yknotify.fido2.enable
+      && fidoCfg.hub.yknotify.fido2.enable);
+
   agentLifecycleCheck = assert' "Darwin lets GnuPG start its agent on demand"
     (if pkgs.stdenv.isDarwin then
       !smartcardCfg.launchd.agents.gpg-agent.enable
@@ -83,7 +89,17 @@ in
 pkgs.runCommand "gpg-module-tests" { } ''
   cat <<'RESULTS'
   ── GPG Home Manager module ──
-  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}${signingContextCheck}${diagnosticCheck}RESULTS
+  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}${signingContextCheck}${diagnosticCheck}${fidoCheck}RESULTS
+  ${lib.optionalString pkgs.stdenv.isDarwin ''
+    # Exercise the rendered detector arguments, not just option defaults.
+    grep -F -- '--predicate' ${builtins.head smartcardCfg.launchd.agents.yknotify.config.ProgramArguments}
+    grep -F -- 'subsystem CONTAINS "CryptoTokenKit"' ${builtins.head smartcardCfg.launchd.agents.yknotify.config.ProgramArguments}
+    grep -F -- '--predicate' ${builtins.head diagnosticCfg.launchd.agents.yknotify.config.ProgramArguments}
+    if grep -F -- '--predicate' ${builtins.head fidoCfg.launchd.agents.yknotify.config.ProgramArguments}; then
+      echo "FAIL FIDO2 opt-in must restore upstream HID detection"
+      exit 1
+    fi
+  ''}
   echo "All GPG module tests passed."
   echo ok > $out
 ''
