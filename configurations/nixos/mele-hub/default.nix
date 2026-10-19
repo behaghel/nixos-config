@@ -381,7 +381,14 @@ in
     tlp.enable = true;
     timesyncd.enable = true;
     pcscd.enable = true;
-    tailscale.enable = true;
+    tailscale = {
+      enable = true;
+      useRoutingFeatures = "server";
+      openFirewall = true;
+      # Native tailscaled-set persists these preferences without resetting others.
+      # Tailscale owns forwarding/firewall NAT rules; do not duplicate masquerade.
+      extraSetFlags = [ "--advertise-exit-node" "--netfilter-mode=on" ];
+    };
     openssh = {
       enable = true;
       settings = {
@@ -582,8 +589,10 @@ in
     "d /var/lib/node_exporter/textfile_collector 0775 root wheel -"
   ];
 
-  # Harden networking a bit for a public host
+  # Global IPv4 forwarding and redirect protections for this exit-node host.
+  # useRoutingFeatures also enables per-stack IPv4/IPv6 forwarding persistently.
   boot.kernel.sysctl = {
+    "net.ipv4.ip_forward" = 1;
     "net.ipv4.conf.all.accept_redirects" = 0;
     "net.ipv4.conf.default.accept_redirects" = 0;
     "net.ipv4.conf.all.accept_source_route" = 0;

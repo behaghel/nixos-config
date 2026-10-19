@@ -52,6 +52,8 @@
 
     checks.agent-session = import ../../tests/agent-session.nix { inherit pkgs lib; };
     checks.gpg-module = import ../../tests/gpg-module.nix { inherit pkgs lib inputs; };
+    checks.shell-module = import ../../tests/shell-module.nix { inherit pkgs; };
+    checks.mele-exit-node = import ../../tests/mele-exit-node.nix { inherit pkgs lib inputs; };
     checks.yknotify-context = pkgs.runCommand "yknotify-context-tests"
       {
         nativeBuildInputs = [ pkgs.python3 pkgs.git ];

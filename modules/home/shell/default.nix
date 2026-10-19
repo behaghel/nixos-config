@@ -30,29 +30,6 @@ in
   xdg.configFile."profile.d/zz_path.profile".source = ./.config/profile.d/zz_path.profile;
   xdg.configFile."profile.d/dark_theme.profile".source = ./.config/profile.d/dark_theme.profile;
 
-  programs.bash.profileExtra =
-    let
-      hmBin = "${config.home.profileDirectory}/bin";
-      sysBin = "/nix/var/nix/profiles/default/bin";
-      usrBin = "/etc/profiles/per-user/$USER/bin";
-    in
-    ''
-      # Ensure system and per-user profiles are present
-      case :$PATH: in
-        *:${sysBin}:*)  ;;  # do nothing
-        *) PATH=${sysBin}:$PATH ;;
-      esac
-      case :$PATH: in
-        *:${usrBin}:*)  ;;  # do nothing
-        *) PATH=${usrBin}:$PATH ;;
-      esac
-      case :$PATH: in
-        *:${hmBin}:*)  ;;  # do nothing
-        *) PATH=${hmBin}:$PATH ;;
-      esac
-      export PATH
-    '';
-
   # Editor defaults
   # NOTE: We set session vars and ship profile.d/editor.profile so shells pick up
   # the emacsclient preferences even if hm-session-vars was already sourced.
@@ -95,9 +72,33 @@ in
   programs = {
     # Only a shell function can implement `as <slug> cd` in the caller's shell. Outside
     # an enabled project it delegates unchanged to the executable (e.g. assembler).
-    bash.initExtra = ''
-      source ${../../flake/agent-session/shell-integration.sh}
-    '';
+    bash = {
+      profileExtra =
+        let
+          hmBin = "${config.home.profileDirectory}/bin";
+          sysBin = "/nix/var/nix/profiles/default/bin";
+          usrBin = "/etc/profiles/per-user/$USER/bin";
+        in
+        ''
+          # Ensure system and per-user profiles are present
+          case :$PATH: in
+            *:${sysBin}:*)  ;;  # do nothing
+            *) PATH=${sysBin}:$PATH ;;
+          esac
+          case :$PATH: in
+            *:${usrBin}:*)  ;;  # do nothing
+            *) PATH=${usrBin}:$PATH ;;
+          esac
+          case :$PATH: in
+            *:${hmBin}:*)  ;;  # do nothing
+            *) PATH=${hmBin}:$PATH ;;
+          esac
+          export PATH
+        '';
+      initExtra = ''
+        source ${../../flake/agent-session/shell-integration.sh}
+      '';
+    };
     zsh.initContent = lib.mkOrder 2000 ''
       source ${../../flake/agent-session/shell-integration.sh}
     '';

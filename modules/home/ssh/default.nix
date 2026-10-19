@@ -1,6 +1,13 @@
-{ lib, ... }:
+{ lib, pkgs, ... }:
 
 let
+  openwrtHosts = import ../../openwrt/hosts.nix { inherit pkgs lib; };
+  openwrtBlocks = lib.mapAttrs
+    (_: host: lib.hm.dag.entryBefore [ "*" ] {
+      user = host.ssh.user;
+      extraOptions = host.ssh.clientOptions;
+    })
+    openwrtHosts;
   codebergEd25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIIVIC02vnjFyL+I4RHfvIGNtOgJMe769VTF1VR4EB3ZB";
   codebergEcdsa = "ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBL2pDxWr18SoiDJCGZ5LmxPygTlPu+cCKSkpqkvCyQzl5xmIMeKNdfdBpfbCGDPoZQghePzFZkKJNR/v9Win3Sc=";
   gitlabEd25519 = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAfuCHKVTjquxvt6CM6tdG4SLp1Btn/nOeHHE5UOzRdf";
@@ -11,7 +18,7 @@ in
     enable = true;
     # Silence HM deprecation warning and declare explicit defaults.
     enableDefaultConfig = false;
-    matchBlocks = {
+    matchBlocks = openwrtBlocks // {
       "*" = {
         # Keep to the canonical known_hosts file for maximum compatibility.
         userKnownHostsFile = "~/.ssh/known_hosts";
