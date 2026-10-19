@@ -1,84 +1,215 @@
-# Beryl AX
+# Beryl AX travel router
 
-GL.iNet firmware stays in place. Nix builds native scripts on the management
-machine; the router does not need Nix. `default.nix` declares desired state,
-not proof that the router has been onboarded.
+A GL.iNet Beryl AX (MT3000) with a physical **direct internet / Tailscale exit
+node** switch. GL.iNet firmware stays in place; Nix builds native management
+scripts on the Mac, not on the router.
 
-## First access
+## What the device offers
 
-Keep an existing trusted root session and web-admin access available. Bootstrap
-only adds the public key from `config.nix`; it does not rename the router, disable
-passwords, alter networking, or restart services.
+### Two internet paths, one physical switch
 
-Run on the Mac, checking each command succeeds before continuing:
+```text
+ON:   wired / Wi-Fi clients → Beryl → Tailscale → MeLE exit node → internet
+OFF:  wired / Wi-Fi clients → Beryl → local WAN uplink           → internet
+```
+
+Beryl joins the Tailnet and uses `mele-hub` as its exit node. Downstream devices
+do not need their own Tailscale client. This is a single-exit-node topology,
+without an additional provider VPN or separate OpenVPN/WireGuard client chain.
+GL.iNet still manages Wi-Fi, Ethernet and repeater/hotspot uplinks.
+
+| Switch | Internet access | If MeLE is unavailable |
+|---|---|---|
+| **ON** | Client internet and upstream client DNS go through MeLE. | Protected traffic stays blocked; no direct-WAN fallback. |
+| **OFF** | Client internet and DNS use Beryl's WAN directly. | Direct access does not depend on MeLE. |
+
+OFF stops **exit-node use**, not Tailscale itself: non-default overlay routes
+remain available. Router-originated bootstrap DNS is deliberately separate from
+client DNS so Beryl can establish the tunnel.
+
+### Client networks and DNS
+
+| Network | Qualified interface | Routed private/Tailnet access |
+|---|---|---|
+| Trusted LAN | `br-lan` | Allowed subject to existing native policy. |
+| Guest | `br-guest` | Cannot initiate private, link-local or Tailnet connections. |
+| IoT | `br-iot` | Same restriction as guest. |
+
+Guest/IoT isolation applies in **both** switch positions, including established
+original-direction flows. Replies to connections initiated by trusted LAN still
+traverse normal mode/native firewall policy. These are routed-traffic controls;
+existing native input policy and same-link isolation remain separate.
+
+- Clients use Quad9 `9.9.9.9` in both modes; only its egress path changes.
+- Native DHCP/DNS and local dnsmasq names remain available.
+- MagicDNS is scoped to the declared Tailnet suffix, `tail21d416.ts.net`, rather
+  than forwarding all `ts.net` names. Protected clients cannot query Quad100
+  directly; the native resolver has the scoped exception.
+- Masqueraded clients share Beryl's Tailnet identity/ACLs. The router guard adds
+  the guest/IoT restrictions rather than relying on separate client identities.
+- External IPv6 is disabled in the qualified deployment; do not treat this as
+  an IPv6-enabled service.
+
+### Everyday operation
+
+Move the physical switch, then check controller health from the repository:
 
 ```sh
-# Prints public-key bootstrap, without applying it.
+devenv -q shell -- beryl-ax:tunnel check
+```
+
+The current physical position is authoritative. A conflicting CLI `on` or `off`
+request refuses rather than overriding it. Queued events re-read the position;
+unknown hardware state or a changed native assignment blocks instead of assuming
+OFF. Boot protection and the enabled watcher restore/reconcile the selected mode.
+
+Switch handling is userspace, with five-second watcher retries—not instantaneous
+electrical-edge enforcement. A successful health check verifies policy and
+configuration, **not** internet connectivity or the absence of packet leaks.
+
+### Known limits
+
+| Area | Qualification |
+|---|---|
+| Leak prevention | Bounded live checks passed; not exhaustive packet-level certification. Rapid-flip/boot checks establish recovered/final state, not continuous absence of transient leaks. |
+| DNS availability | Intermittent shared UDP DNS failures remain open; later successful samples do not close them. |
+| Uplink selection | Automatic preferred-hotspot reconnection is not established; one recovery required manual hotspot reselection. |
+| Home-ISP bootstrap DNS | A known Tailnet-range routing collision needs separate repair; see [bootstrap DNS](#bootstrap-dns-and-uplink-caveats). |
+| IPv6 | IPv6-enabled filtering remains unqualified. |
+
+## Installation and updates
+
+Run management commands on the Mac from this repository. All apply, activation
+and reboot steps below are **human-run**. Keep wired Beryl administration,
+web-admin access and an existing trusted root recovery session available until
+fresh access and internet behavior have been verified.
+
+The declaration in [`default.nix`](default.nix) is desired state, not evidence
+that a particular router has been onboarded.
+
+### 1. Prepare the router and exit node
+
+Qualified baseline: **MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5**.
+Requalify after firmware upgrades; fw4 is not qualified by this module.
+
+Before applying:
+
+- Configure the desired LAN/guest/IoT networks and working WAN uplink in GL.iNet.
+  Keep external IPv6 disabled for this qualified setup.
+- Enable native Tailscale, join the intended Tailnet and keep MagicDNS enabled.
+  Leave native **Custom Exit Nodes off**: the controller owns exit selection.
+- Prepare MeLE's persistent exit-node role, approve **Use as exit node**, and
+  check client authorization and unattended-node key expiry. See the
+  [MeLE operations guide](../../nixos/mele-hub/exit-node.md#apply-and-inspect)
+  and its [Admin Console gates](../../nixos/mele-hub/exit-node.md#admin-console-gates).
+  Beryl's selected address, node ID and Tailnet suffix are declared in
+  [`default.nix`](default.nix).
+- Disable **Network Acceleration**, then reboot. Software/hardware flow offload
+  must remain disabled; a changed setting alone does not prove previously
+  accelerated flows have stopped bypassing netfilter.
+- Leave the physical switch unassigned in the native UI. An existing different
+  function or pending switch configuration blocks installation; the module does
+  not take over unrelated assignments.
+- Ensure router-bootstrap DNS has an independent IPv4 route outside Tailscale.
+  ON requires at least one such resolver among the first three configured
+  nameservers. This route check is not proof that the resolver answers.
+- Verify the device host key through a trusted session. `ssh.hostKey` in
+  `default.nix` pins this particular router; do not reuse it for different hardware.
+
+### 2. Bootstrap public-key access
+
+Bootstrap only adds the public key from `config.nix`. It does not rename the
+router, disable passwords, change networking or restart services. Check each
+command succeeds before continuing:
+
+```sh
+# Print the bootstrap script; this nix run target does not activate anything.
 devenv -q shell -- nix run '.#beryl-ax:bootstrap' > /tmp/beryl-ax-bootstrap.sh
 # Read-only preflight; use the router admin password when prompted.
 ssh -o StrictHostKeyChecking=yes root@192.168.8.1 'sh -s -- check' < /tmp/beryl-ax-bootstrap.sh
-# After reviewing preflight, install the public key through the trusted session.
+# Add the public key through the trusted connection.
 ssh -o StrictHostKeyChecking=yes root@192.168.8.1 'sh -s -- apply' < /tmp/beryl-ax-bootstrap.sh
-# Fresh authentication; touch the YubiKey. No password or connection reuse.
+# Fresh key-only authentication; touch the YubiKey. No connection reuse.
 ssh -o StrictHostKeyChecking=yes -o ControlMaster=no -o ControlPath=none \
   -o BatchMode=yes -o PreferredAuthentications=publickey \
   root@192.168.8.1 'uci -q get system.@system[0].hostname'
 ```
 
-Verify the router's host fingerprint through the existing trusted session if
-strict checking fails; do not disable host-key verification. A missing card or
-withheld touch must not authenticate a fresh connection. Stop if it does: inspect
-the offered agent identity and token touch policy before hardening.
+`192.168.8.1` is the qualified LAN management address; adjust it if your LAN
+configuration differs. If strict checking fails, verify the fingerprint through
+the trusted session—never disable host-key verification. A missing card or
+withheld touch must not authenticate a fresh connection. Stop and inspect the
+offered agent identity and token touch policy if it does.
 
-## Naming and the client alias
+### 3. Apply the complete device configuration
 
-After fresh-key acceptance, the tool manages native/Tailnet naming and key-only
-SSH policy. Keep an interactive recovery session open before applying. The tool
-pins the verified host key and operator identity, never falls back to a password,
-and verifies application with a second fresh SSH authentication. Expect two
-YubiKey touches for an apply. Web-admin credentials are not changed.
+The activation tool applies **naming, SSH hardening, DNS/firewall integration,
+boot protection and physical-switch ownership together**. It is not a naming-only
+operation. Finish the prerequisites above before running it.
+
+With `hardwareSwitch.enable = true`, activation adopts the physical position:
+**ON can select MeLE during application**. Choose OFF first if direct mode is
+wanted. With switch ownership disabled, an initial install starts OFF.
 
 ```sh
-# Read-only: exits nonzero until names and SSH password policy agree.
-devenv -q shell -- beryl-ax:activate --check --target 100.101.32.55
-# Human-approved naming and SSH password cutover; preserves node registration.
-devenv -q shell -- beryl-ax:activate --apply --target 100.101.32.55
-# Repeat check, then apply again to verify no further semantic changes.
-devenv -q shell -- beryl-ax:activate --check --target 100.101.32.55
+# Read-only drift check; an unconfigured device is expected to fail this.
+devenv -q shell -- beryl-ax:activate --check --target 192.168.8.1
+# Apply, then automatically verify using a second fresh SSH authentication.
+devenv -q shell -- beryl-ax:activate --apply --target 192.168.8.1
+# Repeat the read-only check.
+devenv -q shell -- beryl-ax:activate --check --target 192.168.8.1
 ```
 
-The address above is the currently verified router address, not a stored default.
-The normal tool target is `beryl-ax`; an override still verifies the same pinned
-host identity. Native UCI changes awaiting commit block application, so unrelated
-pending settings cannot accidentally be committed. The identity/SSH phase only reloads native Dropbear listeners when needed;
-existing sessions are retained. The exit-tunnel phase below additionally manages
-native DNS/firewall settings. A compliant second apply avoids service reloads.
+The LAN override still verifies the pinned host identity; the tool never falls
+back to password authentication. Expect two YubiKey touches for application.
+`--check` stops at the first drift and is not a complete installation dry run
+when earlier phases are unconfigured.
 
-After renaming, manually activate the Mac's system configuration with
-`nix run .#activate` to refresh Tailnet-backed aliases, and its Home Manager
-configuration with `nix run` to install the SSH client block. Then verify:
+Pending changes in managed UCI packages block application rather than
+accidentally committing unrelated settings. Naming preserves node registration; SSH hardening
+preserves existing root keys, ports, bindings and web-admin credentials. Dropbear
+reloads only when needed; DNS/firewall services may also reload. A compliant
+repeat apply avoids unnecessary service reloads.
+
+**If application fails, assume partial state.** Retain the recovery session and
+do not reboot until the boot guard has been enabled and verified. Inspect the
+failure before retrying; do not delete protection to make a check pass. The
+original DNS API settings are saved root-only in `/etc/nixos-exit/dns-before.json`.
+
+### 4. Install management-machine aliases
+
+After the router is named, manually activate the Mac's system configuration to
+refresh Tailnet-backed aliases, then Home Manager to install the SSH client block:
 
 ```sh
+nix run .#activate
+nix run
 ssh beryl-ax 'uci -q get system.@system[0].hostname'
 devenv -q shell -- beryl-ax:activate --check
+devenv -q shell -- beryl-ax:tunnel check
 ```
 
-GL.iNet runs `tailscale up --reset` on network events. The persisted native
-hostname supplies the matching default when the explicit Tailscale hostname
-preference is reset; vendor scripts stay untouched. Confirm names after the next
-approved reconnect/reboot. A conflicting or manually overridden Tailnet DNS label
-fails verification instead of silently accepting a different name.
+Normal management uses `beryl-ax`; `--target ADDRESS` is available for activation
+when an explicit reachable address is needed. The SSH policy pins both the host
+key and operator identity and disables connection sharing/password fallback.
 
-## SSH policy acceptance and recovery
+### 5. Verify before relying on it
 
-`--check` verifies both persistent password options and live listener flags.
-Application turns off `PasswordAuth` and `RootPasswordAuth` for every configured
-Dropbear instance, preserving ports, interface bindings, root key access, other
-keys, and web-admin credentials. Reload/flag-verification failures attempt to
-restore the previous options; keep the recovery session open until fresh access
-and web administration are verified.
+Complete the [SSH checks](#ssh-access) and appropriate
+[network acceptance checks](#network-acceptance) below. For a new deployment or
+changed firmware/network boundary, do not substitute unit tests or a successful
+public-IP request for packet-level qualification.
 
-To verify that SSH no longer offers password authentication, run on the Mac:
+Routine updates use the same explicit `--check` / `--apply` commands. No Nix
+installation or firmware replacement is needed on Beryl.
+
+## Verification
+
+### SSH access
+
+`--check` inspects both persisted password settings and live listener flags.
+After application, verify fresh key access and unchanged web administration.
+Then confirm the server no longer offers password authentication:
 
 ```sh
 ssh -vv -o PubkeyAuthentication=no -o PreferredAuthentications=password \
@@ -86,10 +217,58 @@ ssh -vv -o PubkeyAuthentication=no -o PreferredAuthentications=password \
 ```
 
 Expected: only `publickey` is offered, followed by authentication failure. A
-connection failure or a failed exit code alone is not proof of password denial.
+connection failure or nonzero exit alone does not prove password denial.
+After a manual reboot, repeat fresh access, `beryl-ax:activate --check` and the
+password-method check.
 
-If recovery is necessary, run in the retained Beryl root session (these are the
-original password settings on this device):
+### Network acceptance
+
+Use an isolated, distinguishable uplink: phone cellular tethering with phone
+Wi-Fi off, no Mac home Ethernet/alternate auto-join or independent Tailscale path
+bypassing Beryl. Wired management should connect **to Beryl**, not another router.
+Record direct cellular egress before selecting MeLE; a shared home public IP
+cannot distinguish the two paths.
+
+For the focused physical-switch check:
+
+1. ON: check health, MeLE egress and fresh UDP/TCP client DNS.
+2. OFF: check health, direct cellular egress and client DNS. Move ON again;
+   `beryl-ax:tunnel off` must refuse without releasing protection.
+3. Flip OFF→ON rapidly, finishing ON. After reconciliation, health and egress
+   must agree with the final position rather than a queued OFF event.
+4. Manually reboot in ON; verify automatic protected recovery and switch control.
+
+For broader tunnel qualification, also test:
+
+- MeLE/Tailscale loss during existing and new client flows: no WAN fallback;
+  inspect DNS counters/captures rather than treating timeouts as leak proof.
+- Firewall reload/restart, reboot and uplink reconnect: protection remains and
+  the selected mode reconverges.
+- Wired, guest, IoT and any additional qualified VLANs in both modes: correct
+  public egress; guest/IoT routed private/link-local/Tailnet probes denied,
+  including established original-direction flows; trusted LAN access and
+  replies to trusted-LAN-initiated IoT connections retained under normal policy.
+- OFF while MeLE is unavailable: direct internet/DNS recover independently.
+- Quad9 via Tailscale in ON, no client-DNS WAN fallback, local names/admin access
+  retained, and only the scoped native resolver using Quad100. Router-bootstrap
+  DNS is a deliberate separate exception.
+- IPv6 behavior under the actual network conditions. No route on an
+  IPv6-disabled network does not qualify IPv6-enabled filtering.
+
+The [accepted bounded manual-controller checkpoint](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6261615700)
+and [completed focused switch checks](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6263115371)
+record the existing deployment's evidence and limitations. Do not repeat the full
+suite solely for the already-tested switch extension, or treat successful samples
+as closing the [known limits](#known-limits).
+
+## Recovery and maintenance
+
+### SSH recovery
+
+Hardening disables `PasswordAuth` and `RootPasswordAuth` on all configured
+Dropbear instances. Reload/flag-verification failures attempt to restore previous
+options, but the retained root session is the recovery path. To restore this
+device's original password settings, run there:
 
 ```sh
 uci set dropbear.main.PasswordAuth=on
@@ -98,180 +277,72 @@ uci commit dropbear
 /etc/init.d/dropbear reload
 ```
 
-After successful acceptance, schedule a manual reboot. Recheck fresh YubiKey
-access, `beryl-ax:activate --check`, password-method rejection, web administration,
-and ordinary LAN internet. The inspected `sysupgrade -l` includes system,
-Dropbear configuration/keys, and Tailscale state; verify after firmware upgrades
-or reapply instead of assuming vendor upgrades preserve policy.
+### Tunnel and switch recovery
 
-## Exit tunnel and physical switch
+Move the switch **OFF** for direct access when MeLE is unavailable. A dead local
+Tailscale daemon has a bounded preference-clear attempt, then the controller
+removes only its exit-default routes, preserving non-default overlay routes.
+Stopping the watcher does **not** remove the kernel guard.
 
-The bounded manual-controller checkpoint was accepted, with the qualifications
-recorded in [PR #39](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6261615700).
-Physical-switch ownership was human-deployed and its focused flip/ON-boot checks
-[passed](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6263115371).
-Rapid-flip and boot checks establish recovered/final state, not continuous
-packet-level absence of transient leaks. Intermittent shared UDP DNS failures,
-automatic preferred-hotspot reconnection and IPv6-enabled filtering remain
-unqualified; external IPv6 remains disabled.
-
-Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
-current armed/ON/OFF profiles, including guest/IoT isolation, passed the router's
-check-only nftables validation; the table inventory stayed empty afterward.
-The scoped native DNS configuration passed native dnsmasq syntax validation
-using a temporary copy. Both the controller and physical-switch extension have
-since been installed and sampled live. Requalify after a firmware upgrade rather
-than assuming the same firewall and GPIO contracts.
-
-- Disable **Network Acceleration**, then reboot before deployment. Persistent
-  flow offload must also remain disabled; configuration checks alone do not prove
-  that previously accelerated connections have stopped bypassing netfilter.
-- Leave native **Custom Exit Nodes** off: vendor network events reset Tailscale
-  preferences, and the controller owns selecting MeLE and restoring that choice.
-- Native IP Masquerading handles client NAT. Owned native forwardings allow the
-  declared LAN/guest/IoT zones outbound to Tailscale, without adding reverse
-  forwardings. Masqueraded clients share the router's Tailnet identity/ACLs, so
-  the guard separately restricts untrusted client interfaces in **both modes**.
-- Only `trustedInterfaces` (default `br-lan`) may initiate routed connections to
-  private/Tailnet destinations. Other qualified local links (guest and IoT by
-  default) are blocked from RFC1918, CGNAT/Tailnet, IPv4 link-local, IPv6 ULA and
-  IPv6 link-local destinations, including established original-direction flows.
-  Replies to connections initiated by trusted LAN still traverse the normal
-  mode/native firewall rules. Router DHCP/DNS and native input/L2 isolation remain
-  unchanged; these rules govern routed traffic, not same-link client isolation.
-- Native DNS uses Quad9 `9.9.9.9` for clients in **both** modes. Native router-DNS
-  separation keeps router bootstrap resolution on uplink DNS; local dnsmasq
-  names remain available. Tailscale's `accept-dns` stays false so its OS resolver
-  integration does not compete with native DNS. Health checks inspect the actual
-  dnsmasq server and router resolver link, not just the admin UI metadata. Native
-  manual DNS uses `noresolv=1`; unset `localuse` then defaults to zero and is valid.
-  An explicit `localuse=1` or resolver-file fallback is rejected. There is no
-  second DNS daemon.
-- ON also requires an independent router-bootstrap DNS route among the first
-  three configured resolvers. A route into Tailscale/loopback is not independent;
-  missing resolvers keep ON blocked. This is a route check, not proof that a DNS
-  server answers. OFF installation/recovery does not depend on this prerequisite.
-- Native MagicDNS forwarding is narrowed from all `ts.net` to the declared
-  `tailnetSuffix`. Tailscale [answers this local domain authoritatively](https://github.com/tailscale/tailscale/blob/v1.92.5/net/dns/resolver/tsdns.go),
-  including NXDOMAIN for unknown local names, without upstream DNS forwarding.
-  Only the native resolver gets the Quad100 exception; direct client DNS queries
-  to Quad100 are blocked. Keep native Tailscale and MagicDNS enabled and requalify
-  before changing the Tailnet suffix. The scoped line satisfies the vendor's
-  existing presence check, so normal enabled-state restarts do not re-add its
-  broader forwarder. A scope/capability mismatch blocks protected traffic.
-- **ON:** initially block external forwarding and resolver upstream requests;
-  verify MeLE's identity and exit approval before releasing tunnel traffic.
-  External IPv6 forwarding is blocked. Unavailable MeLE means no WAN fallback.
-- **OFF:** clear the exit preference and release exit-specific restrictions;
-  guest/IoT private-destination isolation remains active. Quad9 then uses direct WAN. A dead local daemon has a bounded preference-clear attempt
-  followed by removal of only its exit-default routes, preserving overlay routes.
-- A dedicated `inet nixos_exit_guard` nftables table is atomically replaced.
-  Profile content must match digests embedded in the generated controller;
-  missing/truncated files cannot turn replacement into a delete-only operation.
-  Native fw3 rules are not its ownership boundary. Boot protection starts before
-  networking; stopping the watcher does not remove kernel protection.
-- Native VLAN additions require declaring their firewall zone and local link in
-  `downstreamZones`/`localInterfaces`, then acceptance testing. Unknown links do
-  not gain a WAN exception or ON-mode tunnel forwarding before qualification.
-  Newly qualified links are untrusted unless explicitly added to `trustedInterfaces`.
-
-When cleared for deployment, use the pinned LAN transport and retain web-admin
-access plus a root recovery session. If application fails, assume partial state;
-do not reboot until the boot guard has been enabled and verified. Retrying after
-an inspected/fixed failure must preserve compliant native settings.
-With `hardwareSwitch.enable = true`, activation adopts the physical position;
-ON can therefore select MeLE during activation. With switch ownership disabled,
-an initial install starts OFF. Activation may reload native firewall/DNS services. The saved original DNS API result stays root-only
-at `/etc/nixos-exit/dns-before.json`; it is not copied into the repository.
+To relinquish physical-switch ownership, set `hardwareSwitch.enable = false` in
+`default.nix` and manually reapply. This removes only the owned native assignment
+and returns to CLI control, retaining the last cached mode. Then use either:
 
 ```sh
-# Human-run only, after prerequisites and generated-profile validation.
-as beryl-ax-init run beryl-ax:activate --apply --target 192.168.8.1
-as beryl-ax-init run beryl-ax:tunnel check
-# Move the physical switch for ON/OFF once switch ownership is installed.
-# Before binding, or with hardwareSwitch.enable = false:
-as beryl-ax-init run beryl-ax:tunnel on
-as beryl-ax-init run beryl-ax:tunnel off
+devenv -q shell -- beryl-ax:tunnel on
+devenv -q shell -- beryl-ax:tunnel off
 ```
 
-### Physical-switch contract and focused acceptance
+Do not reassign the switch in the vendor UI while Nix ownership is enabled:
+assignment drift deliberately blocks rather than silently changing authority.
 
-- ON selects the protected MeLE mode; OFF selects direct WAN. The physical
-  position, not the last event argument or persisted cache, is authoritative.
-  Conflicting CLI mode requests fail and ask the operator to move the switch.
-- The vendor `/etc/rc.button/switch` and its lock remain untouched. The module
-  owns only `/etc/gl-switch.d/nixos-exit.sh` and the native `func=nixos-exit`
-  assignment. An existing different assignment or pending switch configuration
-  prevents installation; no unrelated native function is taken over.
-- MT3000 metadata and exactly one matching GPIO input record are required:
-  `hi` means ON and `lo` means OFF. Missing, ambiguous or unsupported state,
-  including a changed native assignment, blocks rather than assuming OFF.
-- The S18 boot guard reads hardware before networking, independently of the
-  vendor's S99 replay. Unknown boot state installs the armed profile and still
-  starts the retrying watcher. Stopping the watcher does not remove protection.
-- Queued events read the current position inside the existing controller lock.
-  ON arms before control-plane requests; both transitions re-read hardware
-  before releasing a profile. A mid-operation change stays armed for the next
-  reconciliation. Event handling is userspace, with five-second watcher retries;
-  this does not promise instantaneous electrical-edge enforcement.
-- Set `hardwareSwitch.enable = false` and manually reapply to relinquish an owned
-  native assignment and return to CLI control, retaining the last cached mode.
-  Do not reassign the switch through the vendor UI while Nix ownership is enabled.
+### Bootstrap DNS and uplink caveats
 
-Retain wired Beryl administration and a root recovery session. Use the existing
-isolated cellular setup, not another Mac uplink. After human deployment:
+The home ISP supplies `100.90.1.1` and `100.100.1.1` as DNS servers. The vendor's
+main-table `100.64.0.0/10` Tailscale route captures them, even for protected
+router-originated queries. Changing **client** DNS to Quad9 does not fix this.
+ON stays blocked if no independent bootstrap resolver remains; the qualified
+phone hotspot supplies one. A permanent home-ISP routing repair is separate work.
 
-1. Check health with the physical switch ON; confirm MeLE egress and client DNS.
-2. Move OFF; check health, direct cellular egress and client DNS. Move ON again;
-   a conflicting `beryl-ax:tunnel off` must refuse without releasing protection.
-3. Flip OFF→ON rapidly, finishing ON; after reconciliation, health and egress must
-   agree with the final position, not a queued OFF event.
-4. Manually reboot in ON; verify automatic protected recovery and switch control
-   afterward. Do not repeat the complete tunnel qualification below solely for
-   this extension. Record DNS failures separately rather than declaring them fixed.
+Earlier home-Wi-Fi tests associated with the DIGI H3600 V9 but failed to obtain
+DHCP leases, including with Factory MAC. A later recovery selected home Wi-Fi
+instead of the preferred hotspot and required manual hotspot reselection. Neither
+a permanent home-Wi-Fi failure nor automatic preferred-hotspot reconnection has
+been established.
 
-### Tunnel packet-acceptance reference
+### Firmware, names and new networks
 
-Use phone cellular tethering with phone Wi-Fi off, and disconnect the Mac's home
-Ethernet/other uplinks. Record the direct cellular public IP before selecting an
-exit. Mock tests and `tunnel check` verify orchestration/policy, **not** connectivity
-or the absence of packet leaks.
+- Requalify firmware/firewall/GPIO contracts after upgrades. The inspected
+  `sysupgrade -l` includes system, Dropbear configuration/keys and Tailscale state;
+  verify preservation or reapply instead of assuming it.
+- GL.iNet runs `tailscale up --reset` on network events. Persisted native hostname
+  supplies the matching default after an explicit Tailscale hostname preference
+  is reset. Vendor scripts remain untouched. Check names after reconnect/reboot;
+  a conflicting Tailnet DNS label fails verification.
+- New VLANs require declaring their zone/link in `downstreamZones` and
+  `localInterfaces`, then acceptance testing. Unknown links receive no WAN
+  exception or ON-mode tunnel access. New qualified links are untrusted unless
+  explicitly added to `trustedInterfaces`.
 
-1. OFF: ordinary client internet works with the cellular public IP.
-2. ON: client public IP matches MeLE's home egress, not cellular. Test fresh UDP
-   and TCP DNS queries; inspect native resolver counters and capture traffic to
-   establish Quad9 via Tailscale with no client-DNS WAN fallback. Router bootstrap
-   DNS is an intentional separate exception. Check local names/admin access.
-3. ON: interrupt MeLE/Tailscale reachability while continuously probing from a
-   client; neither existing nor new flows may fall back to WAN. Repeat DNS and
-   IPv6 probes and verify blocking rather than accepting timeouts as leak proof.
-4. ON: repeat during fw3 reload/restart, router reboot, and uplink reconnect.
-   Confirm the independent guard is retained and the correct exit reconverges.
-5. Repeat on wired and guest clients; test any configured additional VLAN.
-6. In both ON and OFF, guest/IoT attempts to reach private LAN, MeLE's Tailnet
-   address and private/link-local test addresses fail; public internet and local
-   router DNS/DHCP still work. Test an already-established guest-private flow as
-   well as new connections. Trusted LAN retains its previous private access;
-   replies to trusted-LAN-initiated IoT connections remain subject to normal
-   mode/native firewall policy.
-7. OFF with MeLE unavailable: direct cellular internet and DNS recover. Repeat
-   ON/OFF and check that unrelated native settings and guest isolation remain.
+## Implementation reference
 
-The accepted bounded pass and its limitations are linked above. Physical-switch
-acceptance extends that checkpoint; it does not silently close its open findings.
+Source: [`modules/openwrt`](../../../modules/openwrt). These details explain the
+safety checks; they are not additional installation steps.
 
-### Deferred home repeater issue
+| Component | Managed behavior / boundary |
+|---|---|
+| Guard | Atomically replaces only `inet nixos_exit_guard`, independently of fw3. Embedded profile digests prevent missing/truncated files becoming delete-only replacements. |
+| Native forwarding/NAT | Owned LAN/guest/IoT forwardings to Tailscale, no added reverse forwardings; native IP Masquerading provides client NAT. |
+| Native DNS | Existing dnsmasq, no second daemon; Quad9 manual DNS, router/client resolver separation, Tailscale `accept-dns=false`. Checks inspect actual runtime configuration, not just UI metadata. |
+| MagicDNS | Authoritative declared Tailnet suffix through Quad100, not a broad `ts.net` upstream proxy. A scope/capability mismatch blocks protected traffic. |
+| Physical switch | Owned `/etc/gl-switch.d/nixos-exit.sh` and native `func=nixos-exit`; vendor dispatcher and lock remain untouched. |
+| Boot/watcher | S18 guard reads hardware before networking, independently of vendor S99 replay; unknown state arms protection and still starts retries. |
 
-Earlier firmware 4.11.0 tests associated with DIGI H3600 V9 home Wi-Fi but failed
-to obtain DHCP leases, including with Factory MAC. A later uplink-recovery test
-selected home Wi-Fi instead of the preferred phone hotspot; manual hotspot
-reselection was required. Neither a permanent home-Wi-Fi failure nor automatic
-preferred-hotspot reconnection has been established. Keep these separate from
-switch acceptance; use wired Beryl management and cellular for isolated tests.
+Native manual DNS must have `noresolv=1`; unset `localuse` then defaults to zero
+and is valid. Explicit `localuse=1` or resolver-file fallback is rejected. Keep
+native Tailscale/MagicDNS enabled and requalify before changing the Tailnet suffix.
 
-The home ISP also supplies DNS servers `100.90.1.1` and `100.100.1.1`. The vendor's
-main-table `100.64.0.0/10` Tailscale route captures them, including protected
-router-originated queries. That bootstrap-routing collision is not repaired by
-changing client DNS to Quad9. ON is blocked if no independent resolver remains;
-the phone hotspot supplies a separately routed DNS server for isolated tests.
-A permanent home-ISP bootstrap-routing fix remains separate work.
+The MT3000 reader requires metadata and exactly one matching GPIO input record:
+`hi` means ON, `lo` means OFF. ON arms before control-plane requests; transitions
+re-read hardware before releasing a profile. A mid-operation change stays armed
+for reconciliation. No vendor GPIO helper that treats read failure as OFF is used.

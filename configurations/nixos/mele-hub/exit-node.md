@@ -69,5 +69,7 @@ and firewall logs before adding any duplicate rules. Finally prove actual IPv4
 and IPv6 exit traffic from a peer; these rule/configuration checks alone do not
 establish end-to-end routing.
 
-Do not select this exit node on Beryl yet. Downstream routing, DNS, IPv6 leak
-protection, fail-closed behavior, and the physical toggle are separate work.
+For Beryl, follow the [travel-router installation manual](../../openwrt/beryl-ax/README.md#installation-and-updates)
+rather than selecting an exit node in the native GL.iNet UI. MeLE setup alone
+does not qualify downstream routing, DNS, fail-closed behavior or the physical
+switch; the router manual covers that integration and its IPv6 limitations.
