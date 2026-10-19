@@ -1,8 +1,28 @@
 # YubiKey touch notifications
 
-On macOS, `hub.yknotify.enable` watches heuristic OpenPGP/FIDO2 touch events
+On macOS, `hub.yknotify.enable` watches heuristic OpenPGP touch events
 and sends notifications through `hub-notify`. Delivery respects macOS Focus
 and notification settings. A notification is not an authorization prompt.
+
+## False FIDO2 alerts after idle or wake
+
+FIDO2 notifications are **disabled by default**. The upstream detector treats
+USB HID client `startQueue`/`stopQueue` messages as a touch-request lifecycle.
+These messages neither identify a YubiKey nor prove a user-presence request.
+A queue left open after unlock or wake can cause endless tap reminders;
+restarting the detector does not make that heuristic reliable.
+
+The default log predicate now includes only CryptoTokenKit events, excluding
+HID activity before it reaches diagnostics or notification throttling.
+OpenPGP detection remains unchanged and is still heuristic, not proof of touch.
+Actual FIDO2 requests (browser security keys, passkeys, etc.) no longer produce
+these notifications; use the requesting application's prompt and key LED.
+To restore the noisy experimental behavior, explicitly set
+`hub.yknotify.fido2.enable = true`.
+
+After manual activation, lock/unlock and sleep/wake with the key connected.
+Expect no FIDO2 reminders. Then verify an OpenPGP signing notification using
+the acceptance test below.
 
 ## Git signing context
 
@@ -31,7 +51,7 @@ The markers are same-user advisory hints, not tamper-proof evidence.
 Git config overrides (including a different `gpg.openpgp.program`), explicit
 GPG invocations, SSH signing, and SSH-agent authentication are not tracked.
 Verification and other non-signing GPG calls do not create context. The
-existing touch-detection and reminder heuristics are unchanged.
+OpenPGP touch-detection and reminder heuristics are unchanged.
 
 ## Opt-in diagnostic journal
 
