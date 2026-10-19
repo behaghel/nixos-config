@@ -7,15 +7,17 @@ let
     if cond then "  ok  ${name}\n"
     else abort "FAIL ${name}";
 
-  evalCfg = expectSmartcard:
+  evalCfg = expectSmartcard: diagnostics:
     (hm.homeManagerConfiguration {
       inherit pkgs;
       modules = [
         ../modules/home/gpg.nix
+        ../modules/home/darwin/yknotify
         {
           home.username = "tester";
           home.homeDirectory = "/tmp/tester";
           home.stateVersion = "24.11";
+          hub.yknotify.diagnostics.enable = lib.mkIf diagnostics true;
           programs.gpg = {
             inherit expectSmartcard;
             useNixGPG = true;
@@ -24,8 +26,9 @@ let
       ];
     }).config;
 
-  smartcardCfg = evalCfg true;
-  disabledCfg = evalCfg false;
+  smartcardCfg = evalCfg true false;
+  disabledCfg = evalCfg false false;
+  diagnosticCfg = evalCfg true true;
   smartcardSettings = smartcardCfg.programs.gpg.scdaemonSettings;
   disabledSettings = disabledCfg.programs.gpg.scdaemonSettings;
 
@@ -52,6 +55,25 @@ let
       && !builtins.hasAttr "pcsc-driver" disabledSettings
       && !builtins.hasAttr "disable-application" disabledSettings);
 
+  signingContextCheck = assert' "Git signing context is Darwin-only and follows smartcard enablement"
+    (
+      let
+        path = [ "gpg" "openpgp" "program" ];
+        enabled = smartcardCfg.programs.git.settings;
+        disabled = disabledCfg.programs.git.settings;
+      in
+      (lib.hasAttrByPath path enabled == pkgs.stdenv.isDarwin)
+      && !(lib.hasAttrByPath path disabled)
+    );
+
+  diagnosticCheck = assert' "diagnostics default off and opt-in changes the signer wrapper"
+    (!smartcardCfg.hub.yknotify.diagnostics.enable
+      && diagnosticCfg.hub.yknotify.diagnostics.enable
+      && (if pkgs.stdenv.isDarwin then
+      smartcardCfg.programs.git.settings.gpg.openpgp.program
+        != diagnosticCfg.programs.git.settings.gpg.openpgp.program
+    else true));
+
   agentLifecycleCheck = assert' "Darwin lets GnuPG start its agent on demand"
     (if pkgs.stdenv.isDarwin then
       !smartcardCfg.launchd.agents.gpg-agent.enable
@@ -61,7 +83,7 @@ in
 pkgs.runCommand "gpg-module-tests" { } ''
   cat <<'RESULTS'
   ── GPG Home Manager module ──
-  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}RESULTS
+  ${pcscCheck}${driverCheck}${applicationCheck}${disabledCheck}${agentLifecycleCheck}${signingContextCheck}${diagnosticCheck}RESULTS
   echo "All GPG module tests passed."
   echo ok > $out
 ''

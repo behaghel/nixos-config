@@ -1,0 +1,8 @@
+{
+  "name": "pi-relative-paths-tests",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node --test test.ts" },
+  "devDependencies": { "marked": "18.0.11" }
+}

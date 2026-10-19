@@ -8,6 +8,20 @@ let
   # environments — lives under here so a server can be found and restored
   # across terminal crashes and reboots.
   tmuxDataDir = "${config.xdg.dataHome}/tmux";
+  hubNotify = import ../notify/package.nix { inherit pkgs; };
+  snapshot = pkgs.writeShellApplication {
+    name = "tmux-snapshot";
+    runtimeInputs = with pkgs;
+      [ tmux bash python3 coreutils findutils gnused gnugrep gawk gnutar gzip hostname ]
+      ++ lib.optionals stdenv.isDarwin [ darwin.ps ]
+      ++ lib.optionals stdenv.isLinux [ procps ];
+    text = ''
+      export TMUX_SNAPSHOT_ROOT=${lib.escapeShellArg tmuxDataDir}
+      export TMUX_SNAPSHOT_SAVE_SCRIPT=${pkgs.tmuxPlugins.resurrect}/share/tmux-plugins/resurrect/scripts/save.sh
+      export TMUX_SNAPSHOT_NOTIFY=${hubNotify}/bin/hub-notify
+      exec python3 ${./snapshot.py} "$@"
+    '';
+  };
 in
 {
   imports = [ ./bepo.nix ];
@@ -18,6 +32,64 @@ in
   # Make sure the parent exists before tmux tries to create tmux-<uid>/ inside it.
   xdg.dataFile."tmux/.keep".text = "";
 
+  home.packages = [ snapshot ];
+
+  # Save without an attached client or a status-right callback. Do not run at
+  # login: give continuum time to restore before taking the first snapshot.
+  launchd.agents.tmux-snapshot = lib.mkIf pkgs.stdenv.isDarwin {
+    enable = true;
+    config = {
+      Label = "org.nixos.tmux-snapshot";
+      ProgramArguments = [ "${snapshot}/bin/tmux-snapshot" ];
+      StartInterval = 300;
+      StandardOutPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
+      StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
+    };
+  };
+
+  # A separate watchdog still reports stale backups when saving stops working.
+  launchd.agents.tmux-snapshot-health = lib.mkIf pkgs.stdenv.isDarwin {
+    enable = true;
+    config = {
+      Label = "org.nixos.tmux-snapshot-health";
+      ProgramArguments = [ "${snapshot}/bin/tmux-snapshot" "--check" ];
+      StartInterval = 300;
+      StandardOutPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
+      StandardErrorPath = "${config.home.homeDirectory}/Library/Logs/tmux-snapshot.log";
+    };
+  };
+
+  systemd.user.services.tmux-snapshot-health = lib.mkIf pkgs.stdenv.isLinux {
+    Unit.Description = "Warn about stale tmux backups";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${snapshot}/bin/tmux-snapshot --check";
+    };
+  };
+  systemd.user.timers.tmux-snapshot-health = lib.mkIf pkgs.stdenv.isLinux {
+    Timer = {
+      OnStartupSec = "5m";
+      OnUnitActiveSec = "5m";
+    };
+    Install.WantedBy = [ "timers.target" ];
+  };
+
+  systemd.user.services.tmux-snapshot = lib.mkIf pkgs.stdenv.isLinux {
+    Unit.Description = "Save the primary tmux layout";
+    Service = {
+      Type = "oneshot";
+      ExecStart = "${snapshot}/bin/tmux-snapshot";
+    };
+  };
+  systemd.user.timers.tmux-snapshot = lib.mkIf pkgs.stdenv.isLinux {
+    Unit.Description = "Save tmux independently of the status bar";
+    Timer = {
+      OnStartupSec = "5m";
+      OnUnitActiveSec = "5m";
+    };
+    Install.WantedBy = [ "timers.target" ];
+  };
+
   programs.tmux = {
     enable = true;
     prefix = "C-a";
@@ -27,8 +99,8 @@ in
     baseIndex = 1;
 
     # Persistence net: resurrect snapshots sessions/windows/panes/layout/cwd to
-    # disk; continuum saves automatically every few minutes and restores on
-    # server start. Combined with the daemonised server that `workon` already
+    # disk; the independent timer saves every five minutes and continuum restores
+    # on server start. Combined with the daemonised server that `workon` already
     # creates, this means: Ghostty dying only detaches you (reattach), and if
     # the server itself dies (crash, OOM, reboot) the next tmux start restores
     # where you left off. resurrect must load before continuum (continuum
@@ -39,6 +111,9 @@ in
         plugin = resurrect;
         extraConfig = ''
           set -g @resurrect-dir '${tmuxDataDir}/resurrect'
+          # Keep the manual shortcut on the same validated save path. A space
+          # suppresses resurrect's default binding without triggering its fallback.
+          set -g @resurrect-save ' '
           set -g @resurrect-capture-pane-contents 'on'
           set -g @resurrect-strategy-nvim 'session'
         '';
@@ -47,7 +122,8 @@ in
         plugin = continuum;
         extraConfig = ''
           set -g @continuum-restore 'on'
-          set -g @continuum-save-interval '5'
+          # Scheduling belongs to launchd/systemd, not the status bar.
+          set -g @continuum-save-interval '0'
         '';
       }
     ];
@@ -96,6 +172,8 @@ in
       set -g mode-style bg=colour24,fg=colour254
 
       set -ga terminal-overrides ",xterm-256color:RGB"
+      # Forward Pi's OSC 8 file links and advertise support to its renderer.
+      set -as terminal-features ",xterm-ghostty:hyperlinks"
       set -g set-clipboard on
 
       # Splits. workon stores the project root in the window option
@@ -154,6 +232,9 @@ in
 
       # Rename current window with prefix + l
       bind l command-prompt -I "#W" "rename-window '%%'"
+
+      # Manual snapshots use the same validation and failure protection as timers.
+      bind C-s run-shell '${snapshot}/bin/tmux-snapshot --socket "#{socket_path}"'
 
       # Extra paste shortcut: prefix + Ctrl-y
       bind C-y paste-buffer

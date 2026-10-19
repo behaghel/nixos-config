@@ -54,11 +54,37 @@
     checks.gpg-module = import ../../tests/gpg-module.nix { inherit pkgs lib inputs; };
     checks.shell-module = import ../../tests/shell-module.nix { inherit pkgs; };
     checks.mele-exit-node = import ../../tests/mele-exit-node.nix { inherit pkgs lib inputs; };
+    checks.yknotify-context = pkgs.runCommand "yknotify-context-tests"
+      {
+        nativeBuildInputs = [ pkgs.python3 pkgs.git ];
+        YKNOTIFY_CONTEXT_HELPER = "${../home/darwin/yknotify}/context.py";
+        PYTHONDONTWRITEBYTECODE = "1";
+      } ''
+      python3 ${../../tests/test-yknotify-context.py}
+      python3 ${../../tests/test-yknotify-diagnostics.py}
+      touch "$out"
+    '';
     checks.file-associations = import ../../tests/file-associations.nix { inherit pkgs lib inputs; };
     checks.marketplace = import ../../tests/marketplace.nix { inherit pkgs lib; };
     checks.opencode-model-config-modes = import ../../tests/opencode-model-config-modes.nix { inherit pkgs lib inputs; };
     checks.opencode-context7 = import ../../tests/opencode-context7.nix { inherit pkgs lib inputs; };
     checks.pi-module = import ../../tests/pi-module.nix { inherit pkgs lib inputs; };
+    checks.pi-relative-paths = pkgs.buildNpmPackage {
+      pname = "pi-relative-paths-tests";
+      version = "1.0.0";
+      src = ../home/pi/relative-paths;
+      npmDeps = pkgs.importNpmLock { npmRoot = ../home/pi/relative-paths; };
+      npmConfigHook = pkgs.importNpmLock.npmConfigHook;
+      nativeBuildInputs = [ pkgs.git ];
+      dontNpmBuild = true;
+      installPhase = ''
+        export HOME="$TMPDIR/home"
+        mkdir -p "$HOME"
+        node --test test.ts
+        touch "$out"
+      '';
+    };
+    checks.tmux-recovery = import ../../tests/tmux-recovery.nix { inherit pkgs lib inputs; };
     checks.zsh-direnv-completion = pkgs.runCommand "zsh-direnv-completion-test"
       {
         nativeBuildInputs = [ pkgs.bash pkgs.direnv pkgs.zsh ];

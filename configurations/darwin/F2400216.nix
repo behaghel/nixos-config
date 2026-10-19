@@ -70,6 +70,9 @@ in
     '';
   };
 
+  # Collect private, unverified evidence for uncovered YubiKey touch requests.
+  home-manager.users.hubertbehaghel.hub.yknotify.diagnostics.enable = true;
+
   # Make Home Manager share the system pkgs (avoids rebuilding stdenv/toolchain twice).
   home-manager.backupFileExtension = "backup";
   home-manager.useGlobalPkgs = true;
