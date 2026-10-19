@@ -104,13 +104,14 @@ and ordinary LAN internet. The inspected `sysupgrade -l` includes system,
 Dropbear configuration/keys, and Tailscale state; verify after firmware upgrades
 or reapply instead of assuming vendor upgrades preserve policy.
 
-## Exit tunnel — manual checkpoint accepted; switch acceptance pending
+## Exit tunnel and physical switch
 
 The bounded manual-controller checkpoint was accepted, with the qualifications
 recorded in [PR #39](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6261615700).
-This declaration now enables physical-switch ownership; that extension still
-requires human deployment and focused flip/boot acceptance. Sampled checks are
-not exhaustive packet-level leak proof. Intermittent shared UDP DNS failures,
+Physical-switch ownership was human-deployed and its focused flip/ON-boot checks
+[passed](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6263115371).
+Rapid-flip and boot checks establish recovered/final state, not continuous
+packet-level absence of transient leaks. Intermittent shared UDP DNS failures,
 automatic preferred-hotspot reconnection and IPv6-enabled filtering remain
 unqualified; external IPv6 remains disabled.
 
@@ -118,9 +119,9 @@ Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
 current armed/ON/OFF profiles, including guest/IoT isolation, passed the router's
 check-only nftables validation; the table inventory stayed empty afterward.
 The scoped native DNS configuration passed native dnsmasq syntax validation
-using a temporary copy. The manual controller has since been installed and
-sampled live; the physical-switch extension has not. Requalify after a firmware
-upgrade rather than assuming the same firewall and GPIO contracts.
+using a temporary copy. Both the controller and physical-switch extension have
+since been installed and sampled live. Requalify after a firmware upgrade rather
+than assuming the same firewall and GPIO contracts.
 
 - Disable **Network Acceleration**, then reboot before deployment. Persistent
   flow offload must also remain disabled; configuration checks alone do not prove
