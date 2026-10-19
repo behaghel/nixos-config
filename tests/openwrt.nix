@@ -43,7 +43,14 @@ let
   allTrusted = evaluate {
     services.exitTunnel.trustedInterfaces = lib.mkForce [ "br-lan" "br-guest" "br-iot" ];
   };
+  manual = evaluate {
+    services.exitTunnel.hardwareSwitch.enable = lib.mkForce false;
+  };
   assertions = [
+    cfg.services.exitTunnel.hardwareSwitch.enable
+    (tunnelFiles ? "/etc/gl-switch.d/nixos-exit.sh")
+    (!(manual.system.build.exitTunnelFiles ? "/etc/gl-switch.d/nixos-exit.sh"))
+    (lib.hasInfix "switch_enabled=0" manual.system.build.exitTunnelFiles."/usr/sbin/nixos-exit-node".text)
     (cfg.networking.hostName == "beryl-ax")
     (cfg.ssh.user == "root")
     (cfg.ssh.authorizedKeys == [ me.sshKey ])

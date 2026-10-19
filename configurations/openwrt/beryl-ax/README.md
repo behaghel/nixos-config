@@ -104,19 +104,23 @@ and ordinary LAN internet. The inspected `sysupgrade -l` includes system,
 Dropbear configuration/keys, and Tailscale state; verify after firmware upgrades
 or reapply instead of assuming vendor upgrades preserve policy.
 
-## Exit tunnel — pending live acceptance
+## Exit tunnel — manual checkpoint accepted; switch acceptance pending
 
-The current declaration also enables an **unaccepted manual tunnel prototype**.
-Do not use it for sensitive traffic until the packet tests below pass. The
-physical switch is not assigned by this module.
+The bounded manual-controller checkpoint was accepted, with the qualifications
+recorded in [PR #39](https://github.com/behaghel/nixos-config/pull/39#issuecomment-6261615700).
+This declaration now enables physical-switch ownership; that extension still
+requires human deployment and focused flip/boot acceptance. Sampled checks are
+not exhaustive packet-level leak proof. Intermittent shared UDP DNS failures,
+automatic preferred-hotspot reconnection and IPv6-enabled filtering remain
+unqualified; external IPv6 remains disabled.
 
 Qualified baseline: MT3000 firmware 4.11.0, native fw3, Tailscale 1.92.5. The
 current armed/ON/OFF profiles, including guest/IoT isolation, passed the router's
 check-only nftables validation; the table inventory stayed empty afterward.
 The scoped native DNS configuration passed native dnsmasq syntax validation
-using a temporary copy. These check-only validations did not install settings;
-installation is a separate step and packet-level behavior still needs acceptance. Requalify after a
-firmware upgrade rather than assuming the same firewall lifecycle.
+using a temporary copy. The manual controller has since been installed and
+sampled live; the physical-switch extension has not. Requalify after a firmware
+upgrade rather than assuming the same firewall and GPIO contracts.
 
 - Disable **Network Acceleration**, then reboot before deployment. Persistent
   flow offload must also remain disabled; configuration checks alone do not prove
@@ -174,19 +178,58 @@ When cleared for deployment, use the pinned LAN transport and retain web-admin
 access plus a root recovery session. If application fails, assume partial state;
 do not reboot until the boot guard has been enabled and verified. Retrying after
 an inspected/fixed failure must preserve compliant native settings.
-Initial activation starts OFF and may reload
-native firewall/DNS services. The saved original DNS API result stays root-only
+With `hardwareSwitch.enable = true`, activation adopts the physical position;
+ON can therefore select MeLE during activation. With switch ownership disabled,
+an initial install starts OFF. Activation may reload native firewall/DNS services. The saved original DNS API result stays root-only
 at `/etc/nixos-exit/dns-before.json`; it is not copied into the repository.
 
 ```sh
 # Human-run only, after prerequisites and generated-profile validation.
 as beryl-ax-init run beryl-ax:activate --apply --target 192.168.8.1
 as beryl-ax-init run beryl-ax:tunnel check
+# Move the physical switch for ON/OFF once switch ownership is installed.
+# Before binding, or with hardwareSwitch.enable = false:
 as beryl-ax-init run beryl-ax:tunnel on
 as beryl-ax-init run beryl-ax:tunnel off
 ```
 
-### Mandatory packet acceptance
+### Physical-switch contract and focused acceptance
+
+- ON selects the protected MeLE mode; OFF selects direct WAN. The physical
+  position, not the last event argument or persisted cache, is authoritative.
+  Conflicting CLI mode requests fail and ask the operator to move the switch.
+- The vendor `/etc/rc.button/switch` and its lock remain untouched. The module
+  owns only `/etc/gl-switch.d/nixos-exit.sh` and the native `func=nixos-exit`
+  assignment. An existing different assignment or pending switch configuration
+  prevents installation; no unrelated native function is taken over.
+- MT3000 metadata and exactly one matching GPIO input record are required:
+  `hi` means ON and `lo` means OFF. Missing, ambiguous or unsupported state,
+  including a changed native assignment, blocks rather than assuming OFF.
+- The S18 boot guard reads hardware before networking, independently of the
+  vendor's S99 replay. Unknown boot state installs the armed profile and still
+  starts the retrying watcher. Stopping the watcher does not remove protection.
+- Queued events read the current position inside the existing controller lock.
+  ON arms before control-plane requests; both transitions re-read hardware
+  before releasing a profile. A mid-operation change stays armed for the next
+  reconciliation. Event handling is userspace, with five-second watcher retries;
+  this does not promise instantaneous electrical-edge enforcement.
+- Set `hardwareSwitch.enable = false` and manually reapply to relinquish an owned
+  native assignment and return to CLI control, retaining the last cached mode.
+  Do not reassign the switch through the vendor UI while Nix ownership is enabled.
+
+Retain wired Beryl administration and a root recovery session. Use the existing
+isolated cellular setup, not another Mac uplink. After human deployment:
+
+1. Check health with the physical switch ON; confirm MeLE egress and client DNS.
+2. Move OFF; check health, direct cellular egress and client DNS. Move ON again;
+   a conflicting `beryl-ax:tunnel off` must refuse without releasing protection.
+3. Flip OFF→ON rapidly, finishing ON; after reconciliation, health and egress must
+   agree with the final position, not a queued OFF event.
+4. Manually reboot in ON; verify automatic protected recovery and switch control
+   afterward. Do not repeat the complete tunnel qualification below solely for
+   this extension. Record DNS failures separately rather than declaring them fixed.
+
+### Tunnel packet-acceptance reference
 
 Use phone cellular tethering with phone Wi-Fi off, and disconnect the Mac's home
 Ethernet/other uplinks. Record the direct cellular public IP before selecting an
@@ -213,16 +256,17 @@ or the absence of packet leaks.
 7. OFF with MeLE unavailable: direct cellular internet and DNS recover. Repeat
    ON/OFF and check that unrelated native settings and guest isolation remain.
 
-Only after these pass should the preserved vendor switch dispatcher be wired to
-explicit ON/OFF operations.
+The accepted bounded pass and its limitations are linked above. Physical-switch
+acceptance extends that checkpoint; it does not silently close its open findings.
 
 ### Deferred home repeater issue
 
-On firmware 4.11.0, the DIGI H3600 V9 home Wi-Fi associates on both bands but
-repeatedly fails to obtain a DHCP lease, including with Factory MAC. Home Ethernet
-and the phone's Wi-Fi hotspot both obtain leases. This Wi-Fi-specific issue is
-unresolved, not a diagnosed driver bug; use Ethernet for management and cellular
-hotspot for isolated tunnel tests until it is investigated separately.
+Earlier firmware 4.11.0 tests associated with DIGI H3600 V9 home Wi-Fi but failed
+to obtain DHCP leases, including with Factory MAC. A later uplink-recovery test
+selected home Wi-Fi instead of the preferred phone hotspot; manual hotspot
+reselection was required. Neither a permanent home-Wi-Fi failure nor automatic
+preferred-hotspot reconnection has been established. Keep these separate from
+switch acceptance; use wired Beryl management and cellular for isolated tests.
 
 The home ISP also supplies DNS servers `100.90.1.1` and `100.100.1.1`. The vendor's
 main-table `100.64.0.0/10` Tailscale route captures them, including protected

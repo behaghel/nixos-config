@@ -29,7 +29,20 @@ if n == "ls":
 elif n == "id":
     print(0 if a == ["-u"] else 453)
 elif n == "uci":
-    if a == ["show", "firewall"]:
+    if a == ["changes", "switch-button"]:
+        rc = int(s.get("switch_changes_error", False))
+        print(s.get("switch_pending", ""), end="")
+    elif a and a[0] in ("set", "delete", "commit"):
+        if a[0] == "set":
+            assert a[1] == "switch-button.@main[0].func=nixos-exit"
+            s["switch_func"] = "nixos-exit"
+        elif a[0] == "delete":
+            assert a[1] == "switch-button.@main[0].func"
+            s["switch_func"] = ""
+        else:
+            assert a[1] == "switch-button"
+        s["calls"].append(["switch-uci"] + a)
+    elif a == ["show", "firewall"]:
         print("firewall.lan=zone\nfirewall.lan.name='lan'")
         print("firewall.guest=zone\nfirewall.guest.name='guest'")
     else:
@@ -41,6 +54,7 @@ elif n == "uci":
             "firewall.@defaults[0].flow_offloading_hw": "0",
             "tailscale.settings.masq": "1",
             "tailscale.settings.enabled": "1",
+            "switch-button.@main[0].func": s.get("switch_func", "nixos-exit"),
             "firewall.tailscale0.masq": "1",
             "dhcp.@dnsmasq[0].server": s.get("actual_dns", "9.9.9.9"),
             "dhcp.@dnsmasq[0].localuse": s.get("localuse", "0"),
@@ -92,6 +106,8 @@ elif n == "nft":
                 s["nft"] = text[text.index("table inet nixos_exit_guard {"):].strip()
                 s["calls"].append(["nft", s["nft"]])
 elif n == "tailscale":
+    if a == ["debug", "prefs"] and s.get("track_prefs"):
+        s["calls"].append(["prefs"])
     if s.get("daemon_down"):
         rc = 1
     elif a == ["debug", "prefs"]:
@@ -116,6 +132,9 @@ elif n == "tailscale":
                 s["exit"] = "nJDM8knVvy11CNTRL" if a[1].split("=", 1)[1] else ""
                 s["lan"] = bool(s["exit"])
                 s["default4"] = s["default6"] = bool(s["exit"])
+            if s.get("switch_after_set"):
+                pathlib.Path(os.environ["FIXTURE_GPIO"]).write_text(
+                    " gpio-455 ( |switch ) in " + s.pop("switch_after_set") + " IRQ\\n")
 elif n == "ubus":
     print(json.dumps({"result": {
         "mode": "auto" if s.get("dns_drift") else "manual",
@@ -179,6 +198,7 @@ class TunnelTests(unittest.TestCase):
             (self.bin / name).symlink_to(mock)
         self.controller = self.root / "controller"
         text = (self.base / "nixos-exit-node").read_text()
+        text = text.replace("switch_enabled=1", "switch_enabled=0")
         text = text.replace("/etc/nixos-exit", str(self.base))
         text = text.replace("/var/run/nixos-exit-applied", str(self.root / "stamp"))
         text = text.replace("/tmp/resolv.conf", str(self.root / "resolv.conf"))
@@ -191,6 +211,212 @@ class TunnelTests(unittest.TestCase):
         self.controller.write_text(text)
         self.env = dict(os.environ, PATH=f"{self.bin}:{os.environ['PATH']}",
                         FIXTURE_STATE=str(self.state))
+
+    def enable_switch(self, level="hi"):
+        self.gpio = self.root / "gpio"
+        self.gpio.write_text(f" gpio-455 ( |switch ) in {level} IRQ\n")
+        model = self.root / "model"
+        model.write_text("mt3000\n")
+        descriptor = self.root / "switch-button"
+        descriptor.write_text("gpio-455\n")
+        text = self.controller.read_text().replace("set -eu", "set -eu\nswitch_enabled=1", 1)
+        for old, new in (("/sys/kernel/debug/gpio", self.gpio),
+                         ("/proc/gl-hw-info/model", model),
+                         ("/proc/gl-hw-info/switch-button", descriptor)):
+            text = text.replace(old, str(new))
+        self.controller.write_text(text)
+        self.env["FIXTURE_GPIO"] = str(self.gpio)
+
+    def test_switch_on_boot_arms_even_with_cached_off_and_dead_daemon(self):
+        self.enable_switch()
+        self.update(daemon_down=True)
+        self.run_mode("guard")
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+        self.assertEqual((self.base / "mode").read_text().strip(), "on")
+
+    def test_switch_position_selects_exit_and_overrules_stale_cache(self):
+        self.enable_switch()
+        self.run_mode("reconcile")
+        self.assertEqual(self.load()["exit"], NODE)
+        self.gpio.write_text(" gpio-455 ( |switch ) in lo IRQ\n")
+        self.run_mode("reconcile")
+        self.assertEqual(self.load()["exit"], "")
+        self.assertEqual(self.load()["nft"], self.profile("off"))
+
+    def test_switch_on_arms_before_first_control_plane_read(self):
+        self.enable_switch()
+        self.update(track_prefs=True, daemon_down=True)
+        self.run_mode("reconcile", success=False)
+        self.assertEqual(self.load()["calls"][0], ["nft", self.profile("armed")])
+
+    def test_switch_rejects_conflicting_manual_off(self):
+        self.enable_switch()
+        self.run_mode("reconcile")
+        before = self.load()
+        self.run_mode("off", success=False)
+        self.assertEqual(self.load(), before)
+        self.assertEqual((self.base / "mode").read_text().strip(), "on")
+
+    def test_switch_off_still_recovers_with_dead_local_daemon(self):
+        self.enable_switch()
+        self.run_mode("reconcile")
+        self.gpio.write_text(" gpio-455 ( |switch ) in lo IRQ\n")
+        self.update(daemon_down=True)
+        self.run_mode("reconcile")
+        self.assertFalse(self.load()["default4"] or self.load()["default6"])
+        self.assertEqual(self.load()["nft"], self.profile("off"))
+
+    def test_unreadable_or_ambiguous_switch_never_means_off(self):
+        self.enable_switch()
+        for content in ("", " gpio-455 ( |switch ) in unknown IRQ\n",
+                        " gpio-455 ( |switch ) in lo IRQ\n" * 2,
+                        " gpio-456 ( |reset ) in lo IRQ\n"):
+            with self.subTest(content=content):
+                self.gpio.write_text(content)
+                self.run_mode("guard")
+                self.assertEqual(self.load()["nft"], self.profile("armed"))
+                self.run_mode("reconcile", success=False)
+        self.gpio.unlink()
+        self.run_mode("guard")
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+
+    def test_switch_assignment_drift_blocks_and_check_is_read_only(self):
+        self.enable_switch()
+        self.run_mode("reconcile")
+        self.update(switch_func="wifi")
+        before = self.load()
+        self.run_mode("check", success=False)
+        self.assertEqual(self.load(), before)
+        self.run_mode("reconcile", success=False)
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+
+    def test_switch_check_reports_cache_drift_without_writing_it(self):
+        self.enable_switch("lo")
+        self.run_mode("reconcile")
+        self.gpio.write_text(" gpio-455 ( |switch ) in hi IRQ\n")
+        before = self.load()
+        self.run_mode("check", success=False)
+        self.assertEqual(self.load(), before)
+        self.assertEqual((self.base / "mode").read_text().strip(), "off")
+
+    def test_switch_on_during_off_rpc_cannot_release_wan(self):
+        self.enable_switch()
+        self.run_mode("reconcile")
+        self.gpio.write_text(" gpio-455 ( |switch ) in lo IRQ\n")
+        self.update(switch_after_set="hi")
+        self.run_mode("reconcile", success=False)
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
+        self.run_mode("reconcile")
+        self.assertEqual(self.load()["nft"], self.profile("on"))
+
+    def test_stale_vendor_event_uses_current_physical_position(self):
+        self.enable_switch()
+        handler = self.base / "nixos-exit.sh"
+        self.assertTrue(handler.exists(), "owned vendor-dispatch handler is missing")
+        shim = self.root / "switch-handler"
+        shim.write_text(handler.read_text().replace(
+            "exec /usr/sbin/nixos-exit-node reconcile",
+            f'exec sh "{self.controller}" --locked reconcile'))
+        result = subprocess.run(["sh", str(shim), "off"], env=self.env,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.load()["exit"], NODE)
+
+    def switch_installer(self, enabled=True):
+        self.enable_switch()
+        native = self.root / "vendor"
+        native.mkdir()
+        handlers = native / "handlers"
+        handlers.mkdir()
+        dispatcher = native / "switch"
+        dispatcher.write_text(f'#!/bin/sh\nexec {handlers}/$func.sh "$action"\n')
+        boot = native / "boot-check"
+        boot.write_text("#!/bin/sh\nexit 0\n")
+        dispatcher.chmod(0o755)
+        boot.chmod(0o755)
+        handler = handlers / "nixos-exit.sh"
+        handler.write_text("# Managed by nixos-config OpenWrt exit-node module.\n")
+        text = self.controller.read_text().split("\nset -eu\n", 1)[0]
+        for old, new in (("/etc/gl-switch.d", handlers),
+                         ("/etc/rc.button/switch", dispatcher),
+                         ("/etc/init.d/gl_switch_button_check", boot)):
+            text = text.replace(old, str(new))
+        shim = self.root / "switch-installer"
+        shim.write_text(text + f'\nset -eu\nswitch_enabled={int(enabled)}\n'
+                        'mode=${1:-apply}\nchanged=0\n'
+                        'fail() { echo "$*" >&2; exit 1; }\n'
+                        'switch_install_preflight\n'
+                        '[ "$mode" != apply ] || switch_install_apply\n'
+                        'echo "$changed"\n')
+        return shim, handler, dispatcher
+
+    def run_switch_installer(self, shim, mode="apply", success=True):
+        result = subprocess.run(["sh", str(shim), mode], env=self.env,
+                                text=True, capture_output=True)
+        self.assertEqual(result.returncode == 0, success, result.stderr)
+        return result
+
+    def test_switch_assignment_apply_is_idempotent_and_preserves_dispatcher(self):
+        shim, _, dispatcher = self.switch_installer()
+        original = dispatcher.read_bytes()
+        self.update(switch_func="")
+        self.assertEqual(self.run_switch_installer(shim).stdout.strip(), "1")
+        calls = self.load()["calls"]
+        self.assertEqual(self.run_switch_installer(shim).stdout.strip(), "0")
+        self.run_switch_installer(shim, "check")
+        self.assertEqual(self.load()["calls"], calls)
+        self.assertEqual(dispatcher.read_bytes(), original)
+
+    def test_switch_install_rejects_other_assignment_and_pending_changes(self):
+        shim, _, _ = self.switch_installer()
+        for changes in ({"switch_func": "wifi"}, {"switch_pending": "uncommitted"},
+                        {"switch_changes_error": True}):
+            with self.subTest(changes=changes):
+                self.update(switch_func="", switch_pending="", switch_changes_error=False)
+                self.update(**changes)
+                self.run_switch_installer(shim, success=False)
+                self.assertEqual(self.load()["calls"], [])
+
+    def test_switch_assignment_is_rechecked_before_mutation(self):
+        shim, _, _ = self.switch_installer()
+        # Model a successful earlier preflight followed by a concurrent native
+        # configuration change before the installer's mutation phase.
+        shim.write_text(shim.read_text().replace(
+            "\nswitch_install_preflight\n", "\nselected_switch=''\n"))
+        for changes in ({"switch_func": "wifi"}, {"switch_pending": "uncommitted"}):
+            with self.subTest(changes=changes):
+                self.update(switch_func="", switch_pending="", calls=[])
+                self.update(**changes)
+                self.run_switch_installer(shim, success=False)
+                self.assertEqual(self.load()["calls"], [])
+
+    def test_disabled_switch_clears_only_owned_assignment(self):
+        shim, handler, dispatcher = self.switch_installer(enabled=False)
+        before = dispatcher.read_bytes()
+        self.run_switch_installer(shim)
+        self.assertEqual(self.load()["switch_func"], "")
+        self.assertFalse(handler.exists())
+        self.assertEqual(dispatcher.read_bytes(), before)
+
+    def test_switch_disable_preserves_unrelated_binding_and_file(self):
+        shim, handler, _ = self.switch_installer(enabled=False)
+        self.update(switch_func="wifi")
+        handler.write_text("unrelated user file\n")
+        self.run_switch_installer(shim)
+        self.assertEqual(self.load()["calls"], [])
+        self.assertEqual(handler.read_text(), "unrelated user file\n")
+
+    def test_switch_check_does_not_assign_missing_binding(self):
+        shim, _, _ = self.switch_installer()
+        self.update(switch_func="")
+        self.run_switch_installer(shim, "check", success=False)
+        self.assertEqual(self.load()["calls"], [])
+
+    def test_switch_refuses_unknown_board_instead_of_assuming_off(self):
+        self.enable_switch("lo")
+        (self.root / "model").write_text("different-model\n")
+        self.run_mode("guard")
+        self.assertEqual(self.load()["nft"], self.profile("armed"))
 
     def load(self):
         return json.loads(self.state.read_text())

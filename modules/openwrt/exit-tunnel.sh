@@ -21,6 +21,10 @@ stamp=/var/run/nixos-exit-applied
 read_mode() {
     mode=$(cat "$base/mode" 2>/dev/null || true)
     case "$mode" in on|off) ;; *) mode=on; logger -t beryl-exit 'invalid/missing mode: enforcing protected mode' ;; esac
+    switch_unknown=0
+    if [ "$switch_enabled" = 1 ]; then
+        if switch_bound && switch_read; then mode=$switch_mode; else switch_unknown=1; mode=on; fi
+    fi
 }
 write_mode() {
     [ "$(cat "$base/mode" 2>/dev/null || true)" != "$1" ] || { mode=$1; return; }
@@ -110,6 +114,29 @@ clear_exit() {
 }
 read_mode
 changed=0
+if [ "$switch_enabled" = 1 ]; then
+    if [ "$switch_unknown" = 1 ]; then
+        [ "$operation" != check ] || fail 'physical switch or binding unreadable'
+        guard armed apply || fail 'could not protect unknown physical switch'
+        # Early boot must still start procd's retrying watcher.
+        [ "$operation" != guard ] || exit 0
+        fail 'physical switch or binding unreadable; blocking policy retained'
+    fi
+    if [ "$operation" = check ]; then
+        [ "$(cat "$base/mode" 2>/dev/null || true)" = "$mode" ] || fail 'physical switch/mode cache drift'
+    else
+        if [ "$mode" = on ]; then
+            guard on check || guard armed apply || fail 'could not arm physical ON'
+        fi
+        case "$operation" in on|off)
+            [ "$operation" = "$mode" ] || fail "physical switch is $mode; move it instead of overriding it" ;;
+        esac
+        if [ "$(cat "$base/mode" 2>/dev/null || true)" != "$mode" ]; then
+            changed=1
+            write_mode "$mode"
+        fi
+    fi
+fi
 case "$operation" in
     on) prerequisites; [ "$mode" = on ] || changed=1; write_mode on ;;
     off) [ "$mode" = off ] || changed=1; write_mode off ;;
@@ -120,7 +147,12 @@ if [ "$operation" = guard ]; then
         # runtime stamp and must block all forwarding until identity is checked.
         guard on check || guard armed apply || fail 'could not arm boot protection'
     else
-        guard off apply || fail 'could not restore explicit OFF'
+        if [ "$switch_enabled" = 1 ] &&
+            { ! switch_bound || ! switch_read || [ "$switch_mode" != off ]; }; then
+            guard armed apply || fail 'could not protect changing boot switch'
+        else
+            guard off apply || fail 'could not restore explicit OFF'
+        fi
     fi
     exit 0
 fi
@@ -143,6 +175,9 @@ if [ "$operation" = check ]; then
     exit 0
 fi
 if [ "$mode" = on ]; then
+    # Arm from OFF before any possibly slow control-plane request. An already
+    # verified ON profile is equally fail-closed and can remain installed.
+    guard on check || guard armed apply || fail 'could not establish ON protection'
     if ! get_exit || [ "$selected" != "$exit_id" ] || [ "$lan" != true ] || [ "$corp_dns" != false ]; then
         guard armed apply || fail 'guard installation failed; no new exit selected'
     else
@@ -173,12 +208,14 @@ if [ "$mode" = on ]; then
         get_exit && [ "$selected" = "$exit_id" ] && [ "$lan" = true ] && [ "$corp_dns" = false ] || fail 'unexpected exit identity/preferences; guard retained'
     fi
     ip -4 route get "$dns_address" uid 453 | grep -q 'dev tailscale0' || fail 'client DNS route unavailable; guard retained'
+    switch_confirm on
     guard on apply || fail 'could not release verified tunnel traffic'
 else
     clear_exit
     # OFF releases the exit gate without a remote peer or an active control
     # service; the off profile still enforces untrusted-client isolation.
     [ "$changed" = 0 ] || clean_dns_flows
+    switch_confirm off
     guard off apply || fail 'could not release owned guard'
 fi
 if [ "$mode" = on ] && [ "$changed" = 1 ]; then clean_dns_flows; fi

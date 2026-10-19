@@ -2,6 +2,7 @@
   networking.hostName = "beryl-ax";
   services.exitTunnel = {
     enable = true;
+    hardwareSwitch.enable = true;
     exitNode = {
       address = "100.115.20.65";
       id = "nJDM8knVvy11CNTRL";

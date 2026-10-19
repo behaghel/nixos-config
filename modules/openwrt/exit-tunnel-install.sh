@@ -22,6 +22,7 @@ filter=$(iptables-save -t filter) || fail 'cannot inspect live flow offload'
 for package in firewall tailscale gl-dns-v2 dhcp; do
     [ -z "$(uci changes "$package")" ] || fail "pending $package changes; inspect first"
 done
+switch_install_preflight
 [ ! -L /etc/nixos-exit ] || fail 'refusing a symlink configuration directory'
 if nft list table inet nixos_exit_guard >/dev/null 2>&1; then
     grep -Fxq '# Managed by nixos-config OpenWrt exit-node module.' /usr/sbin/nixos-exit-node || fail 'unowned nft namespace'

@@ -67,6 +67,7 @@ let
     "/usr/sbin/nixos-exit-node" = executable ''
       #!/bin/sh
       ${marker}
+      switch_enabled=${if cfg.hardwareSwitch.enable then "1" else "0"}
       exit_ip=${lib.escapeShellArg cfg.exitNode.address}
       exit_id=${lib.escapeShellArg cfg.exitNode.id}
       tailnet_suffix=${lib.escapeShellArg cfg.tailnetSuffix}
@@ -76,6 +77,7 @@ let
       off_hash=${builtins.hashString "sha256" files."/etc/nixos-exit/off.nft".text}
       downstream_zones=${lib.escapeShellArg (lib.concatStringsSep " " cfg.downstreamZones)}
       ${builtins.readFile ./exit-tunnel-native.sh}
+      ${builtins.readFile ./exit-tunnel-switch.sh}
       ${builtins.readFile ./exit-tunnel.sh}
     '';
     "/etc/nixos-exit/on.nft" = nftProfile true true;
@@ -98,6 +100,15 @@ let
       }
       # Stopping reconciliation does not remove protection from the kernel.
     '';
+  } // lib.optionalAttrs cfg.hardwareSwitch.enable {
+    "/etc/gl-switch.d/nixos-exit.sh" = executable ''
+      #!/bin/sh
+      ${marker}
+      case "''${1:-}" in on|off) ;; *) exit 2 ;; esac
+      # Events may queue behind the vendor lock. Re-read the actual position
+      # inside the controller lock rather than trusting an old event argument.
+      exec /usr/sbin/nixos-exit-node reconcile
+    '';
   };
   writeFiles = lib.concatStringsSep "\n" (lib.mapAttrsToList
     (path: file:
@@ -113,7 +124,8 @@ let
 in
 {
   options.services.exitTunnel = {
-    enable = lib.mkEnableOption "protected manual exit mode on qualified GL.iNet 4.11 fw3 firmware";
+    enable = lib.mkEnableOption "protected exit mode on qualified GL.iNet 4.11 fw3 firmware";
+    hardwareSwitch.enable = lib.mkEnableOption "authoritative MT3000 physical switch through the native dispatcher";
     exitNode.address = lib.mkOption { type = lib.types.strMatching "100\\.[0-9]+\\.[0-9]+\\.[0-9]+"; };
     exitNode.id = lib.mkOption { type = lib.types.strMatching "[a-zA-Z0-9]+"; };
     localInterfaces = lib.mkOption {
@@ -159,12 +171,14 @@ in
     system.build.exitTunnelFiles = files;
     system.build.exitTunnelInstallText = ''
       #!/bin/sh
+      switch_enabled=${if cfg.hardwareSwitch.enable then "1" else "0"}
       exit_ip=${lib.escapeShellArg cfg.exitNode.address}
       exit_id=${lib.escapeShellArg cfg.exitNode.id}
       dns_address=${lib.escapeShellArg cfg.dnsAddress}
       tailnet_suffix=${lib.escapeShellArg cfg.tailnetSuffix}
       downstream_zones=${lib.escapeShellArg (lib.concatStringsSep " " cfg.downstreamZones)}
       ${builtins.readFile ./exit-tunnel-native.sh}
+      ${builtins.readFile ./exit-tunnel-switch.sh}
       ${builtins.readFile ./exit-tunnel-install.sh}
       ${writeFiles}
       ${builtins.readFile ./exit-tunnel-install-finish.sh}

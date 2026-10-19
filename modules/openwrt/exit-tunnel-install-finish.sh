@@ -20,9 +20,10 @@ if [ "$mode" = check ]; then
     /usr/sbin/nixos-exit-node check
     exit 0
 fi
-# Protect an existing ON before touching native services. An initial install
-# explicitly starts OFF; no exit is selected as a side effect of activation.
+# Protect before assigning the handler or touching native services. Unbound
+# initial installs start OFF; a bound switch takes authority before any release.
 /usr/sbin/nixos-exit-node guard || fail 'could not establish requested guard'
+switch_install_apply
 [ "$(uci -q get firewall.tailscale0)" = zone ] || fail 'enable native Tailscale first'
 [ "$(uci -q get firewall.tailscale0.name)" = tailscale0 ] || fail 'native Tailscale zone changed'
 [ "$(uci -q get tailscale.settings.enabled)" = 1 ] || fail 'native Tailscale must remain enabled'
