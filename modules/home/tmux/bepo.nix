@@ -9,11 +9,12 @@
     bind -n M-s select-pane -U
     bind -n M-r select-pane -R
 
-    # Fallback: also support Alt+Arrow for pane navigation
-    bind -n M-Left  select-pane -L
-    bind -n M-Down  select-pane -D
-    bind -n M-Up    select-pane -U
-    bind -n M-Right select-pane -R
+    # Leave Alt+Arrow to applications (Pi uses Alt+Up to edit queued messages).
+    # Explicitly clear the old pane bindings when reloading an existing server.
+    unbind -n M-Left
+    unbind -n M-Down
+    unbind -n M-Up
+    unbind -n M-Right
 
     # Copy-mode vi movement on BEPO keys
     bind -T copy-mode-vi c send -X cursor-left
