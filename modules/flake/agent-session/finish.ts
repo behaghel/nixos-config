@@ -95,7 +95,7 @@ function forceFinishUnlocked(
 	const metadata = readMetadata(root, slug);
 	assertConfiguredWorktreePath(root, config, metadata);
 	assertNotInvokingWorktree(metadata, invocationRoot);
-	let ownedBranches = localBranches(root).has(metadata.branch)
+	let ownedBranches = metadata.initialBranchOwned !== false && localBranches(root).has(metadata.branch)
 		? [metadata.branch]
 		: [];
 	if (existsSync(metadata.worktreePath)) {
@@ -273,7 +273,9 @@ function finishUnlocked(
 	}
 	unlinkSync(metadataPath(root, slug));
 	const onlyCheck = branchChecks.length === 1 ? branchChecks[0] : undefined;
-	const disposition = keepBranch
+	const disposition = status.ownedBranches.length === 0
+		? "Borrowed branches preserved."
+		: keepBranch
 		? status.ownedBranches.length === 1
 			? `Local branch preserved: ${status.ownedBranches[0]}`
 			: `Local branches preserved: ${status.ownedBranches.join(", ")}`

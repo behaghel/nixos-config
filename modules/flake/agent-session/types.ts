@@ -30,7 +30,7 @@ export interface PullRequestMetadata {
 }
 
 export interface SessionMetadata {
-	version: 1;
+	version: 1 | 2;
 	slug: string;
 	branch: string;
 	worktreePath: string;
@@ -39,6 +39,7 @@ export interface SessionMetadata {
 	createdAt: string;
 	conversation: null;
 	preexistingBranches?: string[];
+	initialBranchOwned?: boolean;
 	pr?: PullRequestMetadata;
 }
 

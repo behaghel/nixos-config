@@ -100,6 +100,24 @@ export function assertReviewSource(root: string, remote: string, pr: PullRequest
 	}
 }
 
+export function borrowedReviewSource(root: string, branch: string, pr: PullRequestMetadata): string {
+	if (git(root, ["rev-parse", "--verify", `refs/heads/${branch}^{commit}`]) !== pr.headCommit) {
+		throw new CliError(`The preexisting local branch ${branch} differs from the resolved PR head; reconcile it explicitly.`);
+	}
+	const remote = run("git", ["config", "--get", `branch.${branch}.remote`], root).stdout;
+	const merge = run("git", ["config", "--get", `branch.${branch}.merge`], root).stdout;
+	const upstream = git(root, ["for-each-ref", "--format=%(upstream)", `refs/heads/${branch}`]);
+	if (!remotePattern.test(remote) || merge !== `refs/heads/${pr.headBranch}` ||
+		upstream !== `refs/remotes/${remote}/${pr.headBranch}`) {
+		throw new CliError(`The preexisting local branch ${branch} has missing or conflicting source tracking. Configure its upstream explicitly before borrowing it.`);
+	}
+	assertReviewSource(root, remote, pr);
+	const pushRemote = run("git", ["config", "--get", `branch.${branch}.pushRemote`], root).stdout ||
+		run("git", ["config", "--get", "remote.pushDefault"], root).stdout || remote;
+	assertReviewSource(root, pushRemote, pr);
+	return remote;
+}
+
 export function fetchPullRequestHead(root: string, remote: string, pr: PullRequestMetadata): void {
 	const fetched = run("git", ["fetch", remote, `refs/pull/${pr.number}/head`], root);
 	if (fetched.status !== 0) throw new CliError(`Could not fetch PR #${pr.number} head.${fetched.stderr ? `\n${fetched.stderr}` : ""}`);
@@ -111,10 +129,10 @@ export function fetchPullRequestHead(root: string, remote: string, pr: PullReque
 // A named Git remote supplies an ordinary upstream and safe plain-push target.
 // Existing remotes are never repointed. Successful sessions retain their source
 // remote, including after finish, so preserved branches keep their tracking.
-export function prepareReviewSource(root: string, baseRemote: string, slug: string, pr: PullRequestMetadata): { remote: string; created: boolean } {
-	let remote = baseRemote;
+export function prepareReviewSource(root: string, baseRemote: string, slug: string, pr: PullRequestMetadata, preferredRemote?: string): { remote: string; created: boolean } {
+	let remote = preferredRemote ?? baseRemote;
 	let created = false;
-	if (pr.sourceRepository !== pr.repository) {
+	if (!preferredRemote && pr.sourceRepository !== pr.repository) {
 		const matching = git(root, ["remote"]).split("\n").find((candidate) => {
 			if (!remotePattern.test(candidate)) return false;
 			try {

@@ -46,6 +46,7 @@ start separate follow-up work without updating the original PR.
 | Freshness | Compare with the recorded PR base branch, including separate-work sessions | A release-targeted PR must not be judged against an unrelated default branch. |
 | Agent | Normal configured launch, no injected review prompt | Keep `as` agent-neutral and do not presume the user's next task. |
 | Cleanup | Preserve borrowed branches; normal guarded cleanup for session-created branches | Checking out an existing branch does not transfer ownership to `as`. |
+| Borrowed-record compatibility | Borrowed sessions use metadata version 2 with explicit non-ownership; new readers accept versions 1 and 2; receipts remain version 1 | A version-1 reader ignores added ownership flags and can mistake a borrowed `agent/<slug>` branch for a deletable managed branch. Rejecting the newer record is safer than interpreting it as owned. |
 
 ### Command contract
 
@@ -134,7 +135,9 @@ not themselves constitute adopting a new remote head.
   in both default and `-c` modes.
 - [ ] AC-18: Given a session using a preexisting local PR branch, when cleanup
   succeeds, that branch remains. A session-created branch is eligible only for
-  normal guarded cleanup. No cleanup mode deletes a remote branch.
+  normal guarded cleanup. No cleanup mode deletes a remote branch. Borrowed
+  sessions use version-2 metadata so older version-1-only readers refuse them;
+  missing or downgraded ownership information is refused by current readers.
 - [ ] AC-19: Given a failed preparation, when creation rolls back, it removes
   only worktree/branch assets created by that attempt and preserves any borrowed
   local branch and its configuration. No successful creation receipt is emitted.
@@ -145,8 +148,12 @@ not themselves constitute adopting a new remote head.
 ## Invariants
 
 - Existing commands without `--pr` retain their behavior and JSON contracts.
-  PR-related metadata is additive; older records remain readable without
-  fabricated PR identity or branch ownership.
+  Older version-1 records remain readable without fabricated PR identity.
+  Session-created initial branches retain version-1 metadata. Borrowed initial
+  branches require version-2 metadata with `initialBranchOwned: false` and a
+  preexisting-branch snapshot containing that branch. Readers refuse inconsistent
+  version/ownership combinations rather than treating them as session-owned.
+  Outer creation receipts and status envelopes remain version 1.
 - Slug-first grammar, explicit current-session targeting, managed-path and Git
   registration validation, ignored worktree-root policy, operation locks,
   explicit local-link allowlists, and invoking-worktree cleanup protection remain.
@@ -199,7 +206,7 @@ coverage. Fault injection verifies failure and rollback paths.
 | AC-14 | Dirty and non-default primary checkout fixtures; assert unchanged primary refs/files and no allocation. | Yes |
 | AC-15 | Fail-on-call network stubs plus before/after Git/session snapshots; inspect unresolved preview fields and JSON framing. | Yes |
 | AC-16–17 | Check creation/status JSON and human output, network-call counts, and freshness against a non-default PR base in both modes. | Yes |
-| AC-18–19 | Cleanup/rollback with borrowed and newly created branches; inspect surviving refs, branch configuration, metadata, and receipt output. | Yes |
+| AC-18–19 | Cleanup/rollback with borrowed and newly created branches; inspect surviving refs/configuration, version-2 borrowed records inside version-1 receipts, and refusal of missing/downgraded ownership metadata. | Yes |
 | AC-20 | Missing executable, authentication, inaccessible PR, and fetch-failure fixtures; assert actionable stderr and no execution or success receipt. | Yes |
 | Invariants | Run existing agent-session regression/template checks and shell-completion coverage; run `nix flake check` before opening a PR. | Yes |
 

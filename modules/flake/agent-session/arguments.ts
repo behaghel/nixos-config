@@ -150,20 +150,36 @@ export function parseCreateArguments(args: string[]): {
 export function parseStartArguments(args: string[]): {
 	slug: string;
 	launchConfiguredAgent: boolean;
+	pr?: PullRequestSelection;
+	trustPr: boolean;
 } {
 	let slug: string | undefined;
 	let launchConfiguredAgent = true;
-	for (const argument of args) {
+	let pr: PullRequestSelection | undefined;
+	let trustPr = false;
+	let createBranch = false;
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index] ?? "";
 		if (argument === "--no-agent") launchConfiguredAgent = false;
+		else if (argument === "--trust-pr") trustPr = true;
+		else if (argument === "-c" || argument === "--create-branch") createBranch = true;
+		else if (argument === "--pr") {
+			if (pr !== undefined) throw argumentError("--pr requires exactly one selection.");
+			try { pr = parsePullRequestSelection(args[++index] ?? ""); }
+			catch { throw argumentError("--pr requires a positive PR number or a github.com PR URL."); }
+		}
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("start", argument, ["--no-agent"]);
+			throw unknownOption("start", argument, ["--no-agent", "--pr", "--trust-pr", "-c", "--create-branch"]);
 		} else {
 			throw argumentError(`Unexpected argument '${argument}' for 'start'.`);
 		}
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'start'.");
-	return { slug, launchConfiguredAgent };
+	if (trustPr && !pr) throw argumentError("--trust-pr requires --pr.");
+	if (createBranch && !pr) throw argumentError("--create-branch (-c) requires --pr.");
+	if (createBranch && pr) pr = { ...pr, mode: "independent" };
+	return { slug, launchConfiguredAgent, pr, trustPr };
 }
 
 export function parseFinishArguments(args: string[]): {
@@ -288,7 +304,7 @@ function usage(): string {
 		"  agent-session <task-slug> run <command> [args...]",
 		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
-		"  agent-session <task-slug> start [--no-agent]",
+		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> resume",
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",

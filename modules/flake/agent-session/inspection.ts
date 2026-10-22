@@ -78,9 +78,10 @@ export function statusCannotOperate(status: SessionStatus): boolean {
 	);
 }
 
-function sessionOwnedBranches(metadata: SessionMetadata): string[] {
+function sessionBranchSets(metadata: SessionMetadata): { owned: string[]; allowed: string[] } {
 	const local = localBranches(metadata.worktreePath);
-	const owned = new Set([metadata.branch]);
+	const owned = new Set<string>(metadata.initialBranchOwned === false ? [] : [metadata.branch]);
+	const allowed = new Set([metadata.branch]);
 	const preexisting = new Set(metadata.preexistingBranches ?? []);
 	const legacyCreationBoundary = Math.floor(
 		new Date(metadata.createdAt).getTime() / 1000,
@@ -90,8 +91,9 @@ function sessionOwnedBranches(metadata: SessionMetadata): string[] {
 		const rename = entry.summary.match(
 			/^Branch: renamed refs\/heads\/(.+) to refs\/heads\/(.+)$/,
 		);
-		if (rename?.[1] && rename[2] && owned.has(rename[1])) {
-			owned.add(rename[2]);
+		if (rename?.[1] && rename[2] && allowed.has(rename[1])) {
+			allowed.add(rename[2]);
+			if (owned.has(rename[1])) owned.add(rename[2]);
 			continue;
 		}
 		const checkout = entry.summary.match(/^checkout: moving from .+ to (.+)$/);
@@ -109,9 +111,13 @@ function sessionOwnedBranches(metadata: SessionMetadata): string[] {
 			creation.commit === entry.commit
 		) {
 			owned.add(destination);
+			allowed.add(destination);
 		}
 	}
-	return [...owned].filter((branch) => local.has(branch)).sort();
+	return {
+		owned: [...owned].filter((branch) => local.has(branch)).sort(),
+		allowed: [...allowed].filter((branch) => local.has(branch)),
+	};
 }
 
 export function inspectSession(
@@ -144,12 +150,12 @@ export function inspectSession(
 		["branch", "--show-current"],
 		metadata.worktreePath,
 	);
-	const ownedBranches = sessionOwnedBranches(metadata);
+	const { owned: ownedBranches, allowed: allowedBranches } = sessionBranchSets(metadata);
 	if (
 		actualRoot.status !== 0 ||
 		realpathSync(actualRoot.stdout) !== metadata.worktreePath ||
 		actualBranch.status !== 0 ||
-		!ownedBranches.includes(actualBranch.stdout)
+		!allowedBranches.includes(actualBranch.stdout)
 	) {
 		const currentBranch = actualBranch.stdout || null;
 		return {

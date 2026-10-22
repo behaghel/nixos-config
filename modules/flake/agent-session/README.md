@@ -59,7 +59,7 @@ as -- status run bun test
 The separator is valid for any slug. Legacy forms such as `as create my-task` and
 `as status my-task` fail with migration hints before any Git mutation or execution.
 Update scripts and their pinned input together; older pins keep their old grammar.
-Session metadata, existing JSON schemas, and cleanup receipts are unchanged.
+Existing non-PR session records and cleanup receipt schemas remain supported.
 Creation supports both preview JSON and an actual creation receipt.
 
 Session metadata remains in the shared Git directory at
@@ -242,6 +242,8 @@ as review-auth create --pr 123                  # ask before executing PR code
 as review-auth create --pr https://github.com/owner/repo/pull/123
 as review-auth create --pr 123 --trust-pr --json # explicit non-interactive trust
 as review-auth create --pr 123 --dry-run --json  # offline, unresolved preview
+as review-auth start --pr 123                   # prepare/reuse, then launch
+as followup start --pr 123 -c --no-agent         # independent preparation only
 ```
 
 This checks out the PR's source head, not its synthetic merge commit, and
@@ -258,8 +260,9 @@ appeared during confirmation. Prompts go to stderr, including with `--json`;
 stdout remains reserved for the creation receipt.
 
 `--trust-pr` explicitly authorizes preparation and later execution in this PR
-checkout without prompting. Non-terminal creation requires this flag. Trust is
-recorded against the fetched head commit, not against future remote updates.
+checkout without prompting. Non-terminal creation of a new session requires this
+flag; matching trusted sessions can be reused without it. Trust is recorded
+against the fetched head commit, not against future remote updates.
 
 PR dry runs require no trust, GitHub lookup, remote query, checkout, preparation,
 or session-record write. They use cached remote HEAD to check the primary
@@ -276,11 +279,13 @@ names are compared case-insensitively. A URL for another target repository is
 refused without GitHub lookup or cloning. Numbers never select another project.
 PRs may come from forks; checkout does not require push permission.
 
-The PR must be open, non-draft, and target the default branch. In default review
-mode its local source branch must not already exist or have saved configuration.
-If checked out elsewhere, the error identifies that path. `start --pr` and reuse
-of an existing session are not available. Unsupported requests fail rather than
-falling back to default-branch creation.
+New PR sessions require an open, non-draft PR targeting the default branch.
+Default review mode can borrow an unused local source branch only if its commit
+exactly matches the resolved PR head and its existing upstream and effective push
+destination already target the PR source branch/repository. Missing or conflicting
+tracking must be configured explicitly by the user; creation does not rewrite it.
+A source branch checked out elsewhere is refused with that worktree's path.
+Unsupported requests fail rather than falling back to default-branch creation.
 
 The new local branch tracks the PR's source branch for `git push`. For a fork,
 creation reuses a matching configured remote without changing it, or adds
@@ -295,6 +300,42 @@ Conflicting push URLs, explicit remote push refspecs, mirror mode,
 are refused rather than rewritten. Git transport rewrites and credentials remain
 under the user's control. Creation verifies that the resolved PR head, fetched
 PR ref, and fetched source branch agree before preparing the checkout.
+
+### Launch and reuse
+
+`start --pr` accepts the same PR selection, trust, and branch-mode flags as
+`create --pr`. It prepares the session and launches the configured agent normally,
+without injecting review instructions. `--no-agent` prepares or reuses only. An
+agent failure leaves the prepared session available for later use.
+
+Repeating `create --pr` or `start --pr` with the same canonical repository, PR
+number, and branch mode reuses a valid recorded session offline. It does not
+fetch, reset, pull, change the worktree, rewrite metadata, repeat preparation, or
+request trust again. Local commits and dirty files are preserved; only `start`
+launches the configured agent. New-session creation retains its primary-checkout
+clean/default-branch guards; reuse allocates nothing and verifies the existing
+path, Git registration, metadata, and allowed branch lineage instead.
+
+A different PR/mode, a non-PR record, or an invalid binding is refused rather than
+converted or repaired. Bare `start` without `--pr` keeps its existing creation
+behavior; use `launch` / `resume` for ordinary existing sessions.
+
+### Borrowed branches and metadata compatibility
+
+Borrowing does not transfer branch ownership. Normal cleanup, forced cleanup,
+failed preparation, and missing-worktree cleanup preserve the initial borrowed
+branch and its configuration. Renaming it does not make it session-owned.
+Branches actually created during the session retain normal ownership checks.
+
+Borrowed sessions store metadata `version: 2` with `initialBranchOwned: false`
+and a preexisting-branch snapshot containing the borrowed branch. Owned sessions
+retain metadata version 1; current readers accept both versions. Outer creation
+receipts and status envelopes remain version 1. Version-1-only launchers reject
+borrowed records rather than ignoring an added flag and deleting a borrowed
+`agent/<slug>` branch. Inconsistent version/ownership records are refused.
+Do not downgrade borrowed records or reconstruct them as version 1. If a borrowed
+record is lost, restore the original version-2 record; unrecorded forced retirement
+preserves all branches and is not permission to invent ownership with `repair`.
 
 ### Independent follow-up work
 
