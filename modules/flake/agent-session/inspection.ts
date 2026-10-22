@@ -1,5 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
-import { assertReviewSource } from "./github.ts";
+import { assertReviewSource, pullRequestSummary } from "./github.ts";
 import { sessionCommand } from "./arguments.ts";
 import {
 	countRevisionRange,
@@ -120,6 +120,10 @@ function sessionBranchSets(metadata: SessionMetadata): { owned: string[]; allowe
 	};
 }
 
+export function sessionBaseBranch(metadata: SessionMetadata, defaultBranch = metadata.defaultBranch): string {
+	return metadata.pr?.baseBranch ?? defaultBranch;
+}
+
 export function inspectSession(
 	metadata: SessionMetadata,
 	defaultBranch = metadata.defaultBranch,
@@ -192,7 +196,7 @@ export function inspectSession(
 			[
 				"merge-base",
 				"--is-ancestor",
-				`${metadata.remote}/${defaultBranch}`,
+				`${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}`,
 				"HEAD",
 			],
 			metadata.worktreePath,
@@ -336,7 +340,7 @@ export function showStatus(
 				? `\n  owned branches: ${session.ownedBranches.join(", ")}`
 				: "";
 		process.stdout.write(
-			`${session.slug}  ${session.currentBranch ?? session.branch}  ${hygiene}\n  ${session.worktreePath}${branches}\n`,
+			`${session.slug}  ${session.currentBranch ?? session.branch}  ${hygiene}\n  ${session.worktreePath}${branches}${session.pr ? `\n  PR: ${pullRequestSummary(session.pr)}; base: ${session.pr.baseBranch}` : ""}\n`,
 		);
 		if (session.problem) process.stderr.write(`${session.problem}\n`);
 	}

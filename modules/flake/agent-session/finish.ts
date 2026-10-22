@@ -26,6 +26,7 @@ import {
 	statusCannotOperate,
 	refreshMetadataRemote,
 	sessionRemotes,
+	sessionBaseBranch,
 } from "./inspection.ts";
 import {
 	CliError,
@@ -199,7 +200,7 @@ function finishUnlocked(
 	if (diffCheck.status !== 0) {
 		throw new CliError(diffCheck.stderr || "Git diff verification failed.");
 	}
-	const mergedDefault = `${metadata.remote}/${defaultBranch}`;
+	const mergedDefault = `${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}`;
 	const branchChecks = status.ownedBranches.map((branch) => {
 		const merged =
 			run(

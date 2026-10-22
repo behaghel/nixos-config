@@ -29,6 +29,12 @@ export function assertPullRequestTarget(root: string, remote: string, selection:
 	return repository;
 }
 
+export function pullRequestSummary(pr: PullRequestMetadata): string {
+	const source = pr.sourceRepository === null ? "; source repository unavailable"
+		: pr.sourceBranchMissing ? "; source branch absent at creation" : "";
+	return `${pr.url} (${pr.state}${pr.isDraft ? "; DRAFT" : ""}${source})`;
+}
+
 export function validPullRequest(value: unknown): value is PullRequestMetadata {
 	if (!value || typeof value !== "object") return false;
 	const pr = value as Partial<PullRequestMetadata>;
@@ -39,8 +45,10 @@ export function validPullRequest(value: unknown): value is PullRequestMetadata {
 		typeof pr.headCommit === "string" && /^[a-f0-9]{40}$/.test(pr.headCommit) &&
 		pr.trustedHeadCommit === pr.headCommit && (pr.mode === "review" || pr.mode === "independent") &&
 		["OPEN", "CLOSED", "MERGED"].includes(pr.state ?? "") && typeof pr.isDraft === "boolean" &&
-		(pr.sourceRepository === undefined || (typeof pr.sourceRepository === "string" && repositoryPattern.test(pr.sourceRepository))) &&
-		(pr.sourceRemote === undefined || (pr.mode === "review" && typeof pr.sourceRemote === "string" && remotePattern.test(pr.sourceRemote) && pr.sourceRepository !== undefined));
+		(pr.sourceRepository === undefined || (pr.sourceRepository === null ? pr.mode === "independent" :
+			typeof pr.sourceRepository === "string" && repositoryPattern.test(pr.sourceRepository))) &&
+		(pr.sourceRemote === undefined || (pr.mode === "review" && typeof pr.sourceRemote === "string" && remotePattern.test(pr.sourceRemote) && typeof pr.sourceRepository === "string")) &&
+		(pr.sourceBranchMissing === undefined || (pr.mode === "review" && typeof pr.sourceBranchMissing === "boolean"));
 }
 
 export function resolvePullRequest(root: string, remote: string, selection: PullRequestSelection): PullRequestMetadata {
@@ -49,8 +57,14 @@ export function resolvePullRequest(root: string, remote: string, selection: Pull
 		"pr", "view", String(selection.number), "--repo", `https://github.com/${repository}`,
 		"--json", "number,url,state,isDraft,baseRefName,headRefName,headRefOid,isCrossRepository,headRepository,headRepositoryOwner",
 	], root);
+	if (result.errorCode) {
+		throw new CliError(`GitHub CLI (gh) is not available (${result.errorCode}). Ensure the packaged gh executable is installed and executable.`);
+	}
 	if (result.status !== 0) {
-		throw new CliError(`Could not resolve PR #${selection.number} with gh. Ensure gh is installed and run gh auth login.${result.stderr ? `\n${result.stderr}` : ""}`);
+		const message = result.status === 4
+			? "GitHub authentication required; run gh auth login."
+			: `Could not resolve PR #${selection.number} in ${repository} with gh.`;
+		throw new CliError(`${message}${result.stderr ? `\n${result.stderr}` : ""}`);
 	}
 	let raw: Record<string, unknown>;
 	try {
@@ -61,11 +75,18 @@ export function resolvePullRequest(root: string, remote: string, selection: Pull
 	}
 	const source = raw.headRepository as { name?: unknown } | null;
 	const owner = raw.headRepositoryOwner as { login?: unknown } | null;
-	if (typeof source?.name !== "string" || typeof owner?.login !== "string" ||
-		!repositoryPattern.test(`${owner.login}/${source.name}`)) {
-		throw new CliError("PR source repository is unavailable or invalid; no session was created.");
+	let sourceRepository: string | null;
+	if (source === null || owner === null) {
+		if (selection.mode !== "independent") {
+			throw new CliError("PR source repository is no longer identifiable. Use -c for independent work; no push destination will be guessed.");
+		}
+		sourceRepository = null;
+	} else if (typeof source?.name === "string" && typeof owner?.login === "string" &&
+		repositoryPattern.test(`${owner.login}/${source.name}`)) {
+		sourceRepository = `${owner.login}/${source.name}`.toLowerCase();
+	} else {
+		throw new CliError("gh returned invalid PR source repository metadata.");
 	}
-	const sourceRepository = `${owner.login}/${source.name}`.toLowerCase();
 	const pr = {
 		number: raw.number, url: typeof raw.url === "string" ? raw.url.toLowerCase() : raw.url, repository,
 		baseBranch: raw.baseRefName, headBranch: raw.headRefName,
@@ -73,17 +94,18 @@ export function resolvePullRequest(root: string, remote: string, selection: Pull
 		mode: selection.mode ?? "review", trustedHeadCommit: raw.headRefOid, sourceRepository,
 	};
 	if (!validPullRequest(pr) || pr.number !== selection.number ||
-		raw.isCrossRepository !== (sourceRepository !== repository) ||
+		typeof raw.isCrossRepository !== "boolean" ||
+		(sourceRepository !== null && raw.isCrossRepository !== (sourceRepository !== repository)) ||
 		run("git", ["check-ref-format", "--branch", pr.headBranch], root).status !== 0 ||
 		run("git", ["check-ref-format", "--branch", pr.baseBranch], root).status !== 0) {
 		throw new CliError("gh returned invalid or mismatched PR metadata.");
 	}
-	if (pr.state !== "OPEN") throw new CliError("Only open PR review is supported currently; draft PRs are allowed.");
 	if (pr.mode === "review" && sourceRepository === repository) assertReviewSource(root, remote, pr);
 	return pr;
 }
 
 export function assertReviewSource(root: string, remote: string, pr: PullRequestMetadata): void {
+	if (pr.sourceRepository === null) throw new CliError("PR source repository is unknown; use -c for independent work.");
 	const repository = pr.sourceRepository ?? pr.repository;
 	if (githubRepository(git(root, ["config", "--get", `remote.${remote}.url`])) !== repository) {
 		throw new CliError("PR source remote no longer identifies the recorded source repository.");
@@ -126,10 +148,20 @@ export function fetchPullRequestHead(root: string, remote: string, pr: PullReque
 	}
 }
 
+function sourceBranchMissing(root: string, remote: string, branch: string): boolean {
+	const available = run("git", ["ls-remote", "--exit-code", remote, `refs/heads/${branch}`], root);
+	if (available.status === 2) return true;
+	if (available.status !== 0) {
+		throw new CliError(`Could not inspect the PR source branch; absence was not established.${available.stderr ? `\n${available.stderr}` : ""}`);
+	}
+	return false;
+}
+
 // A named Git remote supplies an ordinary upstream and safe plain-push target.
 // Existing remotes are never repointed. Successful sessions retain their source
 // remote, including after finish, so preserved branches keep their tracking.
-export function prepareReviewSource(root: string, baseRemote: string, slug: string, pr: PullRequestMetadata, preferredRemote?: string): { remote: string; created: boolean } {
+export function prepareReviewSource(root: string, baseRemote: string, slug: string, pr: PullRequestMetadata, preferredRemote?: string): { remote: string; created: boolean; missing: boolean } {
+	if (pr.sourceRepository === null) throw new CliError("PR source repository is unknown; use -c for independent work.");
 	let remote = preferredRemote ?? baseRemote;
 	let created = false;
 	if (!preferredRemote && pr.sourceRepository !== pr.repository) {
@@ -154,13 +186,18 @@ export function prepareReviewSource(root: string, baseRemote: string, slug: stri
 		assertReviewSource(root, remote, pr);
 		if (remote !== baseRemote) {
 			const fetched = run("git", ["fetch", "--prune", remote], root);
-			if (fetched.status !== 0) throw new CliError(`Could not fetch PR source remote ${remote}.${fetched.stderr ? `\n${fetched.stderr}` : ""}`);
+			if (fetched.status !== 0) {
+				if (sourceBranchMissing(root, remote, pr.headBranch)) return { remote, created, missing: true };
+				throw new CliError(`Could not fetch PR source remote ${remote}.${fetched.stderr ? `\n${fetched.stderr}` : ""}`);
+			}
 		}
 		const source = run("git", ["rev-parse", "--verify", `refs/remotes/${remote}/${pr.headBranch}^{commit}`], root);
-		if (source.status !== 0 || source.stdout !== pr.headCommit) {
-			throw new CliError("PR head changed or its source branch is unavailable. Retry after inspecting the PR; no session was created.");
+		if (source.status !== 0) {
+			if (sourceBranchMissing(root, remote, pr.headBranch)) return { remote, created, missing: true };
+			throw new CliError("PR source branch exists but is not available through its configured tracking. Inspect the remote fetch mapping.");
 		}
-		return { remote, created };
+		if (source.stdout !== pr.headCommit) throw new CliError("PR head changed. Retry after inspecting the PR; no session was created.");
+		return { remote, created, missing: false };
 	} catch (error) {
 		if (created) git(root, ["remote", "remove", remote]);
 		throw error;

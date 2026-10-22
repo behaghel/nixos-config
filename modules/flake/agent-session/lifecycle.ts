@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { resolvePullRequest, fetchPullRequestHead, assertPullRequestTarget, prepareReviewSource, borrowedReviewSource } from "./github.ts";
+import { resolvePullRequest, fetchPullRequestHead, assertPullRequestTarget, prepareReviewSource, borrowedReviewSource, pullRequestSummary } from "./github.ts";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
 import { unrecordedRetirementHint } from "./arguments.ts";
@@ -31,6 +31,7 @@ import {
 	refreshMetadataRemote,
 	inspectSession,
 	statusCannotOperate,
+	sessionBaseBranch,
 } from "./inspection.ts";
 import {
 	CliError,
@@ -129,7 +130,7 @@ function prepareLaunch(
 	}
 	if (!status.fresh) {
 		process.stderr.write(
-			`Warning: session ${slug} has not integrated the latest ${metadata.remote}/${defaultBranch}.\n`,
+			`Warning: session ${slug} has not integrated the latest ${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}.\n`,
 		);
 	}
 	process.stderr.write(`Launching ${metadata.branch}\n`);
@@ -344,13 +345,9 @@ function createSession(
 		throw new CliError(`Primary checkout must be on ${defaultBranch}.`);
 	}
 
-	const pr = selection === undefined ? undefined : runPhase(report, "pr-resolve", () => {
-		const resolved = resolvePullRequest(root, remote, selection);
-		if (resolved.baseBranch !== defaultBranch) {
-			throw new CliError("PRs targeting a non-default base branch are not supported yet.");
-		}
-		return resolved;
-	});
+	const pr = selection === undefined ? undefined : runPhase(report, "pr-resolve", () =>
+		resolvePullRequest(root, remote, selection),
+	);
 	const branch = pr?.mode === "review" ? pr.headBranch : `agent/${slug}`;
 	const configuredWorktreeRoot = resolveWorktreeRoot(
 		root,
@@ -389,7 +386,7 @@ function createSession(
 		runPhase(report, "pr-fetch", () => fetchPullRequestHead(root, remote, pr));
 		if (!trustPr) runPhase(report, "pr-trust", () => {
 			if (!process.stdin.isTTY) throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
-			const accepted = confirm(`Trust ${pr.url} at commit ${pr.headCommit}? Its environment and preparation can execute code. [y/N]`);
+			const accepted = confirm(`Trust ${pullRequestSummary(pr)} at commit ${pr.headCommit}? Its environment and preparation can execute code. [y/N]`);
 			process.stderr.write("\n");
 			if (!accepted) throw new CliError("PR creation cancelled; no PR code was executed.");
 			// Confirmation can wait indefinitely; do not populate a slot or alter
@@ -429,6 +426,7 @@ function createSession(
 			if (borrowed) borrowedReviewSource(root, branch, pr);
 			if (source.created) createdSourceRemote = source.remote;
 			pr.sourceRemote = source.remote;
+			if (source.missing) pr.sourceBranchMissing = true;
 		});
 		runPhase(report, "worktree-create", () => {
 			const added = run(
@@ -451,7 +449,12 @@ function createSession(
 		});
 		created = true;
 		if (pr?.mode === "review" && !borrowed) runPhase(report, "pr-track", () => {
-			git(root, ["branch", `--set-upstream-to=${pr.sourceRemote}/${branch}`, branch]);
+			if (pr.sourceBranchMissing) {
+				git(root, ["config", `branch.${branch}.remote`, pr.sourceRemote!]);
+				git(root, ["config", `branch.${branch}.merge`, `refs/heads/${pr.headBranch}`]);
+			} else {
+				git(root, ["branch", `--set-upstream-to=${pr.sourceRemote}/${branch}`, branch]);
+			}
 			if (git(root, ["config", "--get", `branch.${branch}.merge`]) !== `refs/heads/${pr.headBranch}` ||
 				git(root, ["config", "--get", `branch.${branch}.remote`]) !== pr.sourceRemote) {
 				throw new CliError("Conflicting PR source tracking; refusing to target another source branch.");
@@ -527,7 +530,7 @@ function reportCreated(metadata: SessionMetadata, json = false, reused = false):
 	writeCommandResult(
 		{ version: 1, command: "create", dryRun: false, session: metadata },
 		json,
-		`Session ${reused ? "reused" : "created"} without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${metadata.pr.url} (${metadata.pr.isDraft ? "DRAFT" : metadata.pr.state})\n` : ""}`,
+		`Session ${reused ? "reused" : "created"} without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${pullRequestSummary(metadata.pr)}; base: ${metadata.pr.baseBranch}\n` : ""}`,
 	);
 }
 

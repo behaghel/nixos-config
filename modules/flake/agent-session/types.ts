@@ -25,8 +25,9 @@ export interface PullRequestMetadata {
 	isDraft: boolean;
 	mode: PullRequestMode;
 	trustedHeadCommit: string;
-	sourceRepository?: string;
+	sourceRepository?: string | null;
 	sourceRemote?: string;
+	sourceBranchMissing?: boolean;
 }
 
 export interface SessionMetadata {

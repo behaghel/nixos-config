@@ -279,9 +279,11 @@ names are compared case-insensitively. A URL for another target repository is
 refused without GitHub lookup or cloning. Numbers never select another project.
 PRs may come from forks; checkout does not require push permission.
 
-New PR sessions require an open PR targeting the default branch; drafts are
-supported without changing PR readiness. Creation output identifies drafts as
-`DRAFT`, and JSON retains both `state: "OPEN"` and `isDraft: true`.
+Open, draft, closed, and merged PRs are supported when their retained head can
+be fetched. No PR is reopened or marked ready by creation. Human creation/status
+output includes PR identity, state, draft status, and the recorded base branch;
+JSON keeps `state` and `isDraft` separate. These are recorded at creation:
+Git-only status refresh does not requery GitHub or adopt a new PR head.
 Default review mode can borrow an unused local source branch only if its commit
 exactly matches the resolved PR head and its existing upstream and effective push
 destination already target the PR source branch/repository. Missing or conflicting
@@ -300,8 +302,37 @@ working tracking; remote repositories and their branches are never deleted.
 Conflicting push URLs, explicit remote push refspecs, mirror mode,
 `push.default=matching`, and fetch mappings that would track another source branch
 are refused rather than rewritten. Git transport rewrites and credentials remain
-under the user's control. Creation verifies that the resolved PR head, fetched
-PR ref, and fetched source branch agree before preparing the checkout.
+under the user's control. Creation verifies that the resolved PR head and fetched PR ref agree before
+preparing the checkout; available source branches must also match. A source
+branch is considered deleted only after an explicit remote query establishes
+its absence, never because authentication or transport failed.
+
+### Historical PRs and release bases
+
+A deleted source branch does not prevent reviewing a retained PR head when its
+repository is still identifiable. The local review branch keeps its intended
+source tracking, which can be gone; no remote branch or fake remote-tracking ref
+is created. `sourceBranchMissing: true` records verified absence at creation.
+An explicit later `git push` may restore that branch, so use `-c` for independent
+follow-up work when you do not intend to restore it. `as` never pushes.
+
+If GitHub no longer identifies the source repository, default review mode refuses
+with a `-c` hint. Explicit independent mode can still use the retained head,
+records `sourceRepository: null`, and configures no source remote or source push
+destination. It never guesses a repository or silently changes branch mode.
+
+Freshness, launch warnings, and merge-based cleanup use the recorded PR base
+branch, including release branches, not the repository default. The primary
+checkout must still satisfy the normal clean/upstream-default creation guard.
+Missing cached base refs cannot establish freshness and are treated as stale.
+
+### Dependency diagnostics
+
+A missing/unexecutable `gh` is reported as an executable problem. GitHub's
+authentication-required exit status prompts `gh auth login`; lookup/network
+failures retain their actual diagnostic and repository identity without falsely
+claiming the user is logged out. Failed lookup/fetch emits no successful creation
+receipt and executes no PR preparation or agent command.
 
 ### Launch and reuse
 
@@ -360,7 +391,8 @@ original PR. Ordinary user Git settings remain unchanged. Publication starts as
 
 Creation receipts and `status --json` expose a `pr` object containing `number`,
 `url`, `repository`, `baseBranch`, `headBranch`, `headCommit`, `state`, `isDraft`,
-`mode`, `trustedHeadCommit`, `sourceRepository`, and `sourceRemote`. Older records
+`mode`, `trustedHeadCommit`, `sourceRepository`, `sourceRemote`, and the optional
+`sourceBranchMissing` annotation. Older records
 without source fields remain readable. `mode` is `review` or `independent`;
 independent sessions retain PR source provenance but have no `sourceRemote`.
 Status is offline by default; explicit refresh and guarded cleanup fetch both
@@ -432,6 +464,10 @@ completion in Zsh and Fish). This repository's managed post-direnv hook register
 these after `compinit`, preserves existing completions, and restores registrations
 on project exit. Plain direnv cannot register completions in an already-running
 Zsh without that shell integration.
+
+PR flags are offered for both `create` and `start`. After `--pr`, enter a number
+or URL; option names are not suggested in that value position. PR flag/value
+completion performs no GitHub lookup or fetch.
 
 Projects with their own completions override the directory list explicitly:
 

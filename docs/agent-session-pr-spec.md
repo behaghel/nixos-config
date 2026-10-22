@@ -41,7 +41,8 @@ start separate follow-up work without updating the original PR.
 | Existing session | Reuse a matching PR binding without updating its checkout | Repeated commands must not discard review work or silently fetch a new head into it. |
 | Existing local branch | Reuse only at the exact resolved PR head, with compatible tracking and no other worktree using it | Preserve local commits, tracking configuration, and other active worktrees. |
 | Execution trust | Explicit confirmation before PR code executes; `--trust-pr` for automation; trust bound to the resolved head commit | Checkout of a PR must not silently authorize execution of its environment or preparation code. |
-| PR state | Draft, open, closed, and merged are eligible when the head remains fetchable | Historical review and separate follow-up work remain useful. |
+| PR state | Draft, open, closed, and merged are eligible when the head remains fetchable and review mode can identify its source repository | Historical review and separate follow-up work remain useful without guessing a push destination. |
+| Unidentifiable historical source | Explicit `-c` is required; record unavailable source identity as null and configure no source remote | A retained PR head is enough for separate work, but not authority to infer where review fixes should be pushed. |
 | Preview | Offline and non-mutating, with unresolved PR details identified | Preserve the existing dry-run contract rather than implying online validation. |
 | Freshness | Compare with the recorded PR base branch, including separate-work sessions | A release-targeted PR must not be judged against an unrelated default branch. |
 | Agent | Normal configured launch, no injected review prompt | Keep `as` agent-neutral and do not presume the user's next task. |
@@ -64,7 +65,12 @@ The PR head means the source commit, not GitHub's synthetic merge commit.
 Creation never pushes. A read-only reviewer can create a session without push
 permission; a later unauthorized push fails rather than targeting another branch.
 A deleted source branch is not automatically recreated remotely, and a closed PR
-is not reopened. A push failure never triggers an alternate push destination.
+is not reopened. If the source repository remains identifiable, a deleted branch
+can retain local tracking configuration without a fabricated remote ref. Network
+or permission failures do not establish branch deletion. If GitHub no longer
+identifies the source repository, default review mode refuses with a `-c` hint;
+only explicitly requested independent work proceeds from the retained PR head.
+A push failure never triggers an alternate push destination.
 
 A reused session is identified by canonical repository/PR identity and branch
 mode, not by the spelling of its number or URL. A different PR or branch mode
@@ -117,7 +123,9 @@ not themselves constitute adopting a new remote head.
   reuse of that trusted session requires no new prompt.
 - [ ] AC-12: Given a draft, closed, or merged PR with a fetchable head, when
   creation is authorized, it succeeds and exposes the PR state without reopening
-  the PR or recreating a remote branch. An unavailable head fails clearly.
+  the PR or recreating a remote branch. If the source repository is no longer
+  identifiable, explicit `-c` succeeds without a guessed source/push target and
+  default review mode refuses with that hint. An unavailable head fails clearly.
 - [ ] AC-13: Given a PR URL targeting a different repository, when creation is
   requested, it fails without cloning that repository or allocating a session.
 - [ ] AC-14: Given a dirty primary checkout or one not on its upstream default
@@ -170,9 +178,9 @@ not themselves constitute adopting a new remote head.
 
 **May modify:**
 
-- `modules/flake/agent-session/{arguments,cli,completion,lifecycle,git,sessions,types,inspection,finish,doctor}.ts`
+- `modules/flake/agent-session/{arguments,cli,completion,lifecycle,git,runtime,sessions,types,inspection,finish,doctor}.ts`
   where required for PR selection, trust, metadata, branch ownership, inspection,
-  and cleanup integration.
+  cleanup integration, and dependency diagnostics.
 - `modules/flake/agent-session/README.md` and this specification.
 - `tests/agent-session.test.ts`, `tests/agent-session.nix`, and
   `tests/agent-session-templates.test.ts` for relevant regression coverage.
@@ -202,12 +210,12 @@ coverage. Fault injection verifies failure and rollback paths.
 | AC-7–8 | Repeat against dirty/local-ahead sessions and a changed remote head; compare files, refs, metadata, preparation count, and launch count; reject identity/mode changes. | Yes |
 | AC-9–10 | Register a competing worktree; test exact-match, divergent, ahead/behind, and conflicting-tracking local branches; compare branch configuration before/after refusal. | Yes |
 | AC-11 | Exercise terminal approval/decline, EOF, non-terminal invocation, explicit trust, and trusted reuse; sentinels detect PR code execution before authorization. | Yes |
-| AC-12–13 | Supply PR-state fixtures, unavailable-head failures, and foreign-target URLs; assert state reporting and absence of prohibited remote changes. | Yes |
+| AC-12–13 | Supply PR-state fixtures, deleted source branches, null source identity, unavailable heads, and foreign-target URLs; assert explicit independent-mode requirements, state reporting, and unchanged remote refs. | Yes |
 | AC-14 | Dirty and non-default primary checkout fixtures; assert unchanged primary refs/files and no allocation. | Yes |
 | AC-15 | Fail-on-call network stubs plus before/after Git/session snapshots; inspect unresolved preview fields and JSON framing. | Yes |
 | AC-16–17 | Check creation/status JSON and human output, network-call counts, and freshness against a non-default PR base in both modes. | Yes |
 | AC-18–19 | Cleanup/rollback with borrowed and newly created branches; inspect surviving refs/configuration, version-2 borrowed records inside version-1 receipts, and refusal of missing/downgraded ownership metadata. | Yes |
-| AC-20 | Missing executable, authentication, inaccessible PR, and fetch-failure fixtures; assert actionable stderr and no execution or success receipt. | Yes |
+| AC-20 | Missing executable, gh authentication exit 4, lookup exit 1, and fetch/source-query failures; assert accurate diagnostics, no false login hint on lookup failure, and no execution or success receipt. | Yes |
 | Invariants | Run existing agent-session regression/template checks and shell-completion coverage; run `nix flake check` before opening a PR. | Yes |
 
 A real GitHub smoke test complements the fixtures: create an authorized review

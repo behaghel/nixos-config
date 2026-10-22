@@ -8,9 +8,10 @@ import {
 	argumentError,
 } from "./arguments.ts";
 
+const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
 const commandOptions: Record<string, string[]> = {
-	create: ["--dry-run", "--json"],
-	start: ["--no-agent"],
+	create: ["--dry-run", "--json", ...prOptions],
+	start: ["--no-agent", ...prOptions],
 	status: ["--json", "--refresh"],
 	doctor: ["--json"],
 	"global-doctor": ["--json"],
@@ -90,6 +91,9 @@ _agent_session() {
       fi
       return
     fi
+    if [[ $action == create || $action == start ]] && [[ \${COMP_WORDS[COMP_CWORD-1]-} == --pr ]]; then
+      COMPREPLY=(); return
+    fi
     scope="options:$action"
   fi
   candidates="$(agent-session __complete "$scope" 2>/dev/null)"
@@ -135,6 +139,10 @@ else
     _normal
     return
   fi
+  if [[ $action == create || $action == start ]] && [[ $words[$(( CURRENT - 1 ))] == --pr ]]; then
+    _message 'PR number or URL'
+    return
+  fi
   scope="options:$action"
 fi
 candidates=(\${(f)"$(agent-session __complete "$scope" 2>/dev/null)"})
@@ -174,6 +182,9 @@ function __agent_session_candidates
     if test "$words[$action_index]" = run
       # Fish skips option tokens itself, so the escape separator is not counted.
       __fish_complete_subcommand --fcs-skip=3
+      return
+    end
+    if contains -- "$words[$action_index]" create start; and test "$words[-1]" = --pr
       return
     end
     set scope "options:$words[$action_index]"
