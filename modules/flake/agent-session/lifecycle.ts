@@ -11,6 +11,7 @@ import {
 	localBranches,
 	upstreamRemote,
 	remoteDefaultBranch,
+	cachedRemoteDefaultBranch,
 } from "./git.ts";
 import {
 	loadConfig,
@@ -33,6 +34,7 @@ import {
 } from "./inspection.ts";
 import {
 	CliError,
+	confirm,
 	progressReporter,
 	runPhase,
 	writeCommandResult,
@@ -200,18 +202,21 @@ function previewCreate(
 	root: string,
 	slug: string,
 	report: ProgressReporter,
+	prNumber?: number,
 ): Record<string, unknown> {
 	return runPhase(report, "inspect-create", () => {
 		validateSlug(slug);
 		assertPrimaryCheckout(root);
 		const config = loadConfig(root);
-		ensureClean(root);
+		ensureClean(root, prNumber !== undefined);
 		const currentBranch = git(root, ["branch", "--show-current"]);
 		if (!currentBranch) {
 			throw new CliError("Primary checkout must be on a branch.");
 		}
 		const remote = upstreamRemote(root, currentBranch);
-		const defaultBranch = remoteDefaultBranch(root, remote);
+		const defaultBranch = prNumber === undefined
+			? remoteDefaultBranch(root, remote)
+			: cachedRemoteDefaultBranch(root, remote);
 		if (currentBranch !== defaultBranch) {
 			throw new CliError(`Primary checkout must be on ${defaultBranch}.`);
 		}
@@ -238,9 +243,9 @@ function previewCreate(
 		const canonicalRoot = existsSync(configuredWorktreeRoot)
 			? realpathSync(configuredWorktreeRoot)
 			: configuredWorktreeRoot;
-		const branch = `agent/${slug}`;
+		const branch = prNumber === undefined ? `agent/${slug}` : null;
 		const worktreePath = join(canonicalRoot, slug);
-		if (existsSync(metadataPath(root, slug))) {
+		if (sessionRecordExists(root, slug)) {
 			throw new CliError(`Session already exists: ${slug}`);
 		}
 		if (existsSync(worktreePath) || lstatExists(worktreePath)) {
@@ -248,7 +253,7 @@ function previewCreate(
 				`Refusing to modify unmanaged assets at ${worktreePath}.`,
 			);
 		}
-		if (
+		if (prNumber === undefined && (
 			run(
 				"git",
 				["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -259,7 +264,7 @@ function previewCreate(
 				["show-ref", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`],
 				root,
 			).status === 0
-		) {
+		)) {
 			throw new CliError(
 				`Refusing to modify unmanaged assets for branch ${branch}.`,
 			);
@@ -270,12 +275,33 @@ function previewCreate(
 			worktreePath,
 			remote,
 			defaultBranch,
-			base: `${remote}/${defaultBranch}`,
+			base: prNumber === undefined ? `${remote}/${defaultBranch}` : null,
+			...(prNumber === undefined ? {} : {
+				pr: { number: prNumber, resolved: false, mode: "review", repository: null,
+					url: null, baseBranch: null, headBranch: null, headCommit: null },
+				trustRequired: true,
+			}),
 			agentLaunch: false,
 			prepareCommand: config.prepare_command,
 			localLinks: config.local_links,
 		};
 	});
+}
+
+function assertNewReviewBranch(root: string, branch: string): void {
+	const occupied = git(root, ["worktree", "list", "--porcelain"]).split(/\n\n+/)
+		.find((record) => record.split("\n").includes(`branch refs/heads/${branch}`));
+	if (occupied) {
+		const path = occupied.split("\n").find((line) => line.startsWith("worktree "))?.slice(9);
+		throw new CliError(`PR branch ${branch} is already checked out at ${path}.`);
+	}
+	if (localBranches(root).has(branch)) {
+		throw new CliError(`Refusing to adopt preexisting local branch ${branch}; branch reuse is not supported yet.`);
+	}
+	const branchPattern = branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	if (run("git", ["config", "--get-regexp", `^branch\\.${branchPattern}\\.`], root).status === 0) {
+		throw new CliError(`Refusing to overwrite preexisting local branch configuration for ${branch}.`);
+	}
 }
 
 function createSession(
@@ -284,6 +310,7 @@ function createSession(
 	report: ProgressReporter = progressReporter("create", false),
 	json = false,
 	prNumber?: number,
+	trustPr = false,
 ): { config: AgentSessionConfig; metadata: SessionMetadata } {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -346,20 +373,22 @@ function createSession(
 		);
 	}
 	if (pr) {
-		const occupied = git(root, ["worktree", "list", "--porcelain"]).split(/\n\n+/)
-			.find((record) => record.split("\n").includes(`branch refs/heads/${branch}`));
-		if (occupied) {
-			const path = occupied.split("\n").find((line) => line.startsWith("worktree "))?.slice(9);
-			throw new CliError(`PR branch ${branch} is already checked out at ${path}.`);
-		}
-		if (preexistingBranches.includes(branch)) {
-			throw new CliError(`Refusing to adopt preexisting local branch ${branch}; branch reuse is not supported yet.`);
-		}
-		const branchPattern = branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-		if (run("git", ["config", "--get-regexp", `^branch\\.${branchPattern}\\.`], root).status === 0) {
-			throw new CliError(`Refusing to overwrite preexisting local branch configuration for ${branch}.`);
-		}
+		assertNewReviewBranch(root, branch);
 		runPhase(report, "pr-fetch", () => fetchPullRequestHead(root, remote, pr));
+		if (!trustPr) runPhase(report, "pr-trust", () => {
+			if (!process.stdin.isTTY) throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
+			const accepted = confirm(`Trust ${pr.url} at commit ${pr.headCommit}? Its environment and preparation can execute code. [y/N]`);
+			process.stderr.write("\n");
+			if (!accepted) throw new CliError("PR creation cancelled; no PR code was executed.");
+			// Confirmation can wait indefinitely; do not populate a slot or alter
+			// branch configuration that appeared while the user was deciding.
+			if (sessionRecordExists(root, slug) || lstatExists(worktreePath) ||
+				git(root, ["branch", "--show-current"]) !== currentBranch) {
+				throw new CliError("PR creation target changed during confirmation. Inspect it and retry.");
+			}
+			ensureClean(root);
+			assertNewReviewBranch(root, branch);
+		});
 	} else if (
 		run(
 			"git",
@@ -458,21 +487,23 @@ export function create(
 	prNumber?: number,
 	trustPr = false,
 ): number {
-	if (prNumber !== undefined && !trustPr) {
-		throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr; interactive confirmation is not supported yet.");
+	if (!dryRun && prNumber !== undefined && !trustPr && !process.stdin.isTTY) {
+		throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
 	}
 	const report = progressReporter("create", json);
 	if (dryRun) {
-		const plan = previewCreate(root, slug, report);
+		const plan = previewCreate(root, slug, report, prNumber);
 		writeCommandResult(
 			{ version: 1, command: "create", dryRun: true, plan },
 			json,
-			`Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`,
+			prNumber === undefined
+				? `Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`
+				: `Would prepare PR #${prNumber} at ${String(plan.worktreePath)}. PR identity, branch and head are unresolved; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
 		);
 		return 0;
 	}
 	const prepared = withOperationLock(root, "create", () =>
-		createSession(root, slug, report, json, prNumber),
+		createSession(root, slug, report, json, prNumber, trustPr),
 	);
 	reportCreated(prepared.metadata, json);
 	return 0;

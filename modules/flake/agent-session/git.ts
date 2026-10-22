@@ -78,8 +78,17 @@ export function remoteDefaultBranch(root: string, remote: string): string {
 	return match[1];
 }
 
-export function ensureClean(root: string): void {
-	const status = git(root, ["status", "--porcelain", "--untracked-files=all"]);
+export function cachedRemoteDefaultBranch(root: string, remote: string): string {
+	const result = run("git", ["symbolic-ref", "--quiet", `refs/remotes/${remote}/HEAD`], root);
+	const prefix = `refs/remotes/${remote}/`;
+	if (result.status !== 0 || !result.stdout.startsWith(prefix)) {
+		throw new CliError(`No cached default branch for ${remote}. Refresh its remote HEAD explicitly before previewing; no network query was made.`);
+	}
+	return result.stdout.slice(prefix.length);
+}
+
+export function ensureClean(root: string, readOnly = false): void {
+	const status = git(root, [...(readOnly ? ["--no-optional-locks"] : []), "status", "--porcelain", "--untracked-files=all"]);
 	if (status) {
 		throw new CliError(`Primary checkout must be clean:\n${status}`);
 	}

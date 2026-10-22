@@ -28,6 +28,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -290,6 +291,143 @@ describe("PR review session creation", () => {
 			expect(ghCalls[0].slice(0, 5).join(" ")).toBe("pr view 123 --repo https://github.com/fixture/repo");
 			expect(git(fixture.remote, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(fixture.head);
 			for (const line of result.stderr.trim().split("\n")) expect(JSON.parse(line).type).toBe("progress");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const [answer, slotAppears] of [["yes\n", false], ["no\n", false], ["\n", false], ["EOF", false], ["yes\n", true]] as const) {
+		it(`requires commit-specific terminal consent before PR execution: ${JSON.stringify(answer)}, slotAppears=${slotAppears} (AC-11)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				const driver = `
+import errno, json, os, pty, select, subprocess, sys, time
+master, slave = pty.openpty()
+child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stderr=slave, stdout=subprocess.PIPE)
+os.close(slave)
+output = b''
+answered = False
+safe_before_consent = False
+lock_held = False
+try:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+            if b'[y/N]' in output and not answered:
+                with open(sys.argv[3]) as owner:
+                    lock_held = json.load(owner).get('pid') == child.pid
+                safe_before_consent = not any(os.path.exists(path) for path in sys.argv[4:8])
+                if sys.argv[8] == 'true':
+                    os.mkdir(sys.argv[6])
+                os.write(master, b'\\x04' if sys.argv[2] == 'EOF' else sys.argv[2].encode())
+                answered = True
+        elif child.poll() is not None:
+            break
+    else:
+        raise TimeoutError('PR trust confirmation did not complete')
+    stdout, _ = child.communicate(timeout=5)
+    print(json.dumps({'status': child.returncode, 'output': output.decode(errors='replace'),
+                      'stdout': stdout.decode(), 'answered': answered,
+                      'safeBeforeConsent': safe_before_consent, 'lockHeld': lock_held}))
+finally:
+    if child.poll() is None:
+        child.kill()
+        child.wait()
+    os.close(master)
+`;
+				const worktree = join(fixture.worktrees, "review-auth");
+				const metadata = sessionMetadataPath(fixture.checkout, "review-auth");
+				const result = spawnSync("python3", ["-c", driver,
+					JSON.stringify(["node", cliScript, "review-auth", "create", "--pr", "123", "--json"]), answer,
+					join(fixture.checkout, ".git", "agent-session", "operation.lock", "owner.json"),
+					fixture.prepareLog, fixture.agentLog, worktree, metadata, String(slotAppears),
+				], { cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, ...fixture.environment, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) } });
+				expect(result.status).toBe(0);
+				const terminal = JSON.parse(result.stdout);
+				expect(terminal.answered).toBe(true);
+				expect(terminal.safeBeforeConsent).toBe(true);
+				expect(terminal.lockHeld).toBe(true);
+				expect(terminal.output).toContain(fixture.response.url);
+				expect(terminal.output).toContain(fixture.head);
+				const accepted = answer === "yes\n" && !slotAppears;
+				expect(terminal.status).toBe(accepted ? 0 : 1);
+				expect(existsSync(fixture.prepareLog)).toBe(accepted);
+				expect(existsSync(worktree)).toBe(accepted || slotAppears);
+				expect(existsSync(metadata)).toBe(accepted);
+				expect(existsSync(fixture.agentLog)).toBe(false);
+				if (accepted) {
+					expect(JSON.parse(terminal.stdout).session.pr.trustedHeadCommit).toBe(fixture.head);
+					expect(git(worktree, "rev-parse", "HEAD")).toBe(fixture.head);
+				} else {
+					expect(terminal.stdout).toBe("");
+					expect(terminal.output).toContain(slotAppears ? "changed" : "cancelled");
+					expect(git(fixture.checkout, "branch", "--list", fixture.branch)).toBe("");
+				}
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("previews an unresolved PR offline without trust, GitHub, remote queries, or mutations (AC-15)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8", env: process.env }).stdout.trim();
+			const gitLog = join(fixture.root, "network-attempts");
+			const bin = join(fixture.root, "bin");
+			writeFileSync(join(bin, "git"), `#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in fetch|ls-remote|push) printf '%s\\n' "$*" >> ${tomlString(gitLog)}; exit 91 ;; esac
+done
+exec ${tomlString(realGit)} "$@"
+`);
+			chmodSync(join(bin, "git"), 0o755);
+			const before = {
+				index: readFileSync(join(fixture.checkout, ".git", "index")).toString("hex"),
+				config: readFileSync(join(fixture.checkout, ".git", "config"), "utf8"),
+			};
+			const newer = new Date(Date.now() + 5000);
+			utimesSync(join(fixture.checkout, "README.md"), newer, newer);
+			// This unrelated branch must not collide with an unresolved PR branch.
+			git(fixture.checkout, "branch", "agent/review-auth");
+			const refs = git(fixture.checkout, "show-ref");
+			for (const flags of [["--json"], ["--json", "--trust-pr"], []]) {
+				const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "987", "--dry-run", ...flags], { ...fixture.environment, FAKE_GH_FAILURE: "1" });
+				expect(result.status).toBe(0);
+				if (flags.includes("--json")) {
+					const preview = JSON.parse(result.stdout);
+					expect(preview.dryRun).toBe(true);
+					expect(preview.plan.pr.number).toBe(987);
+					expect(preview.plan.pr.resolved).toBe(false);
+					expect(preview.plan.pr.url).toBe(null);
+					expect(preview.plan.pr.headCommit).toBe(null);
+					expect(preview.plan.branch).toBe(null);
+					expect(preview.plan.base).toBe(null);
+					expect(preview.plan.agentLaunch).toBe(false);
+				} else {
+					expect(result.stdout).toContain("987");
+					expect(result.stdout).toContain("unresolved");
+				}
+			}
+			expect(existsSync(fixture.ghLog)).toBe(false);
+			expect(existsSync(gitLog)).toBe(false);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			expect(existsSync(fixture.worktrees)).toBe(false);
+			expect(existsSync(join(fixture.checkout, ".git", "agent-session"))).toBe(false);
+			expect(git(fixture.checkout, "show-ref")).toBe(refs);
+			expect(readFileSync(join(fixture.checkout, ".git", "index")).toString("hex")).toBe(before.index);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before.config);
+			git(fixture.checkout, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+			const uncached = runCli(fixture.checkout, ["review-auth", "create", "--pr", "987", "--dry-run", "--json"], fixture.environment);
+			expect(uncached.status).toBe(1);
+			expect(uncached.stderr).toContain("No cached default branch");
+			expect(existsSync(gitLog)).toBe(false);
+			expect(existsSync(fixture.ghLog)).toBe(false);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 

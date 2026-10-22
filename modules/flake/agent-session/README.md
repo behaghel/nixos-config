@@ -238,25 +238,41 @@ before exiting, including JSON responses larger than a pipe buffer.
 ## Reviewing a GitHub PR
 
 ```sh
-as review-auth create --pr 123 --trust-pr
-as review-auth create --pr 123 --trust-pr --json
+as review-auth create --pr 123                  # ask before executing PR code
+as review-auth create --pr 123 --trust-pr --json # explicit non-interactive trust
+as review-auth create --pr 123 --dry-run --json  # offline, unresolved preview
 ```
 
 This checks out the PR's source head, not its synthetic merge commit, and
 prepares a managed worktree without launching an agent or pushing. The packaged
 launcher includes `gh`; authenticate it with `gh auth login` before use.
 
+Inspect the PR before granting trust: its environment configuration can execute
+code. On a terminal, creation displays the PR URL and exact fetched head commit
+and asks for confirmation before creating the checkout or running preparation.
+Only `y` or `yes` (case-insensitive) confirms; no, empty input, EOF, or prompt
+failure cancels. The operation lock remains held while waiting; creation
+rechecks the local target after approval rather than populating a slot that
+appeared during confirmation. Prompts go to stderr, including with `--json`;
+stdout remains reserved for the creation receipt.
+
 `--trust-pr` explicitly authorizes preparation and later execution in this PR
-checkout. Inspect the PR before granting trust: its environment configuration
-can execute code. Trust is recorded against the fetched head commit. Without
-the flag, creation refuses execution; interactive confirmation is not available.
+checkout without prompting. Non-terminal creation requires this flag. Trust is
+recorded against the fetched head commit, not against future remote updates.
+
+PR dry runs require no trust, GitHub lookup, remote query, checkout, preparation,
+or session-record write. They use cached remote HEAD to check the primary
+branch; missing cached information fails without an online fallback. The plan
+contains `pr.number`, `pr.resolved: false`, `trustRequired: true`, and null values
+for unverified PR URL/repository/base/head and the proposed branch/base. This
+previews the request, not PR existence or checkout eligibility.
 
 Supported selection is a PR number in this checkout's GitHub upstream repository.
 The PR must be open, non-draft, target the default branch, and have its source
 branch in the same repository. Its local branch must not already exist or have
 saved configuration. If checked out elsewhere, the error identifies that path.
-URL selection, forks, separate-work mode, PR previews, `start --pr`, and reuse of
-an existing session are not available. Unsupported requests fail rather than
+URL selection, forks, separate-work mode, `start --pr`, and reuse of an existing
+session are not available. Unsupported requests fail rather than
 falling back to default-branch creation.
 
 The new local branch tracks the PR's source branch for `git push`. Conflicting

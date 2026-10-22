@@ -139,7 +139,6 @@ export function parseCreateArguments(args: string[]): {
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'create'.");
 	if (trustPr && pr === undefined) throw argumentError("--trust-pr requires --pr.");
-	if (pr !== undefined && dryRun) throw argumentError("PR creation previews are not supported yet.");
 	return { slug, dryRun, json, pr, trustPr };
 }
 
