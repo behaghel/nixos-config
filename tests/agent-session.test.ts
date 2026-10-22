@@ -432,6 +432,29 @@ exec ${tomlString(realGit)} "$@"
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 
+	for (const flags of [[], ["-c"]]) {
+		it(`accepts a draft PR without changing its readiness: ${flags.length ? "independent" : "review"} (AC-12)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				const draft = JSON.stringify({ ...fixture.response, isDraft: true });
+				writeFileSync(fixture.responsePath, draft);
+				const args = ["draft-check", "create", "--pr", "123", ...flags, "--trust-pr"];
+				const created = runCli(fixture.checkout, [...args, "--json"], fixture.environment);
+				expect(created.status).toBe(0);
+				const metadata = JSON.parse(created.stdout).session;
+				expect(metadata.pr.isDraft).toBe(true);
+				expect(metadata.pr.state).toBe("OPEN");
+				expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+				expect(runCli(fixture.checkout, args, fixture.environment).stdout).toContain("DRAFT");
+				expect(readFileSync(fixture.responsePath, "utf8")).toBe(draft);
+				const calls = readFileSync(fixture.ghLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+				expect(calls.length).toBe(1);
+				expect(calls[0].slice(0, 2).join(" ")).toBe("pr view");
+				expect(existsSync(fixture.agentLog)).toBe(false);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
 	it("cleans up its own published local branch without deleting the remote PR branch", () => {
 		const fixture = createPullRequestFixture();
 		try {

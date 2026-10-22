@@ -279,7 +279,9 @@ names are compared case-insensitively. A URL for another target repository is
 refused without GitHub lookup or cloning. Numbers never select another project.
 PRs may come from forks; checkout does not require push permission.
 
-New PR sessions require an open, non-draft PR targeting the default branch.
+New PR sessions require an open PR targeting the default branch; drafts are
+supported without changing PR readiness. Creation output identifies drafts as
+`DRAFT`, and JSON retains both `state: "OPEN"` and `isDraft: true`.
 Default review mode can borrow an unused local source branch only if its commit
 exactly matches the resolved PR head and its existing upstream and effective push
 destination already target the PR source branch/repository. Missing or conflicting

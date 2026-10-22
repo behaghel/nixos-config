@@ -78,7 +78,7 @@ export function resolvePullRequest(root: string, remote: string, selection: Pull
 		run("git", ["check-ref-format", "--branch", pr.baseBranch], root).status !== 0) {
 		throw new CliError("gh returned invalid or mismatched PR metadata.");
 	}
-	if (pr.state !== "OPEN" || pr.isDraft) throw new CliError("Only open, non-draft PR review is supported currently.");
+	if (pr.state !== "OPEN") throw new CliError("Only open PR review is supported currently; draft PRs are allowed.");
 	if (pr.mode === "review" && sourceRepository === repository) assertReviewSource(root, remote, pr);
 	return pr;
 }

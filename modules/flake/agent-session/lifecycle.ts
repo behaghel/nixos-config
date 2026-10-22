@@ -527,7 +527,7 @@ function reportCreated(metadata: SessionMetadata, json = false, reused = false):
 	writeCommandResult(
 		{ version: 1, command: "create", dryRun: false, session: metadata },
 		json,
-		`Session ${reused ? "reused" : "created"} without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${metadata.pr.url} (${metadata.pr.state})\n` : ""}`,
+		`Session ${reused ? "reused" : "created"} without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${metadata.pr.url} (${metadata.pr.isDraft ? "DRAFT" : metadata.pr.state})\n` : ""}`,
 	);
 }
 
