@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolvePullRequest, fetchPullRequestHead, assertPullRequestTarget, prepareReviewSource, borrowedReviewSource, pullRequestSummary } from "./github.ts";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
 import { unrecordedRetirementHint } from "./arguments.ts";
@@ -10,6 +11,7 @@ import {
 	localBranches,
 	upstreamRemote,
 	remoteDefaultBranch,
+	cachedRemoteDefaultBranch,
 } from "./git.ts";
 import {
 	loadConfig,
@@ -29,15 +31,17 @@ import {
 	refreshMetadataRemote,
 	inspectSession,
 	statusCannotOperate,
+	sessionBaseBranch,
 } from "./inspection.ts";
 import {
 	CliError,
+	confirm,
 	progressReporter,
 	runPhase,
 	writeCommandResult,
 	run,
 } from "./runtime.ts";
-import type { AgentSessionConfig, SessionMetadata, ProgressReporter } from "./types.ts";
+import type { AgentSessionConfig, SessionMetadata, ProgressReporter, PullRequestSelection, PullRequestMetadata } from "./types.ts";
 
 function linkLocalFiles(root: string, worktree: string, paths: string[]): void {
 	for (const relativePath of paths) {
@@ -126,7 +130,7 @@ function prepareLaunch(
 	}
 	if (!status.fresh) {
 		process.stderr.write(
-			`Warning: session ${slug} has not integrated the latest ${metadata.remote}/${defaultBranch}.\n`,
+			`Warning: session ${slug} has not integrated the latest ${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}.\n`,
 		);
 	}
 	process.stderr.write(`Launching ${metadata.branch}\n`);
@@ -199,18 +203,22 @@ function previewCreate(
 	root: string,
 	slug: string,
 	report: ProgressReporter,
+	selection?: PullRequestSelection,
 ): Record<string, unknown> {
 	return runPhase(report, "inspect-create", () => {
 		validateSlug(slug);
 		assertPrimaryCheckout(root);
 		const config = loadConfig(root);
-		ensureClean(root);
+		ensureClean(root, selection !== undefined);
 		const currentBranch = git(root, ["branch", "--show-current"]);
 		if (!currentBranch) {
 			throw new CliError("Primary checkout must be on a branch.");
 		}
 		const remote = upstreamRemote(root, currentBranch);
-		const defaultBranch = remoteDefaultBranch(root, remote);
+		if (selection?.repository) assertPullRequestTarget(root, remote, selection);
+		const defaultBranch = selection === undefined
+			? remoteDefaultBranch(root, remote)
+			: cachedRemoteDefaultBranch(root, remote);
 		if (currentBranch !== defaultBranch) {
 			throw new CliError(`Primary checkout must be on ${defaultBranch}.`);
 		}
@@ -237,9 +245,9 @@ function previewCreate(
 		const canonicalRoot = existsSync(configuredWorktreeRoot)
 			? realpathSync(configuredWorktreeRoot)
 			: configuredWorktreeRoot;
-		const branch = `agent/${slug}`;
+		const branch = selection === undefined || selection.mode === "independent" ? `agent/${slug}` : null;
 		const worktreePath = join(canonicalRoot, slug);
-		if (existsSync(metadataPath(root, slug))) {
+		if (sessionRecordExists(root, slug)) {
 			throw new CliError(`Session already exists: ${slug}`);
 		}
 		if (existsSync(worktreePath) || lstatExists(worktreePath)) {
@@ -247,7 +255,7 @@ function previewCreate(
 				`Refusing to modify unmanaged assets at ${worktreePath}.`,
 			);
 		}
-		if (
+		if (branch !== null && (
 			run(
 				"git",
 				["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -258,7 +266,7 @@ function previewCreate(
 				["show-ref", "--verify", "--quiet", `refs/remotes/${remote}/${branch}`],
 				root,
 			).status === 0
-		) {
+		)) {
 			throw new CliError(
 				`Refusing to modify unmanaged assets for branch ${branch}.`,
 			);
@@ -269,7 +277,12 @@ function previewCreate(
 			worktreePath,
 			remote,
 			defaultBranch,
-			base: `${remote}/${defaultBranch}`,
+			base: selection === undefined ? `${remote}/${defaultBranch}` : null,
+			...(selection === undefined ? {} : {
+				pr: { number: selection.number, resolved: false, mode: selection.mode ?? "review", repository: null,
+					url: null, baseBranch: null, headBranch: null, headCommit: null },
+				trustRequired: true,
+			}),
 			agentLaunch: false,
 			prepareCommand: config.prepare_command,
 			localLinks: config.local_links,
@@ -277,11 +290,37 @@ function previewCreate(
 	});
 }
 
+function inspectCreationBranch(root: string, branch: string, independentRemote?: string, pr?: PullRequestMetadata): boolean {
+	const occupied = git(root, ["worktree", "list", "--porcelain"]).split(/\n\n+/)
+		.find((record) => record.split("\n").includes(`branch refs/heads/${branch}`));
+	if (occupied) {
+		const path = occupied.split("\n").find((line) => line.startsWith("worktree "))?.slice(9);
+		throw new CliError(`PR branch ${branch} is already checked out at ${path}.`);
+	}
+	if (localBranches(root).has(branch)) {
+		if (pr?.mode === "review") {
+			borrowedReviewSource(root, branch, pr);
+			return true;
+		}
+		throw new CliError(`Refusing to adopt preexisting local branch ${branch}.`);
+	}
+	if (independentRemote && run("git", ["show-ref", "--verify", "--quiet", `refs/remotes/${independentRemote}/${branch}`], root).status === 0) {
+		throw new CliError(`Refusing to modify unmanaged assets for branch ${branch}.`);
+	}
+	const branchPattern = branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+	if (run("git", ["config", "--get-regexp", `^branch\\.${branchPattern}\\.`], root).status === 0) {
+		throw new CliError(`Refusing to overwrite preexisting local branch configuration for ${branch}.`);
+	}
+	return false;
+}
+
 function createSession(
 	root: string,
 	slug: string,
 	report: ProgressReporter = progressReporter("create", false),
 	json = false,
+	selection?: PullRequestSelection,
+	trustPr = false,
 ): { config: AgentSessionConfig; metadata: SessionMetadata } {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -293,6 +332,7 @@ function createSession(
 	if (!currentBranch)
 		throw new CliError("Primary checkout must be on a branch.");
 	const remote = upstreamRemote(root, currentBranch);
+	if (selection?.repository) assertPullRequestTarget(root, remote, selection);
 	const defaultBranch = runPhase(report, "remote-sync", () => {
 		const fetch = run("git", ["fetch", "--prune", remote], root, json ? "pipe" : "inherit");
 		if (fetch.status !== 0) {
@@ -305,7 +345,10 @@ function createSession(
 		throw new CliError(`Primary checkout must be on ${defaultBranch}.`);
 	}
 
-	const branch = `agent/${slug}`;
+	const pr = selection === undefined ? undefined : runPhase(report, "pr-resolve", () =>
+		resolvePullRequest(root, remote, selection),
+	);
+	const branch = pr?.mode === "review" ? pr.headBranch : `agent/${slug}`;
 	const configuredWorktreeRoot = resolveWorktreeRoot(
 		root,
 		config.worktree_root,
@@ -329,15 +372,35 @@ function createSession(
 	mkdirSync(configuredWorktreeRoot, { recursive: true });
 	const worktreeRoot = realpathSync(configuredWorktreeRoot);
 	const worktreePath = join(worktreeRoot, slug);
-	const statePath = metadataPath(root, slug);
-	if (existsSync(statePath))
+	if (sessionRecordExists(root, slug))
 		throw new CliError(`Session already exists: ${slug}`);
 	if (existsSync(worktreePath) || lstatExists(worktreePath)) {
 		throw new CliError(
 			`Refusing to modify unmanaged assets at ${worktreePath}.`,
 		);
 	}
-	if (
+	let borrowed = false;
+	if (pr) {
+		borrowed = inspectCreationBranch(root, branch, pr.mode === "independent" ? remote : undefined, pr);
+		if (borrowed && !preexistingBranches.includes(branch)) throw new CliError("PR branch appeared during creation; inspect it and retry.");
+		runPhase(report, "pr-fetch", () => fetchPullRequestHead(root, remote, pr));
+		if (!trustPr) runPhase(report, "pr-trust", () => {
+			if (!process.stdin.isTTY) throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
+			const accepted = confirm(`Trust ${pullRequestSummary(pr)} at commit ${pr.headCommit}? Its environment and preparation can execute code. [y/N]`);
+			process.stderr.write("\n");
+			if (!accepted) throw new CliError("PR creation cancelled; no PR code was executed.");
+			// Confirmation can wait indefinitely; do not populate a slot or alter
+			// branch configuration that appeared while the user was deciding.
+			if (sessionRecordExists(root, slug) || lstatExists(worktreePath) ||
+				git(root, ["branch", "--show-current"]) !== currentBranch) {
+				throw new CliError("PR creation target changed during confirmation. Inspect it and retry.");
+			}
+			ensureClean(root);
+			if (inspectCreationBranch(root, branch, pr.mode === "independent" ? remote : undefined, pr) !== borrowed) {
+				throw new CliError("PR branch ownership changed during confirmation; inspect it and retry.");
+			}
+		});
+	} else if (
 		run(
 			"git",
 			["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -356,18 +419,25 @@ function createSession(
 
 	let created = false;
 	let recorded = false;
+	let createdSourceRemote: string | undefined;
 	try {
+		if (pr?.mode === "review") runPhase(report, "pr-source", () => {
+			const source = prepareReviewSource(root, remote, slug, pr, borrowed ? borrowedReviewSource(root, branch, pr) : undefined);
+			if (borrowed) borrowedReviewSource(root, branch, pr);
+			if (source.created) createdSourceRemote = source.remote;
+			pr.sourceRemote = source.remote;
+			if (source.missing) pr.sourceBranchMissing = true;
+		});
 		runPhase(report, "worktree-create", () => {
 			const added = run(
 				"git",
 				[
 					"worktree",
 					"add",
-					"--no-track",
-					"-b",
-					branch,
-					worktreePath,
-					`${remote}/${defaultBranch}`,
+					...(borrowed ? [worktreePath, branch] : [
+						"--no-track", "-b", branch, worktreePath,
+						pr?.headCommit ?? `${remote}/${defaultBranch}`,
+					]),
 				],
 				root,
 				json ? "pipe" : "inherit",
@@ -378,6 +448,19 @@ function createSession(
 			}
 		});
 		created = true;
+		if (pr?.mode === "review" && !borrowed) runPhase(report, "pr-track", () => {
+			if (pr.sourceBranchMissing) {
+				git(root, ["config", `branch.${branch}.remote`, pr.sourceRemote!]);
+				git(root, ["config", `branch.${branch}.merge`, `refs/heads/${pr.headBranch}`]);
+			} else {
+				git(root, ["branch", `--set-upstream-to=${pr.sourceRemote}/${branch}`, branch]);
+			}
+			if (git(root, ["config", "--get", `branch.${branch}.merge`]) !== `refs/heads/${pr.headBranch}` ||
+				git(root, ["config", "--get", `branch.${branch}.remote`]) !== pr.sourceRemote) {
+				throw new CliError("Conflicting PR source tracking; refusing to target another source branch.");
+			}
+			git(root, ["config", `branch.${branch}.pushRemote`, pr.sourceRemote!]);
+		});
 		runPhase(report, "worktree-prepare", () => {
 			linkLocalFiles(root, worktreePath, config.local_links);
 			if (executeConfigured(config.prepare_command, worktreePath, process.env, json ? "pipe" : "inherit") !== 0) {
@@ -386,7 +469,7 @@ function createSession(
 		});
 
 		const metadata: SessionMetadata = {
-			version: 1,
+			version: borrowed ? 2 : 1,
 			slug,
 			branch,
 			worktreePath,
@@ -395,6 +478,8 @@ function createSession(
 			createdAt: new Date().toISOString(),
 			conversation: null,
 			preexistingBranches,
+			...(borrowed ? { initialBranchOwned: false } : {}),
+			...(pr ? { pr } : {}),
 		};
 		runPhase(report, "metadata-record", () => writeMetadata(root, metadata));
 		recorded = true;
@@ -406,19 +491,46 @@ function createSession(
 				root,
 				json ? "pipe" : "inherit",
 			);
-			run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
+			if (!borrowed) run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
 		}
+		if (!recorded && createdSourceRemote) git(root, ["remote", "remove", createdSourceRemote]);
 	}
 
 	if (!json) process.stderr.write(`Agent worktree ready: ${branch}\n`);
 	return { config, metadata: readMetadata(root, slug) };
 }
 
-function reportCreated(metadata: SessionMetadata, json = false): void {
+function prepareSession(
+	root: string, slug: string, report: ProgressReporter, json: boolean,
+	selection?: PullRequestSelection, trustPr = false,
+): { config: AgentSessionConfig; metadata: SessionMetadata; reused: boolean } {
+	if (selection && sessionRecordExists(root, slug)) {
+		return runPhase(report, "session-reuse", () => {
+			const config = loadConfig(root);
+			const metadata = readMetadata(root, slug);
+			const primaryBranch = git(root, ["branch", "--show-current"]);
+			const repository = assertPullRequestTarget(root, upstreamRemote(root, primaryBranch), selection);
+			if (!metadata.pr || metadata.pr.repository !== repository || metadata.pr.number !== selection.number ||
+				metadata.pr.mode !== (selection.mode ?? "review")) {
+				throw new CliError(`Session ${slug} is bound to a different PR or branch mode; refusing to convert it.`);
+			}
+			sessionDirectory(root, slug);
+			const status = inspectSession(metadata);
+			if (statusCannotOperate(status)) throw new CliError(status.problem ?? `Session ${slug} is unusable.`);
+			return { config, metadata, reused: true };
+		});
+	}
+	if (selection && !trustPr && !process.stdin.isTTY) {
+		throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
+	}
+	return { ...createSession(root, slug, report, json, selection, trustPr), reused: false };
+}
+
+function reportCreated(metadata: SessionMetadata, json = false, reused = false): void {
 	writeCommandResult(
 		{ version: 1, command: "create", dryRun: false, session: metadata },
 		json,
-		`Session created without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n`,
+		`Session ${reused ? "reused" : "created"} without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${pullRequestSummary(metadata.pr)}; base: ${metadata.pr.baseBranch}\n` : ""}`,
 	);
 }
 
@@ -427,21 +539,25 @@ export function create(
 	slug: string,
 	dryRun: boolean,
 	json: boolean,
+	selection?: PullRequestSelection,
+	trustPr = false,
 ): number {
 	const report = progressReporter("create", json);
 	if (dryRun) {
-		const plan = previewCreate(root, slug, report);
+		const plan = previewCreate(root, slug, report, selection);
 		writeCommandResult(
 			{ version: 1, command: "create", dryRun: true, plan },
 			json,
-			`Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`,
+			selection === undefined
+				? `Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`
+				: `Would prepare PR #${selection.number} at ${String(plan.worktreePath)}. ${selection.mode === "independent" ? `Independent branch ${String(plan.branch)} requested; PR identity and head are unresolved` : "PR identity, branch and head are unresolved"}; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
 		);
 		return 0;
 	}
 	const prepared = withOperationLock(root, "create", () =>
-		createSession(root, slug, report, json),
+		prepareSession(root, slug, report, json, selection, trustPr),
 	);
-	reportCreated(prepared.metadata, json);
+	reportCreated(prepared.metadata, json, prepared.reused);
 	return 0;
 }
 
@@ -449,13 +565,15 @@ export function start(
 	root: string,
 	slug: string,
 	launchConfiguredAgent: boolean,
+	selection?: PullRequestSelection,
+	trustPr = false,
 ): number {
 	const prepared = withOperationLock(root, "start", () =>
-		createSession(root, slug, progressReporter("start", false)),
+		prepareSession(root, slug, progressReporter("start", false), false, selection, trustPr),
 	);
 	if (launchConfiguredAgent) {
 		return launchAgent(prepared.config, prepared.metadata);
 	}
-	reportCreated(prepared.metadata);
+	reportCreated(prepared.metadata, false, prepared.reused);
 	return 0;
 }

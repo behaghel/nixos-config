@@ -6,8 +6,32 @@ export interface AgentSessionConfig {
 	local_links: string[];
 }
 
+export type PullRequestMode = "review" | "independent";
+
+export interface PullRequestSelection {
+	number: number;
+	repository?: string;
+	mode?: PullRequestMode;
+}
+
+export interface PullRequestMetadata {
+	number: number;
+	url: string;
+	repository: string;
+	baseBranch: string;
+	headBranch: string;
+	headCommit: string;
+	state: "OPEN" | "CLOSED" | "MERGED";
+	isDraft: boolean;
+	mode: PullRequestMode;
+	trustedHeadCommit: string;
+	sourceRepository?: string | null;
+	sourceRemote?: string;
+	sourceBranchMissing?: boolean;
+}
+
 export interface SessionMetadata {
-	version: 1;
+	version: 1 | 2;
 	slug: string;
 	branch: string;
 	worktreePath: string;
@@ -16,6 +40,8 @@ export interface SessionMetadata {
 	createdAt: string;
 	conversation: null;
 	preexistingBranches?: string[];
+	initialBranchOwned?: boolean;
+	pr?: PullRequestMetadata;
 }
 
 export interface OperationLock {

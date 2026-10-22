@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
+import { assertReviewSource, pullRequestSummary } from "./github.ts";
 import { sessionCommand } from "./arguments.ts";
 import {
 	countRevisionRange,
@@ -77,9 +78,10 @@ export function statusCannotOperate(status: SessionStatus): boolean {
 	);
 }
 
-function sessionOwnedBranches(metadata: SessionMetadata): string[] {
+function sessionBranchSets(metadata: SessionMetadata): { owned: string[]; allowed: string[] } {
 	const local = localBranches(metadata.worktreePath);
-	const owned = new Set([metadata.branch]);
+	const owned = new Set<string>(metadata.initialBranchOwned === false ? [] : [metadata.branch]);
+	const allowed = new Set([metadata.branch]);
 	const preexisting = new Set(metadata.preexistingBranches ?? []);
 	const legacyCreationBoundary = Math.floor(
 		new Date(metadata.createdAt).getTime() / 1000,
@@ -89,8 +91,9 @@ function sessionOwnedBranches(metadata: SessionMetadata): string[] {
 		const rename = entry.summary.match(
 			/^Branch: renamed refs\/heads\/(.+) to refs\/heads\/(.+)$/,
 		);
-		if (rename?.[1] && rename[2] && owned.has(rename[1])) {
-			owned.add(rename[2]);
+		if (rename?.[1] && rename[2] && allowed.has(rename[1])) {
+			allowed.add(rename[2]);
+			if (owned.has(rename[1])) owned.add(rename[2]);
 			continue;
 		}
 		const checkout = entry.summary.match(/^checkout: moving from .+ to (.+)$/);
@@ -108,9 +111,17 @@ function sessionOwnedBranches(metadata: SessionMetadata): string[] {
 			creation.commit === entry.commit
 		) {
 			owned.add(destination);
+			allowed.add(destination);
 		}
 	}
-	return [...owned].filter((branch) => local.has(branch)).sort();
+	return {
+		owned: [...owned].filter((branch) => local.has(branch)).sort(),
+		allowed: [...allowed].filter((branch) => local.has(branch)),
+	};
+}
+
+export function sessionBaseBranch(metadata: SessionMetadata, defaultBranch = metadata.defaultBranch): string {
+	return metadata.pr?.baseBranch ?? defaultBranch;
 }
 
 export function inspectSession(
@@ -143,12 +154,12 @@ export function inspectSession(
 		["branch", "--show-current"],
 		metadata.worktreePath,
 	);
-	const ownedBranches = sessionOwnedBranches(metadata);
+	const { owned: ownedBranches, allowed: allowedBranches } = sessionBranchSets(metadata);
 	if (
 		actualRoot.status !== 0 ||
 		realpathSync(actualRoot.stdout) !== metadata.worktreePath ||
 		actualBranch.status !== 0 ||
-		!ownedBranches.includes(actualBranch.stdout)
+		!allowedBranches.includes(actualBranch.stdout)
 	) {
 		const currentBranch = actualBranch.stdout || null;
 		return {
@@ -185,7 +196,7 @@ export function inspectSession(
 			[
 				"merge-base",
 				"--is-ancestor",
-				`${metadata.remote}/${defaultBranch}`,
+				`${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}`,
 				"HEAD",
 			],
 			metadata.worktreePath,
@@ -239,13 +250,18 @@ export function inspectSession(
 	};
 }
 
+export function sessionRemotes(metadata: SessionMetadata): string[] {
+	return [...new Set([metadata.remote, ...(metadata.pr?.mode === "review" && metadata.pr.sourceRemote ? [metadata.pr.sourceRemote] : [])])];
+}
+
 export function refreshMetadataRemote(
 	root: string,
 	metadata: SessionMetadata,
 ): string {
-	const fetch = run("git", ["fetch", "--prune", metadata.remote], root);
-	if (fetch.status !== 0) {
-		throw new CliError(`Failed to fetch remote ${metadata.remote}.`);
+	if (metadata.pr?.mode === "review") assertReviewSource(root, metadata.pr.sourceRemote ?? metadata.remote, metadata.pr);
+	for (const remote of sessionRemotes(metadata)) {
+		const fetch = run("git", ["fetch", "--prune", remote], root);
+		if (fetch.status !== 0) throw new CliError(`Failed to fetch remote ${remote}.`);
 	}
 	return remoteDefaultBranch(root, metadata.remote);
 }
@@ -286,9 +302,10 @@ export function showStatus(
 		}
 		let defaultBranch = metadata.defaultBranch;
 		if (refresh) {
-			const known = refreshedDefaults.get(metadata.remote);
+			const key = JSON.stringify(sessionRemotes(metadata));
+			const known = refreshedDefaults.get(key);
 			defaultBranch = known ?? refreshMetadataRemote(root, metadata);
-			refreshedDefaults.set(metadata.remote, defaultBranch);
+			refreshedDefaults.set(key, defaultBranch);
 		}
 		return inspectSession(metadata, defaultBranch);
 	});
@@ -323,7 +340,7 @@ export function showStatus(
 				? `\n  owned branches: ${session.ownedBranches.join(", ")}`
 				: "";
 		process.stdout.write(
-			`${session.slug}  ${session.currentBranch ?? session.branch}  ${hygiene}\n  ${session.worktreePath}${branches}\n`,
+			`${session.slug}  ${session.currentBranch ?? session.branch}  ${hygiene}\n  ${session.worktreePath}${branches}${session.pr ? `\n  PR: ${pullRequestSummary(session.pr)}; base: ${session.pr.baseBranch}` : ""}\n`,
 		);
 		if (session.problem) process.stderr.write(`${session.problem}\n`);
 	}

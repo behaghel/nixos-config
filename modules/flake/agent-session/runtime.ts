@@ -84,7 +84,7 @@ export function run(
 	cwd: string,
 	stdio: "pipe" | "inherit" = "pipe",
 	environment: NodeJS.ProcessEnv = process.env,
-): { status: number; stdout: string; stderr: string } {
+): { status: number; stdout: string; stderr: string; errorCode?: string } {
 	const result = spawnSync(command, args, {
 		cwd,
 		encoding: "utf8",
@@ -93,6 +93,7 @@ export function run(
 	});
 	return {
 		status: result.status ?? 1,
+		errorCode: (result.error as NodeJS.ErrnoException | undefined)?.code,
 		stdout: typeof result.stdout === "string" ? result.stdout.trim() : "",
 		stderr: typeof result.stderr === "string" ? result.stderr.trim() : "",
 	};

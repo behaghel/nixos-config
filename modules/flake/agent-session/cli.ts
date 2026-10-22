@@ -43,6 +43,8 @@ export function main(args: string[]): number {
 				options.slug,
 				options.dryRun,
 				options.json,
+				options.pr,
+				options.trustPr,
 			);
 		}
 		if (command === "completion") {
@@ -72,7 +74,7 @@ export function main(args: string[]): number {
 		if (command === "start") {
 			const options = parseStartArguments(rest);
 			const root = primaryRoot(repositoryRoot());
-			return start(root, options.slug, options.launchConfiguredAgent);
+			return start(root, options.slug, options.launchConfiguredAgent, options.pr, options.trustPr);
 		}
 		if (command === "resume") {
 			const slug = resolveSessionTarget(parseRequiredSlug("resume", rest));

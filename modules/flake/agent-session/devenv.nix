@@ -11,7 +11,7 @@ let
   });
   agentSessionCommand = pkgs.writeShellApplication {
     name = "agent-session";
-    runtimeInputs = [ pkgs.nodejs_24 pkgs.git ];
+    runtimeInputs = [ pkgs.nodejs_24 pkgs.git pkgs.gh ];
     text = ''
       action="''${2-}"
       case "''${1-}" in

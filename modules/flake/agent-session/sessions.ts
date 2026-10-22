@@ -18,6 +18,7 @@ import {
 	worktreeIsRegistered,
 } from "./git.ts";
 import { CliError, run } from "./runtime.ts";
+import { validPullRequest } from "./github.ts";
 import type {
 	AgentSessionConfig,
 	SessionMetadata,
@@ -188,13 +189,15 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 	}
 	const metadata = value as Partial<SessionMetadata>;
 	if (
-		metadata.version !== 1 ||
+		(metadata.version !== 1 && metadata.version !== 2) ||
+		(metadata.version === 2 ? metadata.initialBranchOwned !== false : metadata.initialBranchOwned === false) ||
 		metadata.slug !== slug ||
 		typeof metadata.branch !== "string" ||
 		typeof metadata.worktreePath !== "string" ||
 		typeof metadata.remote !== "string" ||
 		typeof metadata.defaultBranch !== "string" ||
 		typeof metadata.createdAt !== "string" ||
+		(metadata.initialBranchOwned !== undefined && typeof metadata.initialBranchOwned !== "boolean") ||
 		(metadata.preexistingBranches !== undefined &&
 			(!Array.isArray(metadata.preexistingBranches) ||
 				metadata.preexistingBranches.some(
@@ -207,7 +210,13 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 		? realpathSync(metadata.worktreePath)
 		: resolve(metadata.worktreePath);
 	if (
-		metadata.branch !== `agent/${slug}` ||
+		(metadata.pr !== undefined
+			? !validPullRequest(metadata.pr) ||
+				metadata.branch !== (metadata.pr.mode === "independent" ? `agent/${slug}` : metadata.pr.headBranch) ||
+				run("git", ["check-ref-format", "--branch", metadata.branch], root).status !== 0
+			: metadata.branch !== `agent/${slug}`) ||
+		(metadata.initialBranchOwned === false &&
+			(metadata.pr?.mode !== "review" || !metadata.preexistingBranches?.includes(metadata.branch))) ||
 		!isAbsolute(metadata.worktreePath) ||
 		canonicalWorktree === primaryRoot(root)
 	) {

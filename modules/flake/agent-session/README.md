@@ -59,7 +59,7 @@ as -- status run bun test
 The separator is valid for any slug. Legacy forms such as `as create my-task` and
 `as status my-task` fail with migration hints before any Git mutation or execution.
 Update scripts and their pinned input together; older pins keep their old grammar.
-Session metadata, existing JSON schemas, and cleanup receipts are unchanged.
+Existing non-PR session records and cleanup receipt schemas remain supported.
 Creation supports both preview JSON and an actual creation receipt.
 
 Session metadata remains in the shared Git directory at
@@ -235,6 +235,173 @@ creation without fetching or modifying Git. Human-readable creation and agent
 startup output are unchanged. The entrypoint drains pending stdout/stderr writes
 before exiting, including JSON responses larger than a pipe buffer.
 
+## Reviewing a GitHub PR
+
+```sh
+as review-auth create --pr 123                  # ask before executing PR code
+as review-auth create --pr https://github.com/owner/repo/pull/123
+as review-auth create --pr 123 --trust-pr --json # explicit non-interactive trust
+as review-auth create --pr 123 --dry-run --json  # offline, unresolved preview
+as review-auth start --pr 123                   # prepare/reuse, then launch
+as followup start --pr 123 -c --no-agent         # independent preparation only
+```
+
+This checks out the PR's source head, not its synthetic merge commit, and
+prepares a managed worktree without launching an agent or pushing. The packaged
+launcher includes `gh`; authenticate it with `gh auth login` before use.
+
+Inspect the PR before granting trust: its environment configuration can execute
+code. On a terminal, creation displays the PR URL and exact fetched head commit
+and asks for confirmation before creating the checkout or running preparation.
+Only `y` or `yes` (case-insensitive) confirms; no, empty input, EOF, or prompt
+failure cancels. The operation lock remains held while waiting; creation
+rechecks the local target after approval rather than populating a slot that
+appeared during confirmation. Prompts go to stderr, including with `--json`;
+stdout remains reserved for the creation receipt.
+
+`--trust-pr` explicitly authorizes preparation and later execution in this PR
+checkout without prompting. Non-terminal creation of a new session requires this
+flag; matching trusted sessions can be reused without it. Trust is recorded
+against the fetched head commit, not against future remote updates.
+
+PR dry runs require no trust, GitHub lookup, remote query, checkout, preparation,
+or session-record write. They use cached remote HEAD to check the primary
+branch; missing cached information fails without an online fallback. The plan
+contains `pr.number`, `pr.resolved: false`, `trustRequired: true`, and null values
+for unverified PR URL/repository/base/head and the proposed branch/base. In
+independent mode the requested `agent/<slug>` branch name is known and shown,
+but its starting commit remains unresolved. This previews the request, not PR
+existence or checkout eligibility.
+
+Selection accepts a positive PR number or an HTTPS `github.com` PR URL. Both
+identify a PR targeting this checkout's configured upstream repository; repository
+names are compared case-insensitively. A URL for another target repository is
+refused without GitHub lookup or cloning. Numbers never select another project.
+PRs may come from forks; checkout does not require push permission.
+
+Open, draft, closed, and merged PRs are supported when their retained head can
+be fetched. No PR is reopened or marked ready by creation. Human creation/status
+output includes PR identity, state, draft status, and the recorded base branch;
+JSON keeps `state` and `isDraft` separate. These are recorded at creation:
+Git-only status refresh does not requery GitHub or adopt a new PR head.
+Default review mode can borrow an unused local source branch only if its commit
+exactly matches the resolved PR head and its existing upstream and effective push
+destination already target the PR source branch/repository. Missing or conflicting
+tracking must be configured explicitly by the user; creation does not rewrite it.
+A source branch checked out elsewhere is refused with that worktree's path.
+Unsupported requests fail rather than falling back to default-branch creation.
+
+The new local branch tracks the PR's source branch for `git push`. For a fork,
+creation reuses a matching configured remote without changing it, or adds
+`as-pr-<slug>` pointing to the source repository over HTTPS. Conflicting remote
+configuration or an existing ref namespace is preserved and refused. A failed
+creation removes only a source remote created by that attempt. Successful
+sessions retain their source remote after cleanup so preserved branches keep
+working tracking; remote repositories and their branches are never deleted.
+
+Conflicting push URLs, explicit remote push refspecs, mirror mode,
+`push.default=matching`, and fetch mappings that would track another source branch
+are refused rather than rewritten. Git transport rewrites and credentials remain
+under the user's control. Creation verifies that the resolved PR head and fetched PR ref agree before
+preparing the checkout; available source branches must also match. A source
+branch is considered deleted only after an explicit remote query establishes
+its absence, never because authentication or transport failed.
+
+### Historical PRs and release bases
+
+A deleted source branch does not prevent reviewing a retained PR head when its
+repository is still identifiable. The local review branch keeps its intended
+source tracking, which can be gone; no remote branch or fake remote-tracking ref
+is created. `sourceBranchMissing: true` records verified absence at creation.
+An explicit later `git push` may restore that branch, so use `-c` for independent
+follow-up work when you do not intend to restore it. `as` never pushes.
+
+If GitHub no longer identifies the source repository, default review mode refuses
+with a `-c` hint. Explicit independent mode can still use the retained head,
+records `sourceRepository: null`, and configures no source remote or source push
+destination. It never guesses a repository or silently changes branch mode.
+
+Freshness, launch warnings, and merge-based cleanup use the recorded PR base
+branch, including release branches, not the repository default. The primary
+checkout must still satisfy the normal clean/upstream-default creation guard.
+Missing cached base refs cannot establish freshness and are treated as stale.
+
+### Dependency diagnostics
+
+A missing/unexecutable `gh` is reported as an executable problem. GitHub's
+authentication-required exit status prompts `gh auth login`; lookup/network
+failures retain their actual diagnostic and repository identity without falsely
+claiming the user is logged out. Failed lookup/fetch emits no successful creation
+receipt and executes no PR preparation or agent command.
+
+### Launch and reuse
+
+`start --pr` accepts the same PR selection, trust, and branch-mode flags as
+`create --pr`. It prepares the session and launches the configured agent normally,
+without injecting review instructions. `--no-agent` prepares or reuses only. An
+agent failure leaves the prepared session available for later use.
+
+Repeating `create --pr` or `start --pr` with the same canonical repository, PR
+number, and branch mode reuses a valid recorded session offline. It does not
+fetch, reset, pull, change the worktree, rewrite metadata, repeat preparation, or
+request trust again. Local commits and dirty files are preserved; only `start`
+launches the configured agent. New-session creation retains its primary-checkout
+clean/default-branch guards; reuse allocates nothing and verifies the existing
+path, Git registration, metadata, and allowed branch lineage instead.
+
+A different PR/mode, a non-PR record, or an invalid binding is refused rather than
+converted or repaired. Bare `start` without `--pr` keeps its existing creation
+behavior; use `launch` / `resume` for ordinary existing sessions.
+
+### Borrowed branches and metadata compatibility
+
+Borrowing does not transfer branch ownership. Normal cleanup, forced cleanup,
+failed preparation, and missing-worktree cleanup preserve the initial borrowed
+branch and its configuration. Renaming it does not make it session-owned.
+Branches actually created during the session retain normal ownership checks.
+
+Borrowed sessions store metadata `version: 2` with `initialBranchOwned: false`
+and a preexisting-branch snapshot containing the borrowed branch. Owned sessions
+retain metadata version 1; current readers accept both versions. Outer creation
+receipts and status envelopes remain version 1. Version-1-only launchers reject
+borrowed records rather than ignoring an added flag and deleting a borrowed
+`agent/<slug>` branch. Inconsistent version/ownership records are refused.
+Do not downgrade borrowed records or reconstruct them as version 1. If a borrowed
+record is lost, restore the original version-2 record; unrecorded forced retirement
+preserves all branches and is not permission to invent ownership with `repair`.
+
+### Independent follow-up work
+
+```sh
+as auth-followup create --pr 123 -c
+as auth-followup create --pr 123 --create-branch --trust-pr --json
+```
+
+`-c` / `--create-branch` requires `--pr` and creates `agent/<slug>` at the PR's
+fetched source head. It does not check out or change the original source branch,
+so that branch can already be occupied by another worktree. Creation refuses
+an existing follow-up branch, its saved configuration, or its upstream tracking
+ref rather than resetting or adopting them.
+
+This mode still requires execution trust, but does not fetch or configure a fork
+source remote, add an upstream for the new branch, or configure pushes to the
+original PR. Ordinary user Git settings remain unchanged. Publication starts as
+`unpublished`; normal cleanup protects this separate work. Use
+`finish --keep-branch` to remove the worktree and preserve its branch.
+
+Creation receipts and `status --json` expose a `pr` object containing `number`,
+`url`, `repository`, `baseBranch`, `headBranch`, `headCommit`, `state`, `isDraft`,
+`mode`, `trustedHeadCommit`, `sourceRepository`, `sourceRemote`, and the optional
+`sourceBranchMissing` annotation. Older records
+without source fields remain readable. `mode` is `review` or `independent`;
+independent sessions retain PR source provenance but have no `sourceRemote`.
+Status is offline by default; explicit refresh and guarded cleanup fetch both
+target and source remotes for review sessions when they differ, and only the
+target remote for independent sessions. Freshness uses the target branch;
+publication uses the current local branch's upstream, if any.
+Normal cleanup protects unpushed review fixes and removes only session-owned
+local assets; it never deletes the remote PR branch.
+
 ## Project settings
 
 ```nix
@@ -298,6 +465,10 @@ these after `compinit`, preserves existing completions, and restores registratio
 on project exit. Plain direnv cannot register completions in an already-running
 Zsh without that shell integration.
 
+PR flags are offered for both `create` and `start`. After `--pr`, enter a number
+or URL; option names are not suggested in that value position. PR flag/value
+completion performs no GitHub lookup or fetch.
+
 Projects with their own completions override the directory list explicitly:
 
 ```nix
@@ -327,6 +498,7 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `completion.ts` | Dynamic candidates and Bash/Zsh/Fish completion scripts |
 | `sessions.ts` | Configuration, session records, locks, discovery, and path validation |
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
+| `github.ts` | GitHub PR resolution, source-head verification, and review push safeguards |
 | `inspection.ts` | Local session state, branch ownership, and status reporting |
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
@@ -341,7 +513,8 @@ do not import command dispatch or lifecycle operations.
 
 ## Runtime and verification
 
-The command uses Nix-provided Node.js 24's native TypeScript support and Git.
+The command uses Nix-provided Node.js 24's native TypeScript support, Git,
+and the GitHub CLI (`gh`) for PR selection.
 `run` also needs the `devenv` executable on PATH.
 It needs no npm dependencies, install step, or Bun runtime. Bun remains only in
 this repository's optional regression-test profile; the default shell does not

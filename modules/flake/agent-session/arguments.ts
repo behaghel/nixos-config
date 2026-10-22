@@ -1,5 +1,7 @@
 import { CliError } from "./runtime.ts";
 import { validateSlug } from "./sessions.ts";
+import { parsePullRequestSelection } from "./github.ts";
+import type { PullRequestSelection } from "./types.ts";
 
 export const commandNames = [
 	"cd",
@@ -110,41 +112,74 @@ export function parseCreateArguments(args: string[]): {
 	slug: string;
 	dryRun: boolean;
 	json: boolean;
+	pr?: PullRequestSelection;
+	trustPr: boolean;
 } {
 	let slug: string | undefined;
 	let dryRun = false;
 	let json = false;
-	for (const argument of args) {
+	let pr: PullRequestSelection | undefined;
+	let trustPr = false;
+	let createBranch = false;
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index] ?? "";
 		if (argument === "--dry-run") dryRun = true;
 		else if (argument === "--json") json = true;
+		else if (argument === "--trust-pr") trustPr = true;
+		else if (argument === "-c" || argument === "--create-branch") createBranch = true;
+		else if (argument === "--pr") {
+			const value = args[++index] ?? "";
+			if (pr !== undefined) throw argumentError("--pr requires exactly one selection.");
+			try { pr = parsePullRequestSelection(value); }
+			catch { throw argumentError("--pr requires a positive PR number or a github.com PR URL."); }
+		}
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("create", argument, ["--dry-run", "--json"]);
+			throw unknownOption("create", argument, ["--dry-run", "--json", "--pr", "--trust-pr", "-c", "--create-branch"]);
 		} else {
 			throw argumentError(`Unexpected argument '${argument}' for 'create'.`);
 		}
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'create'.");
-	return { slug, dryRun, json };
+	if (trustPr && pr === undefined) throw argumentError("--trust-pr requires --pr.");
+	if (createBranch && pr === undefined) throw argumentError("--create-branch (-c) requires --pr.");
+	if (createBranch && pr) pr = { ...pr, mode: "independent" };
+	return { slug, dryRun, json, pr, trustPr };
 }
 
 export function parseStartArguments(args: string[]): {
 	slug: string;
 	launchConfiguredAgent: boolean;
+	pr?: PullRequestSelection;
+	trustPr: boolean;
 } {
 	let slug: string | undefined;
 	let launchConfiguredAgent = true;
-	for (const argument of args) {
+	let pr: PullRequestSelection | undefined;
+	let trustPr = false;
+	let createBranch = false;
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index] ?? "";
 		if (argument === "--no-agent") launchConfiguredAgent = false;
+		else if (argument === "--trust-pr") trustPr = true;
+		else if (argument === "-c" || argument === "--create-branch") createBranch = true;
+		else if (argument === "--pr") {
+			if (pr !== undefined) throw argumentError("--pr requires exactly one selection.");
+			try { pr = parsePullRequestSelection(args[++index] ?? ""); }
+			catch { throw argumentError("--pr requires a positive PR number or a github.com PR URL."); }
+		}
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("start", argument, ["--no-agent"]);
+			throw unknownOption("start", argument, ["--no-agent", "--pr", "--trust-pr", "-c", "--create-branch"]);
 		} else {
 			throw argumentError(`Unexpected argument '${argument}' for 'start'.`);
 		}
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'start'.");
-	return { slug, launchConfiguredAgent };
+	if (trustPr && !pr) throw argumentError("--trust-pr requires --pr.");
+	if (createBranch && !pr) throw argumentError("--create-branch (-c) requires --pr.");
+	if (createBranch && pr) pr = { ...pr, mode: "independent" };
+	return { slug, launchConfiguredAgent, pr, trustPr };
 }
 
 export function parseFinishArguments(args: string[]): {
@@ -267,9 +302,9 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
-		"  agent-session <task-slug> create [--dry-run] [--json]",
+		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
-		"  agent-session <task-slug> start [--no-agent]",
+		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> resume",
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",

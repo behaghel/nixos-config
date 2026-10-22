@@ -28,6 +28,7 @@ import {
 	readFileSync,
 	realpathSync,
 	rmSync,
+	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -222,6 +223,1072 @@ function mergeSessionAndDeleteRemoteBranch(
 	);
 	git(fixture.seed, "push", "origin", "master");
 	git(fixture.seed, "push", "origin", "--delete", `agent/${slug}`);
+}
+
+function createPullRequestFixture() {
+	const fixture = createRepositoryFixture("agent-session-pr-");
+	const branch = "review/auth";
+	git(fixture.seed, "checkout", "-b", branch);
+	commitSessionWork(fixture.seed);
+	const head = git(fixture.seed, "rev-parse", "HEAD");
+	git(fixture.seed, "push", "origin", branch, "HEAD:refs/pull/123/head");
+	const repositoryUrl = "https://github.com/fixture/repo.git";
+	// A GitHub identity with entirely local transport; no network or credentials.
+	git(fixture.checkout, "config", `url.${fixture.remote}.insteadOf`, repositoryUrl);
+	git(fixture.checkout, "remote", "set-url", "origin", repositoryUrl);
+	git(fixture.checkout, "config", "push.default", "simple");
+	const bin = installFixtureCLI(fixture);
+	const ghLog = join(fixture.root, "gh-calls");
+	const responsePath = join(fixture.root, "pr.json");
+	const response = {
+		number: 123, url: "https://github.com/fixture/repo/pull/123",
+		state: "OPEN", isDraft: false, baseRefName: "master",
+		headRefName: branch, headRefOid: head, isCrossRepository: false,
+		headRepository: { name: "repo" }, headRepositoryOwner: { login: "fixture" },
+	};
+	writeFileSync(responsePath, JSON.stringify(response));
+	writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.appendFileSync(${JSON.stringify(ghLog)}, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.env.FAKE_GH_FAILURE) { console.error(process.env.FAKE_GH_MESSAGE ?? 'gh: authentication required; run gh auth login'); process.exit(Number(process.env.FAKE_GH_EXIT ?? 1)); }
+process.stdout.write(fs.readFileSync(${JSON.stringify(responsePath)}, 'utf8'));
+`);
+	chmodSync(join(bin, "gh"), 0o755);
+	const agentLog = join(fixture.root, "agent-cwd");
+	const prepareLog = join(fixture.root, "prepared");
+	const agent = createFakeAgent(fixture.root, agentLog);
+	writeConfig(fixture.checkout, agent, ["sh", "-c", `printf prepared > ${tomlString(prepareLog)}`]);
+	const environment = { PATH: `${bin}:${process.env.PATH ?? ""}` };
+	return { ...fixture, branch, head, response, responsePath, ghLog, agentLog, prepareLog, environment };
+}
+
+describe("PR review session creation", () => {
+	it("creates the exact PR source head with push tracking, metadata and a clean receipt (AC-1, AC-4)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const receipt = JSON.parse(result.stdout);
+			expect(receipt.command).toBe("create");
+			expect(receipt.dryRun).toBe(false);
+			expect(receipt.session.branch).toBe(fixture.branch);
+			expect(receipt.session.pr.number).toBe(123);
+			expect(receipt.session.pr.url).toBe(fixture.response.url);
+			expect(receipt.session.pr.baseBranch).toBe("master");
+			expect(receipt.session.pr.headCommit).toBe(fixture.head);
+			expect(receipt.session.pr.trustedHeadCommit).toBe(fixture.head);
+			const worktree = receipt.session.worktreePath;
+			expect(git(worktree, "rev-parse", "HEAD")).toBe(fixture.head);
+			expect(git(worktree, "branch", "--show-current")).toBe(fixture.branch);
+			expect(git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}")).toBe(`origin/${fixture.branch}`);
+			expect(git(worktree, "config", `branch.${fixture.branch}.pushRemote`)).toBe("origin");
+			expect(existsSync(fixture.agentLog)).toBe(false);
+			expect(readFileSync(fixture.prepareLog, "utf8")).toBe("prepared");
+			const status = runCli(worktree, [".", "status", "--json"], fixture.environment);
+			expect(status.status).toBe(0);
+			expect(JSON.parse(status.stdout).sessions[0].publication).toBe("published");
+			const ghCalls = readFileSync(fixture.ghLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+			expect(ghCalls.length).toBe(1);
+			expect(ghCalls[0].slice(0, 5).join(" ")).toBe("pr view 123 --repo https://github.com/fixture/repo");
+			expect(git(fixture.remote, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(fixture.head);
+			for (const line of result.stderr.trim().split("\n")) expect(JSON.parse(line).type).toBe("progress");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const [answer, slotAppears] of [["yes\n", false], ["no\n", false], ["\n", false], ["EOF", false], ["yes\n", true]] as const) {
+		it(`requires commit-specific terminal consent before PR execution: ${JSON.stringify(answer)}, slotAppears=${slotAppears} (AC-11)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				const driver = `
+import errno, json, os, pty, select, subprocess, sys, time
+master, slave = pty.openpty()
+child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stderr=slave, stdout=subprocess.PIPE)
+os.close(slave)
+output = b''
+answered = False
+safe_before_consent = False
+lock_held = False
+try:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+            if b'[y/N]' in output and not answered:
+                with open(sys.argv[3]) as owner:
+                    lock_held = json.load(owner).get('pid') == child.pid
+                safe_before_consent = not any(os.path.exists(path) for path in sys.argv[4:8])
+                if sys.argv[8] == 'true':
+                    os.mkdir(sys.argv[6])
+                os.write(master, b'\\x04' if sys.argv[2] == 'EOF' else sys.argv[2].encode())
+                answered = True
+        elif child.poll() is not None:
+            break
+    else:
+        raise TimeoutError('PR trust confirmation did not complete')
+    stdout, _ = child.communicate(timeout=5)
+    print(json.dumps({'status': child.returncode, 'output': output.decode(errors='replace'),
+                      'stdout': stdout.decode(), 'answered': answered,
+                      'safeBeforeConsent': safe_before_consent, 'lockHeld': lock_held}))
+finally:
+    if child.poll() is None:
+        child.kill()
+        child.wait()
+    os.close(master)
+`;
+				const worktree = join(fixture.worktrees, "review-auth");
+				const metadata = sessionMetadataPath(fixture.checkout, "review-auth");
+				const result = spawnSync("python3", ["-c", driver,
+					JSON.stringify(["node", cliScript, "review-auth", "create", "--pr", "123", "--json"]), answer,
+					join(fixture.checkout, ".git", "agent-session", "operation.lock", "owner.json"),
+					fixture.prepareLog, fixture.agentLog, worktree, metadata, String(slotAppears),
+				], { cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, ...fixture.environment, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) } });
+				expect(result.status).toBe(0);
+				const terminal = JSON.parse(result.stdout);
+				expect(terminal.answered).toBe(true);
+				expect(terminal.safeBeforeConsent).toBe(true);
+				expect(terminal.lockHeld).toBe(true);
+				expect(terminal.output).toContain(fixture.response.url);
+				expect(terminal.output).toContain(fixture.head);
+				const accepted = answer === "yes\n" && !slotAppears;
+				expect(terminal.status).toBe(accepted ? 0 : 1);
+				expect(existsSync(fixture.prepareLog)).toBe(accepted);
+				expect(existsSync(worktree)).toBe(accepted || slotAppears);
+				expect(existsSync(metadata)).toBe(accepted);
+				expect(existsSync(fixture.agentLog)).toBe(false);
+				if (accepted) {
+					expect(JSON.parse(terminal.stdout).session.pr.trustedHeadCommit).toBe(fixture.head);
+					expect(git(worktree, "rev-parse", "HEAD")).toBe(fixture.head);
+				} else {
+					expect(terminal.stdout).toBe("");
+					expect(terminal.output).toContain(slotAppears ? "changed" : "cancelled");
+					expect(git(fixture.checkout, "branch", "--list", fixture.branch)).toBe("");
+				}
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("previews an unresolved PR offline without trust, GitHub, remote queries, or mutations (AC-15)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8", env: process.env }).stdout.trim();
+			const gitLog = join(fixture.root, "network-attempts");
+			const bin = join(fixture.root, "bin");
+			writeFileSync(join(bin, "git"), `#!/usr/bin/env bash
+for arg in "$@"; do
+  case "$arg" in fetch|ls-remote|push) printf '%s\\n' "$*" >> ${tomlString(gitLog)}; exit 91 ;; esac
+done
+exec ${tomlString(realGit)} "$@"
+`);
+			chmodSync(join(bin, "git"), 0o755);
+			const before = {
+				index: readFileSync(join(fixture.checkout, ".git", "index")).toString("hex"),
+				config: readFileSync(join(fixture.checkout, ".git", "config"), "utf8"),
+			};
+			const newer = new Date(Date.now() + 5000);
+			utimesSync(join(fixture.checkout, "README.md"), newer, newer);
+			// This unrelated branch must not collide with an unresolved PR branch.
+			git(fixture.checkout, "branch", "agent/review-auth");
+			const refs = git(fixture.checkout, "show-ref");
+			for (const flags of [["--json"], ["--json", "--trust-pr"], []]) {
+				const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "987", "--dry-run", ...flags], { ...fixture.environment, FAKE_GH_FAILURE: "1" });
+				expect(result.status).toBe(0);
+				if (flags.includes("--json")) {
+					const preview = JSON.parse(result.stdout);
+					expect(preview.dryRun).toBe(true);
+					expect(preview.plan.pr.number).toBe(987);
+					expect(preview.plan.pr.resolved).toBe(false);
+					expect(preview.plan.pr.url).toBe(null);
+					expect(preview.plan.pr.headCommit).toBe(null);
+					expect(preview.plan.branch).toBe(null);
+					expect(preview.plan.base).toBe(null);
+					expect(preview.plan.agentLaunch).toBe(false);
+				} else {
+					expect(result.stdout).toContain("987");
+					expect(result.stdout).toContain("unresolved");
+				}
+			}
+			expect(existsSync(fixture.ghLog)).toBe(false);
+			expect(existsSync(gitLog)).toBe(false);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			expect(existsSync(fixture.worktrees)).toBe(false);
+			expect(existsSync(join(fixture.checkout, ".git", "agent-session"))).toBe(false);
+			expect(git(fixture.checkout, "show-ref")).toBe(refs);
+			expect(readFileSync(join(fixture.checkout, ".git", "index")).toString("hex")).toBe(before.index);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before.config);
+			git(fixture.checkout, "symbolic-ref", "--delete", "refs/remotes/origin/HEAD");
+			const uncached = runCli(fixture.checkout, ["review-auth", "create", "--pr", "987", "--dry-run", "--json"], fixture.environment);
+			expect(uncached.status).toBe(1);
+			expect(uncached.stderr).toContain("No cached default branch");
+			expect(existsSync(gitLog)).toBe(false);
+			expect(existsSync(fixture.ghLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const flags of [[], ["-c"]]) {
+		it(`accepts a draft PR without changing its readiness: ${flags.length ? "independent" : "review"} (AC-12)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				const draft = JSON.stringify({ ...fixture.response, isDraft: true });
+				writeFileSync(fixture.responsePath, draft);
+				const args = ["draft-check", "create", "--pr", "123", ...flags, "--trust-pr"];
+				const created = runCli(fixture.checkout, [...args, "--json"], fixture.environment);
+				expect(created.status).toBe(0);
+				const metadata = JSON.parse(created.stdout).session;
+				expect(metadata.pr.isDraft).toBe(true);
+				expect(metadata.pr.state).toBe("OPEN");
+				expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+				expect(runCli(fixture.checkout, args, fixture.environment).stdout).toContain("DRAFT");
+				expect(readFileSync(fixture.responsePath, "utf8")).toBe(draft);
+				const calls = readFileSync(fixture.ghLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
+				expect(calls.length).toBe(1);
+				expect(calls[0].slice(0, 2).join(" ")).toBe("pr view");
+				expect(existsSync(fixture.agentLog)).toBe(false);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("cleans up its own published local branch without deleting the remote PR branch", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			expect(runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment).status).toBe(0);
+			const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment);
+			expect(finished.status).toBe(0);
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", fixture.branch)).toBe("");
+			expect(git(fixture.remote, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(fixture.head);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses normal cleanup of unpushed review fixes", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			expect(runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment).status).toBe(0);
+			const worktree = join(fixture.worktrees, "review-auth");
+			writeFileSync(join(worktree, "fix.txt"), "review fix\n");
+			git(worktree, "add", "fix.txt");
+			git(worktree, "-c", "user.name=Review", "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Review fix");
+			const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment);
+			expect(finished.status).toBe(1);
+			expect(finished.stderr).toContain("unpushed commits");
+			expect(existsSync(worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rolls back only newly created session assets when PR preparation fails (AC-19)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			writeConfig(fixture.checkout, "unused-agent", ["sh", "-c", "echo PR-prepare-failed >&2; exit 7"]);
+			git(fixture.checkout, "branch", "keep-me");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("PR-prepare-failed");
+			expect(result.stdout).toBe("");
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", fixture.branch)).toBe("");
+			expect(git(fixture.checkout, "rev-parse", "keep-me")).toBe(git(fixture.checkout, "rev-parse", "master"));
+			expect(git(fixture.remote, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(fixture.head);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves a dangling session record instead of overwriting it during PR creation", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const state = sessionMetadataPath(fixture.checkout, "review-auth");
+			mkdirSync(join(fixture.checkout, ".git", "agent-session", "sessions"), { recursive: true });
+			const missing = join(fixture.root, "missing-session-record");
+			symlinkSync(missing, state);
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(readlinkSync(state)).toBe(missing);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not execute PR code without explicit trust", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("--trust-pr");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			expect(existsSync(fixture.agentLog)).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses preexisting local branches that differ from the resolved PR head", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			git(fixture.checkout, "branch", fixture.branch);
+			const before = git(fixture.checkout, "rev-parse", fixture.branch);
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("preexisting local branch");
+			expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("identifies a PR branch already checked out elsewhere without moving it (AC-9)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const other = join(fixture.root, "other-review");
+			git(fixture.checkout, "worktree", "add", "-b", fixture.branch, other);
+			const before = git(other, "rev-parse", "HEAD");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain(other);
+			expect(git(other, "rev-parse", "HEAD")).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reports GitHub authentication failure without allocation or execution (AC-20)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], { ...fixture.environment, FAKE_GH_FAILURE: "1" });
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("gh auth login");
+			expect(result.stdout).toBe("");
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rejects a changed PR head between resolution and fetch before preparation", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, headRefOid: git(fixture.checkout, "rev-parse", "master") }));
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("PR head changed");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+});
+
+function createForkPullRequestFixture() {
+	const fixture = createPullRequestFixture();
+	const fork = join(fixture.root, "fork.git");
+	git(fixture.root, "clone", "--bare", fixture.remote, fork);
+	const forkUrl = "https://github.com/contributor/repo.git";
+	git(fixture.checkout, "config", `url.${fork}.insteadOf`, forkUrl);
+	// Only the fork owns the source branch; the base retains the PR ref.
+	git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+	writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response,
+		isCrossRepository: true, headRepositoryOwner: { login: "contributor" } }));
+	const reject = join(fork, "hooks", "pre-receive");
+	writeFileSync(reject, "#!/usr/bin/env bash\necho 'fork push denied' >&2\nexit 1\n");
+	chmodSync(reject, 0o755);
+	return { ...fixture, fork, forkUrl };
+}
+
+describe("PR URLs and fork sources", () => {
+	it("resolves number and URL to the same canonical PR identity (AC-2)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const numbered = runCli(fixture.checkout, ["number-review", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(numbered.status).toBe(0);
+			expect(runCli(fixture.checkout, ["number-review", "finish", "--yes"], fixture.environment).status).toBe(0);
+			const byUrl = runCli(fixture.checkout, ["url-review", "create", "--pr", "https://github.com/FIXTURE/REPO/pull/123", "--trust-pr", "--json"], fixture.environment);
+			expect(byUrl.status).toBe(0);
+			expect(JSON.stringify(JSON.parse(byUrl.stdout).session.pr)).toBe(JSON.stringify(JSON.parse(numbered.stdout).session.pr));
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rejects foreign-target URLs without GitHub lookup or session allocation (AC-13)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			for (const flags of [["--trust-pr"], ["--dry-run"]]) {
+				const result = runCli(fixture.checkout, ["foreign", "create", "--pr", "https://github.com/other/repo/pull/123", ...flags], fixture.environment);
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain("different repository");
+			}
+			expect(existsSync(fixture.ghLog)).toBe(false);
+			expect(existsSync(fixture.worktrees)).toBe(false);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("checks out a read-only fork and targets plain git push at its source, never the base (AC-3, AC-4)", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			const baseRefs = git(fixture.remote, "show-ref");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", fixture.response.url, "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const metadata = JSON.parse(result.stdout).session;
+			expect(metadata.pr.sourceRepository).toBe("contributor/repo");
+			const source = metadata.pr.sourceRemote;
+			expect(git(fixture.checkout, "config", `remote.${source}.url`)).toBe(fixture.forkUrl);
+			expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+			expect(git(metadata.worktreePath, "rev-parse", "--abbrev-ref", "@{push}")).toBe(`${source}/${fixture.branch}`);
+			expect(git(metadata.worktreePath, "config", `branch.${fixture.branch}.pushRemote`)).toBe(source);
+			writeFileSync(join(metadata.worktreePath, "fix.txt"), "review fix\n");
+			git(metadata.worktreePath, "add", "fix.txt");
+			git(metadata.worktreePath, "-c", "user.name=Review", "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Review fix");
+			const pushed = spawnSync("git", ["push"], { cwd: metadata.worktreePath, encoding: "utf8", env: process.env });
+			expect(pushed.status).toBe(1);
+			expect(pushed.stderr).toContain("fork push denied");
+			expect(git(fixture.fork, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(fixture.head);
+			expect(git(fixture.remote, "show-ref")).toBe(baseRefs);
+			expect(existsSync(fixture.agentLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refreshes fork publication and cleans only local session assets", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const metadata = JSON.parse(result.stdout).session;
+			writeFileSync(join(fixture.seed, "next.txt"), "next\n");
+			git(fixture.seed, "add", "next.txt");
+			git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Advance fork");
+			git(fixture.fork, "fetch", fixture.seed, fixture.branch);
+			git(fixture.fork, "update-ref", `refs/heads/${fixture.branch}`, "FETCH_HEAD");
+			const stale = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+			expect(JSON.parse(stale.stdout).sessions[0].publication).toBe("published");
+			const refreshed = runCli(fixture.checkout, ["review-auth", "status", "--refresh", "--json"], fixture.environment);
+			expect(refreshed.status).toBe(0);
+			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("behind");
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment).status).toBe(0);
+			expect(existsSync(metadata.worktreePath)).toBe(false);
+			expect(git(fixture.fork, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(git(fixture.seed, "rev-parse", "HEAD"));
+			expect(git(fixture.checkout, "remote")).toContain(metadata.pr.sourceRemote);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rolls back a newly allocated fork remote when preparation fails", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			writeConfig(fixture.checkout, "unused", ["sh", "-c", "exit 7"]);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Configured command exited with status 7");
+			expect(result.stdout).toBe("");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(git(fixture.checkout, "branch", "--list", fixture.branch)).toBe("");
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves a matching preexisting fork remote during rollback", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.checkout, "remote", "add", "contributor", fixture.forkUrl);
+			writeConfig(fixture.checkout, "unused", ["sh", "-c", "exit 7"]);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Configured command exited with status 7");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses a fork fetch mapping that would push review fixes to another branch", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.fork, "update-ref", "refs/heads/master", fixture.head);
+			git(fixture.checkout, "remote", "add", "contributor", fixture.forkUrl);
+			git(fixture.checkout, "config", "remote.contributor.fetch", `+refs/heads/master:refs/remotes/contributor/${fixture.branch}`);
+			git(fixture.checkout, "config", "push.default", "upstream");
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("source tracking");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves preexisting refs in a proposed fork remote namespace", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			const savedRef = "refs/remotes/as-pr-review-auth/private-work";
+			git(fixture.checkout, "update-ref", savedRef, "HEAD");
+			const before = git(fixture.checkout, "show-ref");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("existing source remote");
+			expect(git(fixture.checkout, "show-ref")).toBe(before);
+			expect(git(fixture.checkout, "remote")).toBe("origin");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses conflicting fork remote configuration instead of repointing it", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.checkout, "remote", "add", "contributor", fixture.forkUrl);
+			git(fixture.checkout, "config", "remote.contributor.pushurl", "https://github.com/fixture/repo.git");
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("conflicting push URL");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+describe("independent work from a PR", () => {
+	for (const flag of ["-c", "--create-branch"]) {
+		it(`creates agent/<slug> with ${flag} while leaving an occupied PR branch untouched (AC-5)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				git(fixture.checkout, "fetch", "origin");
+				const occupied = join(fixture.root, "existing-review");
+				git(fixture.checkout, "worktree", "add", "--track", "-b", fixture.branch, occupied, `origin/${fixture.branch}`);
+				writeFileSync(join(occupied, "local-review.txt"), "keep my review\n");
+				const sourceConfig = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+				const result = runCli(fixture.checkout, ["followup", "create", "--pr", "123", flag, "--trust-pr", "--json"], fixture.environment);
+				expect(result.status).toBe(0);
+				const metadata = JSON.parse(result.stdout).session;
+				expect(metadata.branch).toBe("agent/followup");
+				expect(metadata.pr.mode).toBe("independent");
+				expect(metadata.pr.headBranch).toBe(fixture.branch);
+				expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+				expect(git(metadata.worktreePath, "for-each-ref", "--format=%(upstream)", "refs/heads/agent/followup")).toBe("");
+				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(sourceConfig);
+				expect(readFileSync(join(occupied, "local-review.txt"), "utf8")).toBe("keep my review\n");
+				expect(git(occupied, "rev-parse", "HEAD")).toBe(fixture.head);
+				const status = runCli(metadata.worktreePath, [".", "status", "--json"], fixture.environment);
+				expect(status.status).toBe(0);
+				expect(JSON.parse(status.stdout).sessions[0].publication).toBe("unpublished");
+				expect(runCli(fixture.checkout, ["followup", "finish", "--yes"], fixture.environment).status).toBe(1);
+				expect(existsSync(metadata.worktreePath)).toBe(true);
+				expect(runCli(fixture.checkout, ["followup", "finish", "--keep-branch", "--yes"], fixture.environment).status).toBe(0);
+				expect(git(fixture.checkout, "rev-parse", "agent/followup")).toBe(fixture.head);
+				expect(readFileSync(join(occupied, "local-review.txt"), "utf8")).toBe("keep my review\n");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("starts independent fork work without fetching or configuring its source remote", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			rmSync(fixture.fork, { recursive: true, force: true });
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["followup", "create", "--pr", fixture.response.url, "-c", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const metadata = JSON.parse(result.stdout).session;
+			expect(metadata.pr.mode).toBe("independent");
+			expect(metadata.pr.sourceRepository).toBe("contributor/repo");
+			expect(metadata.pr.sourceRemote).toBe(undefined);
+			expect(git(fixture.checkout, "remote")).toBe("origin");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			const refreshed = runCli(fixture.checkout, ["followup", "status", "--refresh", "--json"], fixture.environment);
+			expect(refreshed.status).toBe(0);
+			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("unpublished");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("previews the requested independent branch offline while leaving the PR head unresolved", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["followup", "create", "--pr", fixture.response.url, "-c", "--dry-run", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const plan = JSON.parse(result.stdout).plan;
+			expect(plan.branch).toBe("agent/followup");
+			expect(plan.pr.mode).toBe("independent");
+			expect(plan.pr.resolved).toBe(false);
+			expect(plan.pr.headCommit).toBe(null);
+			expect(plan.base).toBe(null);
+			expect(existsSync(fixture.ghLog)).toBe(false);
+			expect(existsSync(fixture.worktrees)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires PR selection and preserves existing follow-up branches and saved tracking", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const missing = runCli(fixture.checkout, ["followup", "create", "-c"], fixture.environment);
+			expect(missing.status).toBe(64);
+			expect(missing.stderr).toContain("requires --pr");
+			git(fixture.checkout, "config", "branch.agent/followup.merge", `refs/heads/${fixture.branch}`);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const orphan = runCli(fixture.checkout, ["followup", "create", "--pr", "123", "-c", "--trust-pr"], fixture.environment);
+			expect(orphan.status).toBe(1);
+			expect(orphan.stderr).toContain("preexisting local branch configuration");
+			git(fixture.checkout, "branch", "agent/followup");
+			const existing = runCli(fixture.checkout, ["followup", "create", "--pr", "123", "--create-branch", "--trust-pr"], fixture.environment);
+			expect(existing.status).toBe(1);
+			expect(git(fixture.checkout, "rev-parse", "agent/followup")).toBe(git(fixture.checkout, "rev-parse", "master"));
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+function prepareBorrowedBranch(fixture: ReturnType<typeof createPullRequestFixture>): void {
+	git(fixture.checkout, "fetch", "origin");
+	git(fixture.checkout, "branch", "--track", fixture.branch, `origin/${fixture.branch}`);
+	git(fixture.checkout, "config", `branch.${fixture.branch}.pushRemote`, "origin");
+}
+
+describe("PR launch, reuse and borrowed branches", () => {
+	it("starts a PR agent normally and supports independent no-agent preparation (AC-6)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const started = runCli(fixture.checkout, ["review-auth", "start", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(started.status).toBe(0);
+			expect(readFileSync(fixture.agentLog, "utf8").trim()).toBe(realpathSync(join(fixture.worktrees, "review-auth")));
+			expect(readFileSync(`${fixture.agentLog}.args`, "utf8")).toBe("\n");
+			const prepared = runCli(fixture.checkout, ["followup", "start", "--pr", fixture.response.url, "--create-branch", "--trust-pr", "--no-agent"], fixture.environment);
+			expect(prepared.status).toBe(0);
+			expect(readFileSync(fixture.agentLog, "utf8").trim().split("\n").length).toBe(1);
+			expect(git(join(fixture.worktrees, "followup"), "branch", "--show-current")).toBe("agent/followup");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reuses trusted dirty/local-ahead work offline without re-preparing or adopting a new PR head (AC-7)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			writeConfig(fixture.checkout, createFakeAgent(fixture.root, fixture.agentLog), ["sh", "-c", `printf prepared >> ${tomlString(fixture.prepareLog)}`]);
+			const created = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			const metadata = JSON.parse(created.stdout).session;
+			writeFileSync(join(metadata.worktreePath, "fix.txt"), "fix\n");
+			git(metadata.worktreePath, "add", "fix.txt");
+			git(metadata.worktreePath, "-c", "user.name=Review", "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Local fix");
+			writeFileSync(join(metadata.worktreePath, "dirty.txt"), "unfinished\n");
+			const head = git(metadata.worktreePath, "rev-parse", "HEAD");
+			const before = readFileSync(sessionMetadataPath(fixture.checkout, "review-auth"), "utf8");
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, headRefOid: "f".repeat(40) }));
+			rmSync(fixture.remote, { recursive: true, force: true });
+			const env = { ...fixture.environment, FAKE_GH_FAILURE: "1" };
+			const reused = runCli(fixture.checkout, ["review-auth", "create", "--pr", fixture.response.url, "--json"], env);
+			expect(reused.status).toBe(0);
+			expect(JSON.stringify(JSON.parse(reused.stdout).session)).toBe(JSON.stringify(metadata));
+			expect(runCli(fixture.checkout, ["review-auth", "start", "--pr", "123"], env).status).toBe(0);
+			expect(readFileSync(fixture.prepareLog, "utf8")).toBe("prepared");
+			expect(readFileSync(fixture.agentLog, "utf8").trim()).toBe(metadata.worktreePath);
+			expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(head);
+			expect(readFileSync(join(metadata.worktreePath, "dirty.txt"), "utf8")).toBe("unfinished\n");
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "review-auth"), "utf8")).toBe(before);
+			expect(readFileSync(fixture.ghLog, "utf8").trim().split("\n").length).toBe(1);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses an existing slug with a different PR, branch mode, or invalid binding (AC-8)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			expect(runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment).status).toBe(0);
+			const record = sessionMetadataPath(fixture.checkout, "review-auth");
+			const before = readFileSync(record, "utf8");
+			for (const args of [["create", "--pr", "456"], ["start", "--pr", "123", "-c"]]) {
+				const result = runCli(fixture.checkout, ["review-auth", ...args], fixture.environment);
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain("different PR or branch mode");
+				expect(readFileSync(record, "utf8")).toBe(before);
+			}
+			rmSync(join(fixture.worktrees, "review-auth", ".git"));
+			expect(runCli(fixture.checkout, ["review-auth", "start", "--pr", "123"], fixture.environment).status).toBe(1);
+			expect(existsSync(fixture.agentLog)).toBe(false);
+			expect(readFileSync(record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const mode of ["normal", "force", "orphaned-force", "renamed"]) {
+		it(`borrows a matching tracked branch without owning or deleting it: ${mode} (AC-10, AC-18)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				prepareBorrowedBranch(fixture);
+				const config = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+				const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+				expect(result.status).toBe(0);
+				const metadata = JSON.parse(result.stdout).session;
+				expect(metadata.initialBranchOwned).toBe(false);
+				expect(metadata.version).toBe(2);
+				expect(JSON.parse(result.stdout).version).toBe(1);
+				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
+				let branch = fixture.branch;
+				if (mode === "renamed") { branch = "fix/renamed-borrowed"; git(metadata.worktreePath, "branch", "-m", branch); }
+				const status = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+				expect(status.status).toBe(0);
+				expect(JSON.parse(status.stdout).sessions[0].ownedBranches.length).toBe(0);
+				expect(JSON.parse(status.stdout).sessions[0].state).toBe("ready");
+				if (mode === "orphaned-force") rmSync(metadata.worktreePath, { recursive: true, force: true });
+				if (mode === "force") writeFileSync(join(metadata.worktreePath, "dirty.txt"), "discard checkout files only\n");
+				const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes", ...(mode.includes("force") ? ["--force"] : [])], fixture.environment);
+				expect(finished.status).toBe(0);
+				expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
+				expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
+				if (mode !== "renamed") expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("requires ownership-aware v2 metadata even when a borrowed branch looks like a legacy managed branch", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const branch = "agent/review-auth";
+			git(fixture.remote, "update-ref", `refs/heads/${branch}`, fixture.head);
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, headRefName: branch }));
+			git(fixture.checkout, "fetch", "origin");
+			git(fixture.checkout, "branch", "--track", branch, `origin/${branch}`);
+			git(fixture.checkout, "config", `branch.${branch}.pushRemote`, "origin");
+			const created = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			const receipt = JSON.parse(created.stdout);
+			expect(receipt.version).toBe(1);
+			expect(receipt.session.version).toBe(2);
+			expect(receipt.session.initialBranchOwned).toBe(false);
+			const record = sessionMetadataPath(fixture.checkout, "review-auth");
+			const before = readFileSync(record, "utf8");
+			expect(runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--json"], fixture.environment).status).toBe(0);
+			for (const corruption of ["downgrade", "missing-ownership"]) {
+				const corrupt = { ...receipt.session };
+				if (corruption === "downgrade") corrupt.version = 1;
+				else delete corrupt.initialBranchOwned;
+				writeFileSync(record, JSON.stringify(corrupt));
+				const refused = runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment);
+				expect(refused.status).toBe(1);
+				expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
+				expect(existsSync(receipt.session.worktreePath)).toBe(true);
+			}
+			writeFileSync(record, before);
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment).status).toBe(0);
+			expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("borrows the configured fork upstream, honors its push override, and does not reconfigure aliases", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.checkout, "remote", "add", "z-source", fixture.forkUrl);
+			git(fixture.checkout, "remote", "add", "a-alias", fixture.forkUrl);
+			git(fixture.checkout, "fetch", "z-source");
+			git(fixture.checkout, "branch", "--track", fixture.branch, `z-source/${fixture.branch}`);
+			git(fixture.checkout, "config", "remote.pushDefault", "origin");
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const unsafe = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(unsafe.status).toBe(1);
+			expect(unsafe.stderr).toContain("source repository");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			git(fixture.checkout, "config", `branch.${fixture.branch}.pushRemote`, "z-source");
+			const compatible = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const created = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			expect(JSON.parse(created.stdout).session.pr.sourceRemote).toBe("z-source");
+			expect(JSON.parse(created.stdout).session.initialBranchOwned).toBe(false);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(compatible);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("deletes only session-created follow-up branches when force-finishing borrowed work", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			prepareBorrowedBranch(fixture);
+			const created = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			const worktree = JSON.parse(created.stdout).session.worktreePath;
+			git(worktree, "checkout", "-b", "fix/session-owned");
+			const status = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("fix/session-owned");
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment).status).toBe(0);
+			expect(git(fixture.checkout, "branch", "--list", "fix/session-owned")).toBe("");
+			expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(fixture.head);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves a borrowed branch and configuration when preparation fails (AC-19)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			prepareBorrowedBranch(fixture);
+			writeConfig(fixture.checkout, "unused", ["sh", "-c", "exit 7"]);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Configured command exited with status 7");
+			expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(fixture.head);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+			expect(result.stdout).toBe("");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses missing or conflicting borrowed-branch tracking without rewriting it", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			prepareBorrowedBranch(fixture);
+			for (const merge of ["refs/heads/master", ""]) {
+				if (merge) git(fixture.checkout, "config", `branch.${fixture.branch}.merge`, merge);
+				else git(fixture.checkout, "config", "--unset", `branch.${fixture.branch}.merge`);
+				const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+				const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain("tracking");
+				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+				expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(fixture.head);
+			}
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+describe("historical PRs and release bases", () => {
+	for (const state of ["CLOSED", "MERGED"]) {
+		for (const flags of [[], ["-c"]]) {
+			it(`reviews ${state} PRs with a fetchable head: ${flags.length ? "independent" : "review"} (AC-12)`, () => {
+				const fixture = createPullRequestFixture();
+				try {
+					writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, state }));
+					const refs = git(fixture.remote, "show-ref");
+					const created = runCli(fixture.checkout, ["history", "create", "--pr", "123", ...flags, "--trust-pr", "--json"], fixture.environment);
+					expect(created.status).toBe(0);
+					const metadata = JSON.parse(created.stdout).session;
+					expect(metadata.pr.state).toBe(state);
+					expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+					const status = runCli(fixture.checkout, ["history", "status"], fixture.environment);
+					expect(status.stdout).toContain(fixture.response.url);
+					expect(status.stdout).toContain(state);
+					expect(git(fixture.remote, "show-ref")).toBe(refs);
+				} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+			});
+		}
+
+		it(`reviews ${state} PRs whose source branch was deleted without recreating it`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				if (state === "MERGED") git(fixture.remote, "update-ref", "refs/heads/master", fixture.head);
+				git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+				writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, state }));
+				const refs = git(fixture.remote, "show-ref");
+				const created = runCli(fixture.checkout, ["history", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+				expect(created.status).toBe(0);
+				const metadata = JSON.parse(created.stdout).session;
+				expect(metadata.pr.sourceBranchMissing).toBe(true);
+				expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+				expect(git(metadata.worktreePath, "config", `branch.${fixture.branch}.merge`)).toBe(`refs/heads/${fixture.branch}`);
+				expect(git(metadata.worktreePath, "for-each-ref", "--format=%(upstream:track)", `refs/heads/${fixture.branch}`)).toBe("[gone]");
+				const finished = runCli(fixture.checkout, ["history", "finish", "--yes"], fixture.environment);
+				expect(finished.status).toBe(state === "MERGED" ? 0 : 1);
+				if (state === "CLOSED") expect(runCli(fixture.checkout, ["history", "finish", "--keep-branch", "--yes"], fixture.environment).status).toBe(0);
+				expect(git(fixture.remote, "show-ref")).toBe(refs);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("preserves a borrowed historical branch after its upstream was deleted", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			prepareBorrowedBranch(fixture);
+			git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, state: "CLOSED" }));
+			const config = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const created = runCli(fixture.checkout, ["history", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			const metadata = JSON.parse(created.stdout).session;
+			expect(metadata.version).toBe(2);
+			expect(metadata.initialBranchOwned).toBe(false);
+			expect(metadata.pr.sourceBranchMissing).toBe(true);
+			expect(runCli(fixture.checkout, ["history", "finish", "--yes"], fixture.environment).status).toBe(0);
+			expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(fixture.head);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reviews a deleted fork branch even with an existing single-branch fetch configuration", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.fork, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+			git(fixture.checkout, "remote", "add", "-t", fixture.branch, "contributor", fixture.forkUrl);
+			const response = JSON.parse(readFileSync(fixture.responsePath, "utf8"));
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...response, state: "MERGED" }));
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const created = runCli(fixture.checkout, ["history", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			expect(JSON.parse(created.stdout).session.pr.sourceBranchMissing).toBe(true);
+			expect(JSON.parse(created.stdout).session.pr.sourceRemote).toBe("contributor");
+			expect(runCli(fixture.checkout, ["history", "finish", "--keep-branch", "--yes"], fixture.environment).status).toBe(0);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toContain(before.trim());
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not mistake a failed source-branch query for a deleted branch", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, state: "CLOSED" }));
+			const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8", env: process.env }).stdout.trim();
+			const shim = join(fixture.root, "bin", "git");
+			writeFileSync(shim, `#!/usr/bin/env bash
+if [ "$1" = ls-remote ] && [ "$2" = --exit-code ]; then echo 'permission denied' >&2; exit 128; fi
+exec ${tomlString(realGit)} "$@"
+`);
+			chmodSync(shim, 0o755);
+			const failed = runCli(fixture.checkout, ["history", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(failed.status).toBe(1);
+			expect(failed.stderr).toContain("absence was not established");
+			expect(failed.stdout).toBe("");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires explicit independent mode when the historical source repository is no longer identifiable", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, state: "CLOSED", isCrossRepository: true, headRepository: null, headRepositoryOwner: null }));
+			const config = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const review = runCli(fixture.checkout, ["history", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(review.status).toBe(1);
+			expect(review.stderr).toContain("-c");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			const independent = runCli(fixture.checkout, ["history", "create", "--pr", "123", "-c", "--trust-pr", "--json"], fixture.environment);
+			expect(independent.status).toBe(0);
+			const metadata = JSON.parse(independent.stdout).session;
+			expect(metadata.pr.sourceRepository).toBe(null);
+			expect(metadata.pr.sourceRemote).toBe(undefined);
+			expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("fails clearly before execution when the retained PR ref cannot be fetched", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, state: "CLOSED" }));
+			git(fixture.remote, "update-ref", "-d", "refs/pull/123/head");
+			const result = runCli(fixture.checkout, ["history", "create", "--pr", "123", "-c", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Could not fetch PR #123 head");
+			expect(result.stdout).toBe("");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+			expect(existsSync(join(fixture.worktrees, "history"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const flags of [[], ["-c"]]) {
+		it(`checks freshness and cleanup against a release base, not master: ${flags.length ? "independent" : "review"} (AC-17)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				git(fixture.seed, "branch", "release/2.x", "master");
+				git(fixture.seed, "push", "origin", "release/2.x");
+				git(fixture.seed, "checkout", "master");
+				advanceRemoteDefault(fixture);
+				writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, baseRefName: "release/2.x" }));
+				const created = runCli(fixture.checkout, ["release-review", "create", "--pr", "123", ...flags, "--trust-pr", "--json"], fixture.environment);
+				expect(created.status).toBe(0);
+				const metadata = JSON.parse(created.stdout).session;
+				expect(metadata.defaultBranch).toBe("master");
+				expect(metadata.pr.baseBranch).toBe("release/2.x");
+				const fresh = runCli(fixture.checkout, ["release-review", "status", "--json"], fixture.environment);
+				expect(JSON.parse(fresh.stdout).sessions[0].fresh).toBe(true);
+				git(fixture.seed, "checkout", "release/2.x");
+				writeFileSync(join(fixture.seed, "release.txt"), "advance release\n");
+				git(fixture.seed, "add", "release.txt");
+				git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Advance release");
+				git(fixture.seed, "push", "origin", "release/2.x");
+				const stale = runCli(fixture.checkout, ["release-review", "status", "--refresh", "--json"], fixture.environment);
+				expect(JSON.parse(stale.stdout).sessions[0].fresh).toBe(false);
+				const launched = runCli(fixture.checkout, ["release-review", "launch"], fixture.environment);
+				expect(launched.status).toBe(0);
+				expect(launched.stderr).toContain("latest origin/release/2.x");
+				git(fixture.seed, "-c", "commit.gpgsign=false", "merge", "--no-ff", fixture.branch, "-m", "Merge into release");
+				git(fixture.seed, "push", "origin", "release/2.x");
+				git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+				expect(runCli(fixture.checkout, ["release-review", "finish", "--yes"], fixture.environment).status).toBe(0);
+				expect(existsSync(metadata.worktreePath)).toBe(false);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+});
+
+describe("PR dependency diagnostics", () => {
+	for (const [code, message, expected, loginHint] of [
+		[1, "GraphQL: Could not resolve to a PullRequest with the number of 123.", "Could not resolve PR #123 in fixture/repo", false],
+		[4, "credentials missing", "GitHub authentication required", true],
+	] as const) {
+		it(`distinguishes GitHub lookup/authentication failure: exit ${code} (AC-20)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				const result = runCli(fixture.checkout, ["diagnostic", "create", "--pr", "123", "--trust-pr", "--json"], {
+					...fixture.environment, FAKE_GH_FAILURE: "1", FAKE_GH_EXIT: String(code), FAKE_GH_MESSAGE: message,
+				});
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain(expected);
+				expect(result.stderr.includes("gh auth login")).toBe(loginHint);
+				expect(result.stdout).toBe("");
+				expect(existsSync(fixture.prepareLog)).toBe(false);
+				expect(existsSync(join(fixture.worktrees, "diagnostic"))).toBe(false);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("identifies a missing gh executable without pretending authentication failed", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const bin = join(fixture.root, "without-gh");
+			mkdirSync(bin);
+			for (const command of ["node", "git"]) {
+				const resolved = spawnSync("sh", ["-c", `command -v ${command}`], { encoding: "utf8", env: process.env }).stdout.trim();
+				symlinkSync(resolved, join(bin, command));
+			}
+			const result = runCli(fixture.checkout, ["diagnostic", "create", "--pr", "123", "--trust-pr", "--json"], { PATH: bin });
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("GitHub CLI (gh) is not available");
+			expect(result.stderr.includes("gh auth login")).toBe(false);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+for (const shell of ["bash", "zsh", "fish"]) {
+	it(`completes PR flags offline, but not options in PR-value position: ${shell}`, () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const completion = runCli(fixture.checkout, ["completion", shell]);
+			const path = join(fixture.root, shell === "zsh" ? "_agent_session" : "completion");
+			writeFileSync(path, completion.stdout.replaceAll("-c agent-session ", "-c as "));
+			const script = shell === "fish" ? `
+set -g fish_complete_path "$FIXTURE_ROOT"
+complete -c as -e
+source "$COMPLETION"
+complete -C 'as task create --' | string replace -r '^' 'create:'
+complete -C 'as task start --' | string replace -r '^' 'start:'
+complete -C 'as task create --pr --' | string replace -r '^' 'value:'
+true
+` : shell === "zsh" ? `
+fpath=("$FIXTURE_ROOT" $fpath)
+autoload -Uz compinit
+compinit -D -i
+_describe() { for candidate in "\${candidates[@]}"; do print -r -- "$label:$candidate"; done; }
+_message() { :; }
+label=create; words=(as task create --); CURRENT=4; _agent_session
+label=start; words=(as task start --); CURRENT=4; _agent_session
+label=value; words=(as task create --pr --); CURRENT=5; _agent_session
+` : `
+source "$COMPLETION"
+COMP_WORDS=(as task create --); COMP_CWORD=3; _agent_session; printf 'create:%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as task start --); COMP_CWORD=3; _agent_session; printf 'start:%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as task create --pr --); COMP_CWORD=4; _agent_session; printf 'value:%s\\n' "\${COMPREPLY[@]}"
+`;
+			const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "zsh" ? "-f" : "--noprofile", "-c", script], {
+				cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, ...fixture.environment, COMPLETION: path, FIXTURE_ROOT: fixture.root },
+			});
+			expect(result.status).toBe(0);
+			for (const action of ["create", "start"]) {
+				for (const flag of ["--pr", "--trust-pr", "--create-branch"]) expect(result.stdout).toContain(`${action}:${flag}`);
+			}
+			expect(result.stdout.includes("value:--")).toBe(false);
+			expect(existsSync(fixture.ghLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
 }
 
 describe("subject-first invocation", () => {
