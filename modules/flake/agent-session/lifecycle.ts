@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { resolvePullRequest, fetchPullRequestHead } from "./github.ts";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
 import { unrecordedRetirementHint } from "./arguments.ts";
@@ -282,6 +283,7 @@ function createSession(
 	slug: string,
 	report: ProgressReporter = progressReporter("create", false),
 	json = false,
+	prNumber?: number,
 ): { config: AgentSessionConfig; metadata: SessionMetadata } {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -305,7 +307,14 @@ function createSession(
 		throw new CliError(`Primary checkout must be on ${defaultBranch}.`);
 	}
 
-	const branch = `agent/${slug}`;
+	const pr = prNumber === undefined ? undefined : runPhase(report, "pr-resolve", () => {
+		const resolved = resolvePullRequest(root, remote, prNumber);
+		if (resolved.baseBranch !== defaultBranch) {
+			throw new CliError("PRs targeting a non-default base branch are not supported yet.");
+		}
+		return resolved;
+	});
+	const branch = pr?.headBranch ?? `agent/${slug}`;
 	const configuredWorktreeRoot = resolveWorktreeRoot(
 		root,
 		config.worktree_root,
@@ -329,15 +338,29 @@ function createSession(
 	mkdirSync(configuredWorktreeRoot, { recursive: true });
 	const worktreeRoot = realpathSync(configuredWorktreeRoot);
 	const worktreePath = join(worktreeRoot, slug);
-	const statePath = metadataPath(root, slug);
-	if (existsSync(statePath))
+	if (sessionRecordExists(root, slug))
 		throw new CliError(`Session already exists: ${slug}`);
 	if (existsSync(worktreePath) || lstatExists(worktreePath)) {
 		throw new CliError(
 			`Refusing to modify unmanaged assets at ${worktreePath}.`,
 		);
 	}
-	if (
+	if (pr) {
+		const occupied = git(root, ["worktree", "list", "--porcelain"]).split(/\n\n+/)
+			.find((record) => record.split("\n").includes(`branch refs/heads/${branch}`));
+		if (occupied) {
+			const path = occupied.split("\n").find((line) => line.startsWith("worktree "))?.slice(9);
+			throw new CliError(`PR branch ${branch} is already checked out at ${path}.`);
+		}
+		if (preexistingBranches.includes(branch)) {
+			throw new CliError(`Refusing to adopt preexisting local branch ${branch}; branch reuse is not supported yet.`);
+		}
+		const branchPattern = branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		if (run("git", ["config", "--get-regexp", `^branch\\.${branchPattern}\\.`], root).status === 0) {
+			throw new CliError(`Refusing to overwrite preexisting local branch configuration for ${branch}.`);
+		}
+		runPhase(report, "pr-fetch", () => fetchPullRequestHead(root, remote, pr));
+	} else if (
 		run(
 			"git",
 			["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -367,7 +390,7 @@ function createSession(
 					"-b",
 					branch,
 					worktreePath,
-					`${remote}/${defaultBranch}`,
+					pr?.headCommit ?? `${remote}/${defaultBranch}`,
 				],
 				root,
 				json ? "pipe" : "inherit",
@@ -378,6 +401,10 @@ function createSession(
 			}
 		});
 		created = true;
+		if (pr) runPhase(report, "pr-track", () => {
+			git(root, ["branch", `--set-upstream-to=${remote}/${branch}`, branch]);
+			git(root, ["config", `branch.${branch}.pushRemote`, remote]);
+		});
 		runPhase(report, "worktree-prepare", () => {
 			linkLocalFiles(root, worktreePath, config.local_links);
 			if (executeConfigured(config.prepare_command, worktreePath, process.env, json ? "pipe" : "inherit") !== 0) {
@@ -395,6 +422,7 @@ function createSession(
 			createdAt: new Date().toISOString(),
 			conversation: null,
 			preexistingBranches,
+			...(pr ? { pr } : {}),
 		};
 		runPhase(report, "metadata-record", () => writeMetadata(root, metadata));
 		recorded = true;
@@ -418,7 +446,7 @@ function reportCreated(metadata: SessionMetadata, json = false): void {
 	writeCommandResult(
 		{ version: 1, command: "create", dryRun: false, session: metadata },
 		json,
-		`Session created without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n`,
+		`Session created without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${metadata.pr.url} (${metadata.pr.state})\n` : ""}`,
 	);
 }
 
@@ -427,7 +455,12 @@ export function create(
 	slug: string,
 	dryRun: boolean,
 	json: boolean,
+	prNumber?: number,
+	trustPr = false,
 ): number {
+	if (prNumber !== undefined && !trustPr) {
+		throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr; interactive confirmation is not supported yet.");
+	}
 	const report = progressReporter("create", json);
 	if (dryRun) {
 		const plan = previewCreate(root, slug, report);
@@ -439,7 +472,7 @@ export function create(
 		return 0;
 	}
 	const prepared = withOperationLock(root, "create", () =>
-		createSession(root, slug, report, json),
+		createSession(root, slug, report, json, prNumber),
 	);
 	reportCreated(prepared.metadata, json);
 	return 0;

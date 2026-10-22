@@ -6,6 +6,19 @@ export interface AgentSessionConfig {
 	local_links: string[];
 }
 
+export interface PullRequestMetadata {
+	number: number;
+	url: string;
+	repository: string;
+	baseBranch: string;
+	headBranch: string;
+	headCommit: string;
+	state: "OPEN" | "CLOSED" | "MERGED";
+	isDraft: boolean;
+	mode: "review";
+	trustedHeadCommit: string;
+}
+
 export interface SessionMetadata {
 	version: 1;
 	slug: string;
@@ -16,6 +29,7 @@ export interface SessionMetadata {
 	createdAt: string;
 	conversation: null;
 	preexistingBranches?: string[];
+	pr?: PullRequestMetadata;
 }
 
 export interface OperationLock {

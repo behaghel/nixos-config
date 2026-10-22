@@ -235,6 +235,42 @@ creation without fetching or modifying Git. Human-readable creation and agent
 startup output are unchanged. The entrypoint drains pending stdout/stderr writes
 before exiting, including JSON responses larger than a pipe buffer.
 
+## Reviewing a GitHub PR
+
+```sh
+as review-auth create --pr 123 --trust-pr
+as review-auth create --pr 123 --trust-pr --json
+```
+
+This checks out the PR's source head, not its synthetic merge commit, and
+prepares a managed worktree without launching an agent or pushing. The packaged
+launcher includes `gh`; authenticate it with `gh auth login` before use.
+
+`--trust-pr` explicitly authorizes preparation and later execution in this PR
+checkout. Inspect the PR before granting trust: its environment configuration
+can execute code. Trust is recorded against the fetched head commit. Without
+the flag, creation refuses execution; interactive confirmation is not available.
+
+Supported selection is a PR number in this checkout's GitHub upstream repository.
+The PR must be open, non-draft, target the default branch, and have its source
+branch in the same repository. Its local branch must not already exist or have
+saved configuration. If checked out elsewhere, the error identifies that path.
+URL selection, forks, separate-work mode, PR previews, `start --pr`, and reuse of
+an existing session are not available. Unsupported requests fail rather than
+falling back to default-branch creation.
+
+The new local branch tracks the PR's source branch for `git push`. Conflicting
+push URLs, explicit remote push refspecs, mirror mode, and `push.default=matching`
+are refused rather than rewritten. Git transport rewrites and credentials remain
+under the user's control. Creation verifies that the resolved PR head, fetched
+PR ref, and fetched source branch agree before preparing the checkout.
+
+Creation receipts and `status --json` expose a `pr` object containing `number`,
+`url`, `repository`, `baseBranch`, `headBranch`, `headCommit`, `state`, `isDraft`,
+`mode`, and `trustedHeadCommit`. Existing non-PR session records are unchanged.
+Normal cleanup protects unpushed review fixes and removes only session-owned
+local assets; it never deletes the remote PR branch.
+
 ## Project settings
 
 ```nix
@@ -327,6 +363,7 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `completion.ts` | Dynamic candidates and Bash/Zsh/Fish completion scripts |
 | `sessions.ts` | Configuration, session records, locks, discovery, and path validation |
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
+| `github.ts` | GitHub PR resolution, source-head verification, and review push safeguards |
 | `inspection.ts` | Local session state, branch ownership, and status reporting |
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
@@ -341,7 +378,8 @@ do not import command dispatch or lifecycle operations.
 
 ## Runtime and verification
 
-The command uses Nix-provided Node.js 24's native TypeScript support and Git.
+The command uses Nix-provided Node.js 24's native TypeScript support, Git,
+and the GitHub CLI (`gh`) for PR selection.
 `run` also needs the `devenv` executable on PATH.
 It needs no npm dependencies, install step, or Bun runtime. Bun remains only in
 this repository's optional regression-test profile; the default shell does not

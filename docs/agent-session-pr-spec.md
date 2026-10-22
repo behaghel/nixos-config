@@ -171,7 +171,7 @@ not themselves constitute adopting a new remote head.
   `tests/agent-session-templates.test.ts` for relevant regression coverage.
 - A focused GitHub/PR helper and associated tests within the same module/test
   boundaries, if warranted; no new provider framework is required.
-- `modules/flake/agent-session/default.nix` and `devenv.nix` only as needed to
+- `modules/flake/agent-session/devenv.nix` and `devenv.nix` only as needed to
   make the approved `gh` dependency available for PR operations and tests.
 
 **Must not modify:** host configuration, activation behavior, unrelated agent

@@ -110,22 +110,37 @@ export function parseCreateArguments(args: string[]): {
 	slug: string;
 	dryRun: boolean;
 	json: boolean;
+	pr?: number;
+	trustPr: boolean;
 } {
 	let slug: string | undefined;
 	let dryRun = false;
 	let json = false;
-	for (const argument of args) {
+	let pr: number | undefined;
+	let trustPr = false;
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index] ?? "";
 		if (argument === "--dry-run") dryRun = true;
 		else if (argument === "--json") json = true;
+		else if (argument === "--trust-pr") trustPr = true;
+		else if (argument === "--pr") {
+			const value = args[++index] ?? "";
+			if (pr !== undefined || !/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
+				throw argumentError("--pr requires one positive PR number; URL selection is not supported yet.");
+			}
+			pr = Number(value);
+		}
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("create", argument, ["--dry-run", "--json"]);
+			throw unknownOption("create", argument, ["--dry-run", "--json", "--pr", "--trust-pr"]);
 		} else {
 			throw argumentError(`Unexpected argument '${argument}' for 'create'.`);
 		}
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'create'.");
-	return { slug, dryRun, json };
+	if (trustPr && pr === undefined) throw argumentError("--trust-pr requires --pr.");
+	if (pr !== undefined && dryRun) throw argumentError("PR creation previews are not supported yet.");
+	return { slug, dryRun, json, pr, trustPr };
 }
 
 export function parseStartArguments(args: string[]): {
@@ -267,7 +282,7 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
-		"  agent-session <task-slug> create [--dry-run] [--json]",
+		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number> --trust-pr]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent]",
 		"  agent-session <task-slug> resume",

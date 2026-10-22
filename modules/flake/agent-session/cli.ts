@@ -43,6 +43,8 @@ export function main(args: string[]): number {
 				options.slug,
 				options.dryRun,
 				options.json,
+				options.pr,
+				options.trustPr,
 			);
 		}
 		if (command === "completion") {

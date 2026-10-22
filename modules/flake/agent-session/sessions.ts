@@ -18,6 +18,7 @@ import {
 	worktreeIsRegistered,
 } from "./git.ts";
 import { CliError, run } from "./runtime.ts";
+import { validPullRequest } from "./github.ts";
 import type {
 	AgentSessionConfig,
 	SessionMetadata,
@@ -207,7 +208,10 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 		? realpathSync(metadata.worktreePath)
 		: resolve(metadata.worktreePath);
 	if (
-		metadata.branch !== `agent/${slug}` ||
+		(metadata.pr !== undefined
+			? !validPullRequest(metadata.pr) || metadata.branch !== metadata.pr.headBranch ||
+				run("git", ["check-ref-format", "--branch", metadata.branch], root).status !== 0
+			: metadata.branch !== `agent/${slug}`) ||
 		!isAbsolute(metadata.worktreePath) ||
 		canonicalWorktree === primaryRoot(root)
 	) {
