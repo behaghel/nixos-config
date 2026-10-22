@@ -6,9 +6,12 @@ export interface AgentSessionConfig {
 	local_links: string[];
 }
 
+export type PullRequestMode = "review" | "independent";
+
 export interface PullRequestSelection {
 	number: number;
 	repository?: string;
+	mode?: PullRequestMode;
 }
 
 export interface PullRequestMetadata {
@@ -20,7 +23,7 @@ export interface PullRequestMetadata {
 	headCommit: string;
 	state: "OPEN" | "CLOSED" | "MERGED";
 	isDraft: boolean;
-	mode: "review";
+	mode: PullRequestMode;
 	trustedHeadCommit: string;
 	sourceRepository?: string;
 	sourceRemote?: string;

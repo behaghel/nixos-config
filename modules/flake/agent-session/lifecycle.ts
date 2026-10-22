@@ -244,7 +244,7 @@ function previewCreate(
 		const canonicalRoot = existsSync(configuredWorktreeRoot)
 			? realpathSync(configuredWorktreeRoot)
 			: configuredWorktreeRoot;
-		const branch = selection === undefined ? `agent/${slug}` : null;
+		const branch = selection === undefined || selection.mode === "independent" ? `agent/${slug}` : null;
 		const worktreePath = join(canonicalRoot, slug);
 		if (sessionRecordExists(root, slug)) {
 			throw new CliError(`Session already exists: ${slug}`);
@@ -254,7 +254,7 @@ function previewCreate(
 				`Refusing to modify unmanaged assets at ${worktreePath}.`,
 			);
 		}
-		if (selection === undefined && (
+		if (branch !== null && (
 			run(
 				"git",
 				["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -278,7 +278,7 @@ function previewCreate(
 			defaultBranch,
 			base: selection === undefined ? `${remote}/${defaultBranch}` : null,
 			...(selection === undefined ? {} : {
-				pr: { number: selection.number, resolved: false, mode: "review", repository: null,
+				pr: { number: selection.number, resolved: false, mode: selection.mode ?? "review", repository: null,
 					url: null, baseBranch: null, headBranch: null, headCommit: null },
 				trustRequired: true,
 			}),
@@ -289,7 +289,7 @@ function previewCreate(
 	});
 }
 
-function assertNewReviewBranch(root: string, branch: string): void {
+function assertNewSessionBranch(root: string, branch: string, independentRemote?: string): void {
 	const occupied = git(root, ["worktree", "list", "--porcelain"]).split(/\n\n+/)
 		.find((record) => record.split("\n").includes(`branch refs/heads/${branch}`));
 	if (occupied) {
@@ -298,6 +298,9 @@ function assertNewReviewBranch(root: string, branch: string): void {
 	}
 	if (localBranches(root).has(branch)) {
 		throw new CliError(`Refusing to adopt preexisting local branch ${branch}; branch reuse is not supported yet.`);
+	}
+	if (independentRemote && run("git", ["show-ref", "--verify", "--quiet", `refs/remotes/${independentRemote}/${branch}`], root).status === 0) {
+		throw new CliError(`Refusing to modify unmanaged assets for branch ${branch}.`);
 	}
 	const branchPattern = branch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	if (run("git", ["config", "--get-regexp", `^branch\\.${branchPattern}\\.`], root).status === 0) {
@@ -343,7 +346,7 @@ function createSession(
 		}
 		return resolved;
 	});
-	const branch = pr?.headBranch ?? `agent/${slug}`;
+	const branch = pr?.mode === "review" ? pr.headBranch : `agent/${slug}`;
 	const configuredWorktreeRoot = resolveWorktreeRoot(
 		root,
 		config.worktree_root,
@@ -375,7 +378,7 @@ function createSession(
 		);
 	}
 	if (pr) {
-		assertNewReviewBranch(root, branch);
+		assertNewSessionBranch(root, branch, pr.mode === "independent" ? remote : undefined);
 		runPhase(report, "pr-fetch", () => fetchPullRequestHead(root, remote, pr));
 		if (!trustPr) runPhase(report, "pr-trust", () => {
 			if (!process.stdin.isTTY) throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
@@ -389,7 +392,7 @@ function createSession(
 				throw new CliError("PR creation target changed during confirmation. Inspect it and retry.");
 			}
 			ensureClean(root);
-			assertNewReviewBranch(root, branch);
+			assertNewSessionBranch(root, branch, pr.mode === "independent" ? remote : undefined);
 		});
 	} else if (
 		run(
@@ -412,7 +415,7 @@ function createSession(
 	let recorded = false;
 	let createdSourceRemote: string | undefined;
 	try {
-		if (pr) runPhase(report, "pr-source", () => {
+		if (pr?.mode === "review") runPhase(report, "pr-source", () => {
 			const source = prepareReviewSource(root, remote, slug, pr);
 			if (source.created) createdSourceRemote = source.remote;
 			pr.sourceRemote = source.remote;
@@ -438,7 +441,7 @@ function createSession(
 			}
 		});
 		created = true;
-		if (pr) runPhase(report, "pr-track", () => {
+		if (pr?.mode === "review") runPhase(report, "pr-track", () => {
 			git(root, ["branch", `--set-upstream-to=${pr.sourceRemote}/${branch}`, branch]);
 			if (git(root, ["config", "--get", `branch.${branch}.merge`]) !== `refs/heads/${pr.headBranch}` ||
 				git(root, ["config", "--get", `branch.${branch}.remote`]) !== pr.sourceRemote) {
@@ -511,7 +514,7 @@ export function create(
 			json,
 			selection === undefined
 				? `Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`
-				: `Would prepare PR #${selection.number} at ${String(plan.worktreePath)}. PR identity, branch and head are unresolved; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
+				: `Would prepare PR #${selection.number} at ${String(plan.worktreePath)}. ${selection.mode === "independent" ? `Independent branch ${String(plan.branch)} requested; PR identity and head are unresolved` : "PR identity, branch and head are unresolved"}; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
 		);
 		return 0;
 	}

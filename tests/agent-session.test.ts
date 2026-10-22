@@ -722,6 +722,95 @@ describe("PR URLs and fork sources", () => {
 	});
 });
 
+describe("independent work from a PR", () => {
+	for (const flag of ["-c", "--create-branch"]) {
+		it(`creates agent/<slug> with ${flag} while leaving an occupied PR branch untouched (AC-5)`, () => {
+			const fixture = createPullRequestFixture();
+			try {
+				git(fixture.checkout, "fetch", "origin");
+				const occupied = join(fixture.root, "existing-review");
+				git(fixture.checkout, "worktree", "add", "--track", "-b", fixture.branch, occupied, `origin/${fixture.branch}`);
+				writeFileSync(join(occupied, "local-review.txt"), "keep my review\n");
+				const sourceConfig = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+				const result = runCli(fixture.checkout, ["followup", "create", "--pr", "123", flag, "--trust-pr", "--json"], fixture.environment);
+				expect(result.status).toBe(0);
+				const metadata = JSON.parse(result.stdout).session;
+				expect(metadata.branch).toBe("agent/followup");
+				expect(metadata.pr.mode).toBe("independent");
+				expect(metadata.pr.headBranch).toBe(fixture.branch);
+				expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+				expect(git(metadata.worktreePath, "for-each-ref", "--format=%(upstream)", "refs/heads/agent/followup")).toBe("");
+				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(sourceConfig);
+				expect(readFileSync(join(occupied, "local-review.txt"), "utf8")).toBe("keep my review\n");
+				expect(git(occupied, "rev-parse", "HEAD")).toBe(fixture.head);
+				const status = runCli(metadata.worktreePath, [".", "status", "--json"], fixture.environment);
+				expect(status.status).toBe(0);
+				expect(JSON.parse(status.stdout).sessions[0].publication).toBe("unpublished");
+				expect(runCli(fixture.checkout, ["followup", "finish", "--yes"], fixture.environment).status).toBe(1);
+				expect(existsSync(metadata.worktreePath)).toBe(true);
+				expect(runCli(fixture.checkout, ["followup", "finish", "--keep-branch", "--yes"], fixture.environment).status).toBe(0);
+				expect(git(fixture.checkout, "rev-parse", "agent/followup")).toBe(fixture.head);
+				expect(readFileSync(join(occupied, "local-review.txt"), "utf8")).toBe("keep my review\n");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("starts independent fork work without fetching or configuring its source remote", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			rmSync(fixture.fork, { recursive: true, force: true });
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["followup", "create", "--pr", fixture.response.url, "-c", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const metadata = JSON.parse(result.stdout).session;
+			expect(metadata.pr.mode).toBe("independent");
+			expect(metadata.pr.sourceRepository).toBe("contributor/repo");
+			expect(metadata.pr.sourceRemote).toBe(undefined);
+			expect(git(fixture.checkout, "remote")).toBe("origin");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			const refreshed = runCli(fixture.checkout, ["followup", "status", "--refresh", "--json"], fixture.environment);
+			expect(refreshed.status).toBe(0);
+			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("unpublished");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("previews the requested independent branch offline while leaving the PR head unresolved", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["followup", "create", "--pr", fixture.response.url, "-c", "--dry-run", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const plan = JSON.parse(result.stdout).plan;
+			expect(plan.branch).toBe("agent/followup");
+			expect(plan.pr.mode).toBe("independent");
+			expect(plan.pr.resolved).toBe(false);
+			expect(plan.pr.headCommit).toBe(null);
+			expect(plan.base).toBe(null);
+			expect(existsSync(fixture.ghLog)).toBe(false);
+			expect(existsSync(fixture.worktrees)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires PR selection and preserves existing follow-up branches and saved tracking", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			const missing = runCli(fixture.checkout, ["followup", "create", "-c"], fixture.environment);
+			expect(missing.status).toBe(64);
+			expect(missing.stderr).toContain("requires --pr");
+			git(fixture.checkout, "config", "branch.agent/followup.merge", `refs/heads/${fixture.branch}`);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const orphan = runCli(fixture.checkout, ["followup", "create", "--pr", "123", "-c", "--trust-pr"], fixture.environment);
+			expect(orphan.status).toBe(1);
+			expect(orphan.stderr).toContain("preexisting local branch configuration");
+			git(fixture.checkout, "branch", "agent/followup");
+			const existing = runCli(fixture.checkout, ["followup", "create", "--pr", "123", "--create-branch", "--trust-pr"], fixture.environment);
+			expect(existing.status).toBe(1);
+			expect(git(fixture.checkout, "rev-parse", "agent/followup")).toBe(git(fixture.checkout, "rev-parse", "master"));
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("subject-first invocation", () => {
 	it("creates and inspects a named session while retaining repository-wide commands", () => {
 		const fixture = createRepositoryFixture();

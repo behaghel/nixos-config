@@ -265,8 +265,10 @@ PR dry runs require no trust, GitHub lookup, remote query, checkout, preparation
 or session-record write. They use cached remote HEAD to check the primary
 branch; missing cached information fails without an online fallback. The plan
 contains `pr.number`, `pr.resolved: false`, `trustRequired: true`, and null values
-for unverified PR URL/repository/base/head and the proposed branch/base. This
-previews the request, not PR existence or checkout eligibility.
+for unverified PR URL/repository/base/head and the proposed branch/base. In
+independent mode the requested `agent/<slug>` branch name is known and shown,
+but its starting commit remains unresolved. This previews the request, not PR
+existence or checkout eligibility.
 
 Selection accepts a positive PR number or an HTTPS `github.com` PR URL. Both
 identify a PR targeting this checkout's configured upstream repository; repository
@@ -274,11 +276,11 @@ names are compared case-insensitively. A URL for another target repository is
 refused without GitHub lookup or cloning. Numbers never select another project.
 PRs may come from forks; checkout does not require push permission.
 
-The PR must be open, non-draft, and target the default branch. Its local source
-branch must not already exist or have saved configuration. If checked out
-elsewhere, the error identifies that path. Separate-work mode, `start --pr`, and
-reuse of an existing session are not available. Unsupported requests fail rather
-than falling back to default-branch creation.
+The PR must be open, non-draft, and target the default branch. In default review
+mode its local source branch must not already exist or have saved configuration.
+If checked out elsewhere, the error identifies that path. `start --pr` and reuse
+of an existing session are not available. Unsupported requests fail rather than
+falling back to default-branch creation.
 
 The new local branch tracks the PR's source branch for `git push`. For a fork,
 creation reuses a matching configured remote without changing it, or adds
@@ -294,12 +296,34 @@ are refused rather than rewritten. Git transport rewrites and credentials remain
 under the user's control. Creation verifies that the resolved PR head, fetched
 PR ref, and fetched source branch agree before preparing the checkout.
 
+### Independent follow-up work
+
+```sh
+as auth-followup create --pr 123 -c
+as auth-followup create --pr 123 --create-branch --trust-pr --json
+```
+
+`-c` / `--create-branch` requires `--pr` and creates `agent/<slug>` at the PR's
+fetched source head. It does not check out or change the original source branch,
+so that branch can already be occupied by another worktree. Creation refuses
+an existing follow-up branch, its saved configuration, or its upstream tracking
+ref rather than resetting or adopting them.
+
+This mode still requires execution trust, but does not fetch or configure a fork
+source remote, add an upstream for the new branch, or configure pushes to the
+original PR. Ordinary user Git settings remain unchanged. Publication starts as
+`unpublished`; normal cleanup protects this separate work. Use
+`finish --keep-branch` to remove the worktree and preserve its branch.
+
 Creation receipts and `status --json` expose a `pr` object containing `number`,
 `url`, `repository`, `baseBranch`, `headBranch`, `headCommit`, `state`, `isDraft`,
 `mode`, `trustedHeadCommit`, `sourceRepository`, and `sourceRemote`. Older records
-without source fields remain readable. Status is offline by default; explicit
-refresh and guarded cleanup fetch both the target and source remotes when they
-differ. Freshness uses the target branch; publication uses the source upstream.
+without source fields remain readable. `mode` is `review` or `independent`;
+independent sessions retain PR source provenance but have no `sourceRemote`.
+Status is offline by default; explicit refresh and guarded cleanup fetch both
+target and source remotes for review sessions when they differ, and only the
+target remote for independent sessions. Freshness uses the target branch;
+publication uses the current local branch's upstream, if any.
 Normal cleanup protects unpushed review fixes and removes only session-owned
 local assets; it never deletes the remote PR branch.
 

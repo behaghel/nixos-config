@@ -37,10 +37,10 @@ export function validPullRequest(value: unknown): value is PullRequestMetadata {
 		pr.url === `https://github.com/${pr.repository}/pull/${pr.number}` &&
 		typeof pr.baseBranch === "string" && typeof pr.headBranch === "string" &&
 		typeof pr.headCommit === "string" && /^[a-f0-9]{40}$/.test(pr.headCommit) &&
-		pr.trustedHeadCommit === pr.headCommit && pr.mode === "review" &&
+		pr.trustedHeadCommit === pr.headCommit && (pr.mode === "review" || pr.mode === "independent") &&
 		["OPEN", "CLOSED", "MERGED"].includes(pr.state ?? "") && typeof pr.isDraft === "boolean" &&
 		(pr.sourceRepository === undefined || (typeof pr.sourceRepository === "string" && repositoryPattern.test(pr.sourceRepository))) &&
-		(pr.sourceRemote === undefined || (typeof pr.sourceRemote === "string" && remotePattern.test(pr.sourceRemote) && pr.sourceRepository !== undefined));
+		(pr.sourceRemote === undefined || (pr.mode === "review" && typeof pr.sourceRemote === "string" && remotePattern.test(pr.sourceRemote) && pr.sourceRepository !== undefined));
 }
 
 export function resolvePullRequest(root: string, remote: string, selection: PullRequestSelection): PullRequestMetadata {
@@ -70,7 +70,7 @@ export function resolvePullRequest(root: string, remote: string, selection: Pull
 		number: raw.number, url: typeof raw.url === "string" ? raw.url.toLowerCase() : raw.url, repository,
 		baseBranch: raw.baseRefName, headBranch: raw.headRefName,
 		headCommit: raw.headRefOid, state: raw.state, isDraft: raw.isDraft,
-		mode: "review", trustedHeadCommit: raw.headRefOid, sourceRepository,
+		mode: selection.mode ?? "review", trustedHeadCommit: raw.headRefOid, sourceRepository,
 	};
 	if (!validPullRequest(pr) || pr.number !== selection.number ||
 		raw.isCrossRepository !== (sourceRepository !== repository) ||
@@ -79,7 +79,7 @@ export function resolvePullRequest(root: string, remote: string, selection: Pull
 		throw new CliError("gh returned invalid or mismatched PR metadata.");
 	}
 	if (pr.state !== "OPEN" || pr.isDraft) throw new CliError("Only open, non-draft PR review is supported currently.");
-	if (sourceRepository === repository) assertReviewSource(root, remote, pr);
+	if (pr.mode === "review" && sourceRepository === repository) assertReviewSource(root, remote, pr);
 	return pr;
 }
 

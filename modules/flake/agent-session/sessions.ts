@@ -209,7 +209,8 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 		: resolve(metadata.worktreePath);
 	if (
 		(metadata.pr !== undefined
-			? !validPullRequest(metadata.pr) || metadata.branch !== metadata.pr.headBranch ||
+			? !validPullRequest(metadata.pr) ||
+				metadata.branch !== (metadata.pr.mode === "independent" ? `agent/${slug}` : metadata.pr.headBranch) ||
 				run("git", ["check-ref-format", "--branch", metadata.branch], root).status !== 0
 			: metadata.branch !== `agent/${slug}`) ||
 		!isAbsolute(metadata.worktreePath) ||

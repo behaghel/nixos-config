@@ -120,11 +120,13 @@ export function parseCreateArguments(args: string[]): {
 	let json = false;
 	let pr: PullRequestSelection | undefined;
 	let trustPr = false;
+	let createBranch = false;
 	for (let index = 0; index < args.length; index++) {
 		const argument = args[index] ?? "";
 		if (argument === "--dry-run") dryRun = true;
 		else if (argument === "--json") json = true;
 		else if (argument === "--trust-pr") trustPr = true;
+		else if (argument === "-c" || argument === "--create-branch") createBranch = true;
 		else if (argument === "--pr") {
 			const value = args[++index] ?? "";
 			if (pr !== undefined) throw argumentError("--pr requires exactly one selection.");
@@ -133,13 +135,15 @@ export function parseCreateArguments(args: string[]): {
 		}
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("create", argument, ["--dry-run", "--json", "--pr", "--trust-pr"]);
+			throw unknownOption("create", argument, ["--dry-run", "--json", "--pr", "--trust-pr", "-c", "--create-branch"]);
 		} else {
 			throw argumentError(`Unexpected argument '${argument}' for 'create'.`);
 		}
 	}
 	if (!slug) throw argumentError("Missing <task-slug> for 'create'.");
 	if (trustPr && pr === undefined) throw argumentError("--trust-pr requires --pr.");
+	if (createBranch && pr === undefined) throw argumentError("--create-branch (-c) requires --pr.");
+	if (createBranch && pr) pr = { ...pr, mode: "independent" };
 	return { slug, dryRun, json, pr, trustPr };
 }
 
@@ -282,7 +286,7 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
-		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr]]",
+		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent]",
 		"  agent-session <task-slug> resume",

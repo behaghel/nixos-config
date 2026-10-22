@@ -241,14 +241,14 @@ export function inspectSession(
 }
 
 export function sessionRemotes(metadata: SessionMetadata): string[] {
-	return [...new Set([metadata.remote, ...(metadata.pr?.sourceRemote ? [metadata.pr.sourceRemote] : [])])];
+	return [...new Set([metadata.remote, ...(metadata.pr?.mode === "review" && metadata.pr.sourceRemote ? [metadata.pr.sourceRemote] : [])])];
 }
 
 export function refreshMetadataRemote(
 	root: string,
 	metadata: SessionMetadata,
 ): string {
-	if (metadata.pr) assertReviewSource(root, metadata.pr.sourceRemote ?? metadata.remote, metadata.pr);
+	if (metadata.pr?.mode === "review") assertReviewSource(root, metadata.pr.sourceRemote ?? metadata.remote, metadata.pr);
 	for (const remote of sessionRemotes(metadata)) {
 		const fetch = run("git", ["fetch", "--prune", remote], root);
 		if (fetch.status !== 0) throw new CliError(`Failed to fetch remote ${remote}.`);
