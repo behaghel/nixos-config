@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { resolvePullRequest, fetchPullRequestHead } from "./github.ts";
+import { resolvePullRequest, fetchPullRequestHead, assertPullRequestTarget, prepareReviewSource } from "./github.ts";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
 import { unrecordedRetirementHint } from "./arguments.ts";
@@ -40,7 +40,7 @@ import {
 	writeCommandResult,
 	run,
 } from "./runtime.ts";
-import type { AgentSessionConfig, SessionMetadata, ProgressReporter } from "./types.ts";
+import type { AgentSessionConfig, SessionMetadata, ProgressReporter, PullRequestSelection } from "./types.ts";
 
 function linkLocalFiles(root: string, worktree: string, paths: string[]): void {
 	for (const relativePath of paths) {
@@ -202,19 +202,20 @@ function previewCreate(
 	root: string,
 	slug: string,
 	report: ProgressReporter,
-	prNumber?: number,
+	selection?: PullRequestSelection,
 ): Record<string, unknown> {
 	return runPhase(report, "inspect-create", () => {
 		validateSlug(slug);
 		assertPrimaryCheckout(root);
 		const config = loadConfig(root);
-		ensureClean(root, prNumber !== undefined);
+		ensureClean(root, selection !== undefined);
 		const currentBranch = git(root, ["branch", "--show-current"]);
 		if (!currentBranch) {
 			throw new CliError("Primary checkout must be on a branch.");
 		}
 		const remote = upstreamRemote(root, currentBranch);
-		const defaultBranch = prNumber === undefined
+		if (selection?.repository) assertPullRequestTarget(root, remote, selection);
+		const defaultBranch = selection === undefined
 			? remoteDefaultBranch(root, remote)
 			: cachedRemoteDefaultBranch(root, remote);
 		if (currentBranch !== defaultBranch) {
@@ -243,7 +244,7 @@ function previewCreate(
 		const canonicalRoot = existsSync(configuredWorktreeRoot)
 			? realpathSync(configuredWorktreeRoot)
 			: configuredWorktreeRoot;
-		const branch = prNumber === undefined ? `agent/${slug}` : null;
+		const branch = selection === undefined ? `agent/${slug}` : null;
 		const worktreePath = join(canonicalRoot, slug);
 		if (sessionRecordExists(root, slug)) {
 			throw new CliError(`Session already exists: ${slug}`);
@@ -253,7 +254,7 @@ function previewCreate(
 				`Refusing to modify unmanaged assets at ${worktreePath}.`,
 			);
 		}
-		if (prNumber === undefined && (
+		if (selection === undefined && (
 			run(
 				"git",
 				["show-ref", "--verify", "--quiet", `refs/heads/${branch}`],
@@ -275,9 +276,9 @@ function previewCreate(
 			worktreePath,
 			remote,
 			defaultBranch,
-			base: prNumber === undefined ? `${remote}/${defaultBranch}` : null,
-			...(prNumber === undefined ? {} : {
-				pr: { number: prNumber, resolved: false, mode: "review", repository: null,
+			base: selection === undefined ? `${remote}/${defaultBranch}` : null,
+			...(selection === undefined ? {} : {
+				pr: { number: selection.number, resolved: false, mode: "review", repository: null,
 					url: null, baseBranch: null, headBranch: null, headCommit: null },
 				trustRequired: true,
 			}),
@@ -309,7 +310,7 @@ function createSession(
 	slug: string,
 	report: ProgressReporter = progressReporter("create", false),
 	json = false,
-	prNumber?: number,
+	selection?: PullRequestSelection,
 	trustPr = false,
 ): { config: AgentSessionConfig; metadata: SessionMetadata } {
 	validateSlug(slug);
@@ -322,6 +323,7 @@ function createSession(
 	if (!currentBranch)
 		throw new CliError("Primary checkout must be on a branch.");
 	const remote = upstreamRemote(root, currentBranch);
+	if (selection?.repository) assertPullRequestTarget(root, remote, selection);
 	const defaultBranch = runPhase(report, "remote-sync", () => {
 		const fetch = run("git", ["fetch", "--prune", remote], root, json ? "pipe" : "inherit");
 		if (fetch.status !== 0) {
@@ -334,8 +336,8 @@ function createSession(
 		throw new CliError(`Primary checkout must be on ${defaultBranch}.`);
 	}
 
-	const pr = prNumber === undefined ? undefined : runPhase(report, "pr-resolve", () => {
-		const resolved = resolvePullRequest(root, remote, prNumber);
+	const pr = selection === undefined ? undefined : runPhase(report, "pr-resolve", () => {
+		const resolved = resolvePullRequest(root, remote, selection);
 		if (resolved.baseBranch !== defaultBranch) {
 			throw new CliError("PRs targeting a non-default base branch are not supported yet.");
 		}
@@ -408,7 +410,13 @@ function createSession(
 
 	let created = false;
 	let recorded = false;
+	let createdSourceRemote: string | undefined;
 	try {
+		if (pr) runPhase(report, "pr-source", () => {
+			const source = prepareReviewSource(root, remote, slug, pr);
+			if (source.created) createdSourceRemote = source.remote;
+			pr.sourceRemote = source.remote;
+		});
 		runPhase(report, "worktree-create", () => {
 			const added = run(
 				"git",
@@ -431,8 +439,12 @@ function createSession(
 		});
 		created = true;
 		if (pr) runPhase(report, "pr-track", () => {
-			git(root, ["branch", `--set-upstream-to=${remote}/${branch}`, branch]);
-			git(root, ["config", `branch.${branch}.pushRemote`, remote]);
+			git(root, ["branch", `--set-upstream-to=${pr.sourceRemote}/${branch}`, branch]);
+			if (git(root, ["config", "--get", `branch.${branch}.merge`]) !== `refs/heads/${pr.headBranch}` ||
+				git(root, ["config", "--get", `branch.${branch}.remote`]) !== pr.sourceRemote) {
+				throw new CliError("Conflicting PR source tracking; refusing to target another source branch.");
+			}
+			git(root, ["config", `branch.${branch}.pushRemote`, pr.sourceRemote!]);
 		});
 		runPhase(report, "worktree-prepare", () => {
 			linkLocalFiles(root, worktreePath, config.local_links);
@@ -465,6 +477,7 @@ function createSession(
 			);
 			run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
 		}
+		if (!recorded && createdSourceRemote) git(root, ["remote", "remove", createdSourceRemote]);
 	}
 
 	if (!json) process.stderr.write(`Agent worktree ready: ${branch}\n`);
@@ -484,26 +497,26 @@ export function create(
 	slug: string,
 	dryRun: boolean,
 	json: boolean,
-	prNumber?: number,
+	selection?: PullRequestSelection,
 	trustPr = false,
 ): number {
-	if (!dryRun && prNumber !== undefined && !trustPr && !process.stdin.isTTY) {
+	if (!dryRun && selection !== undefined && !trustPr && !process.stdin.isTTY) {
 		throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
 	}
 	const report = progressReporter("create", json);
 	if (dryRun) {
-		const plan = previewCreate(root, slug, report, prNumber);
+		const plan = previewCreate(root, slug, report, selection);
 		writeCommandResult(
 			{ version: 1, command: "create", dryRun: true, plan },
 			json,
-			prNumber === undefined
+			selection === undefined
 				? `Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`
-				: `Would prepare PR #${prNumber} at ${String(plan.worktreePath)}. PR identity, branch and head are unresolved; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
+				: `Would prepare PR #${selection.number} at ${String(plan.worktreePath)}. PR identity, branch and head are unresolved; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
 		);
 		return 0;
 	}
 	const prepared = withOperationLock(root, "create", () =>
-		createSession(root, slug, report, json, prNumber, trustPr),
+		createSession(root, slug, report, json, selection, trustPr),
 	);
 	reportCreated(prepared.metadata, json);
 	return 0;

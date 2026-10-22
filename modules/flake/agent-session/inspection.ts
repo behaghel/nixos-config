@@ -1,4 +1,5 @@
 import { existsSync, realpathSync } from "node:fs";
+import { assertReviewSource } from "./github.ts";
 import { sessionCommand } from "./arguments.ts";
 import {
 	countRevisionRange,
@@ -239,13 +240,18 @@ export function inspectSession(
 	};
 }
 
+export function sessionRemotes(metadata: SessionMetadata): string[] {
+	return [...new Set([metadata.remote, ...(metadata.pr?.sourceRemote ? [metadata.pr.sourceRemote] : [])])];
+}
+
 export function refreshMetadataRemote(
 	root: string,
 	metadata: SessionMetadata,
 ): string {
-	const fetch = run("git", ["fetch", "--prune", metadata.remote], root);
-	if (fetch.status !== 0) {
-		throw new CliError(`Failed to fetch remote ${metadata.remote}.`);
+	if (metadata.pr) assertReviewSource(root, metadata.pr.sourceRemote ?? metadata.remote, metadata.pr);
+	for (const remote of sessionRemotes(metadata)) {
+		const fetch = run("git", ["fetch", "--prune", remote], root);
+		if (fetch.status !== 0) throw new CliError(`Failed to fetch remote ${remote}.`);
 	}
 	return remoteDefaultBranch(root, metadata.remote);
 }
@@ -286,9 +292,10 @@ export function showStatus(
 		}
 		let defaultBranch = metadata.defaultBranch;
 		if (refresh) {
-			const known = refreshedDefaults.get(metadata.remote);
+			const key = JSON.stringify(sessionRemotes(metadata));
+			const known = refreshedDefaults.get(key);
 			defaultBranch = known ?? refreshMetadataRemote(root, metadata);
-			refreshedDefaults.set(metadata.remote, defaultBranch);
+			refreshedDefaults.set(key, defaultBranch);
 		}
 		return inspectSession(metadata, defaultBranch);
 	});

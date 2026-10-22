@@ -244,6 +244,7 @@ function createPullRequestFixture() {
 		number: 123, url: "https://github.com/fixture/repo/pull/123",
 		state: "OPEN", isDraft: false, baseRefName: "master",
 		headRefName: branch, headRefOid: head, isCrossRepository: false,
+		headRepository: { name: "repo" }, headRepositoryOwner: { login: "fixture" },
 	};
 	writeFileSync(responsePath, JSON.stringify(response));
 	writeFileSync(join(bin, "gh"), `#!/usr/bin/env node
@@ -554,13 +555,168 @@ exec ${tomlString(realGit)} "$@"
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 
-	it("refuses fork PRs explicitly until fork review support is available", () => {
+});
+
+function createForkPullRequestFixture() {
+	const fixture = createPullRequestFixture();
+	const fork = join(fixture.root, "fork.git");
+	git(fixture.root, "clone", "--bare", fixture.remote, fork);
+	const forkUrl = "https://github.com/contributor/repo.git";
+	git(fixture.checkout, "config", `url.${fork}.insteadOf`, forkUrl);
+	// Only the fork owns the source branch; the base retains the PR ref.
+	git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
+	writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response,
+		isCrossRepository: true, headRepositoryOwner: { login: "contributor" } }));
+	const reject = join(fork, "hooks", "pre-receive");
+	writeFileSync(reject, "#!/usr/bin/env bash\necho 'fork push denied' >&2\nexit 1\n");
+	chmodSync(reject, 0o755);
+	return { ...fixture, fork, forkUrl };
+}
+
+describe("PR URLs and fork sources", () => {
+	it("resolves number and URL to the same canonical PR identity (AC-2)", () => {
 		const fixture = createPullRequestFixture();
 		try {
-			writeFileSync(fixture.responsePath, JSON.stringify({ ...fixture.response, isCrossRepository: true }));
+			const numbered = runCli(fixture.checkout, ["number-review", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(numbered.status).toBe(0);
+			expect(runCli(fixture.checkout, ["number-review", "finish", "--yes"], fixture.environment).status).toBe(0);
+			const byUrl = runCli(fixture.checkout, ["url-review", "create", "--pr", "https://github.com/FIXTURE/REPO/pull/123", "--trust-pr", "--json"], fixture.environment);
+			expect(byUrl.status).toBe(0);
+			expect(JSON.stringify(JSON.parse(byUrl.stdout).session.pr)).toBe(JSON.stringify(JSON.parse(numbered.stdout).session.pr));
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rejects foreign-target URLs without GitHub lookup or session allocation (AC-13)", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			for (const flags of [["--trust-pr"], ["--dry-run"]]) {
+				const result = runCli(fixture.checkout, ["foreign", "create", "--pr", "https://github.com/other/repo/pull/123", ...flags], fixture.environment);
+				expect(result.status).toBe(1);
+				expect(result.stderr).toContain("different repository");
+			}
+			expect(existsSync(fixture.ghLog)).toBe(false);
+			expect(existsSync(fixture.worktrees)).toBe(false);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("checks out a read-only fork and targets plain git push at its source, never the base (AC-3, AC-4)", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			const baseRefs = git(fixture.remote, "show-ref");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", fixture.response.url, "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const metadata = JSON.parse(result.stdout).session;
+			expect(metadata.pr.sourceRepository).toBe("contributor/repo");
+			const source = metadata.pr.sourceRemote;
+			expect(git(fixture.checkout, "config", `remote.${source}.url`)).toBe(fixture.forkUrl);
+			expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
+			expect(git(metadata.worktreePath, "rev-parse", "--abbrev-ref", "@{push}")).toBe(`${source}/${fixture.branch}`);
+			expect(git(metadata.worktreePath, "config", `branch.${fixture.branch}.pushRemote`)).toBe(source);
+			writeFileSync(join(metadata.worktreePath, "fix.txt"), "review fix\n");
+			git(metadata.worktreePath, "add", "fix.txt");
+			git(metadata.worktreePath, "-c", "user.name=Review", "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Review fix");
+			const pushed = spawnSync("git", ["push"], { cwd: metadata.worktreePath, encoding: "utf8", env: process.env });
+			expect(pushed.status).toBe(1);
+			expect(pushed.stderr).toContain("fork push denied");
+			expect(git(fixture.fork, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(fixture.head);
+			expect(git(fixture.remote, "show-ref")).toBe(baseRefs);
+			expect(existsSync(fixture.agentLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refreshes fork publication and cleans only local session assets", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(0);
+			const metadata = JSON.parse(result.stdout).session;
+			writeFileSync(join(fixture.seed, "next.txt"), "next\n");
+			git(fixture.seed, "add", "next.txt");
+			git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Advance fork");
+			git(fixture.fork, "fetch", fixture.seed, fixture.branch);
+			git(fixture.fork, "update-ref", `refs/heads/${fixture.branch}`, "FETCH_HEAD");
+			const stale = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+			expect(JSON.parse(stale.stdout).sessions[0].publication).toBe("published");
+			const refreshed = runCli(fixture.checkout, ["review-auth", "status", "--refresh", "--json"], fixture.environment);
+			expect(refreshed.status).toBe(0);
+			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("behind");
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment).status).toBe(0);
+			expect(existsSync(metadata.worktreePath)).toBe(false);
+			expect(git(fixture.fork, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(git(fixture.seed, "rev-parse", "HEAD"));
+			expect(git(fixture.checkout, "remote")).toContain(metadata.pr.sourceRemote);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rolls back a newly allocated fork remote when preparation fails", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			writeConfig(fixture.checkout, "unused", ["sh", "-c", "exit 7"]);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Configured command exited with status 7");
+			expect(result.stdout).toBe("");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(git(fixture.checkout, "branch", "--list", fixture.branch)).toBe("");
+			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves a matching preexisting fork remote during rollback", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.checkout, "remote", "add", "contributor", fixture.forkUrl);
+			writeConfig(fixture.checkout, "unused", ["sh", "-c", "exit 7"]);
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Configured command exited with status 7");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses a fork fetch mapping that would push review fixes to another branch", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.fork, "update-ref", "refs/heads/master", fixture.head);
+			git(fixture.checkout, "remote", "add", "contributor", fixture.forkUrl);
+			git(fixture.checkout, "config", "remote.contributor.fetch", `+refs/heads/master:refs/remotes/contributor/${fixture.branch}`);
+			git(fixture.checkout, "config", "push.default", "upstream");
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
 			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
 			expect(result.status).toBe(1);
-			expect(result.stderr).toContain("Fork PR");
+			expect(result.stderr).toContain("source tracking");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves preexisting refs in a proposed fork remote namespace", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			const savedRef = "refs/remotes/as-pr-review-auth/private-work";
+			git(fixture.checkout, "update-ref", savedRef, "HEAD");
+			const before = git(fixture.checkout, "show-ref");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("existing source remote");
+			expect(git(fixture.checkout, "show-ref")).toBe(before);
+			expect(git(fixture.checkout, "remote")).toBe("origin");
+			expect(existsSync(fixture.prepareLog)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses conflicting fork remote configuration instead of repointing it", () => {
+		const fixture = createForkPullRequestFixture();
+		try {
+			git(fixture.checkout, "remote", "add", "contributor", fixture.forkUrl);
+			git(fixture.checkout, "config", "remote.contributor.pushurl", "https://github.com/fixture/repo.git");
+			const before = readFileSync(join(fixture.checkout, ".git", "config"), "utf8");
+			const result = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("conflicting push URL");
+			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
 			expect(existsSync(fixture.prepareLog)).toBe(false);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});

@@ -1,5 +1,7 @@
 import { CliError } from "./runtime.ts";
 import { validateSlug } from "./sessions.ts";
+import { parsePullRequestSelection } from "./github.ts";
+import type { PullRequestSelection } from "./types.ts";
 
 export const commandNames = [
 	"cd",
@@ -110,13 +112,13 @@ export function parseCreateArguments(args: string[]): {
 	slug: string;
 	dryRun: boolean;
 	json: boolean;
-	pr?: number;
+	pr?: PullRequestSelection;
 	trustPr: boolean;
 } {
 	let slug: string | undefined;
 	let dryRun = false;
 	let json = false;
-	let pr: number | undefined;
+	let pr: PullRequestSelection | undefined;
 	let trustPr = false;
 	for (let index = 0; index < args.length; index++) {
 		const argument = args[index] ?? "";
@@ -125,10 +127,9 @@ export function parseCreateArguments(args: string[]): {
 		else if (argument === "--trust-pr") trustPr = true;
 		else if (argument === "--pr") {
 			const value = args[++index] ?? "";
-			if (pr !== undefined || !/^[1-9][0-9]*$/.test(value) || !Number.isSafeInteger(Number(value))) {
-				throw argumentError("--pr requires one positive PR number; URL selection is not supported yet.");
-			}
-			pr = Number(value);
+			if (pr !== undefined) throw argumentError("--pr requires exactly one selection.");
+			try { pr = parsePullRequestSelection(value); }
+			catch { throw argumentError("--pr requires a positive PR number or a github.com PR URL."); }
 		}
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
@@ -281,7 +282,7 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
-		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number> --trust-pr]",
+		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr]]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent]",
 		"  agent-session <task-slug> resume",

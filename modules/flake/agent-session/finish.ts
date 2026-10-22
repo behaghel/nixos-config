@@ -25,6 +25,7 @@ import {
 	inspectSession,
 	statusCannotOperate,
 	refreshMetadataRemote,
+	sessionRemotes,
 } from "./inspection.ts";
 import {
 	CliError,
@@ -479,7 +480,7 @@ export function finishBulk(
 						);
 					}
 				}
-				for (const remote of new Set(records.map((record) => record.remote))) {
+				for (const remote of new Set(records.flatMap(sessionRemotes))) {
 					const fetched = run(
 						"git",
 						["fetch", "--prune", remote],

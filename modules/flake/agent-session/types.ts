@@ -6,6 +6,11 @@ export interface AgentSessionConfig {
 	local_links: string[];
 }
 
+export interface PullRequestSelection {
+	number: number;
+	repository?: string;
+}
+
 export interface PullRequestMetadata {
 	number: number;
 	url: string;
@@ -17,6 +22,8 @@ export interface PullRequestMetadata {
 	isDraft: boolean;
 	mode: "review";
 	trustedHeadCommit: string;
+	sourceRepository?: string;
+	sourceRemote?: string;
 }
 
 export interface SessionMetadata {

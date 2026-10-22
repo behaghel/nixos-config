@@ -239,6 +239,7 @@ before exiting, including JSON responses larger than a pipe buffer.
 
 ```sh
 as review-auth create --pr 123                  # ask before executing PR code
+as review-auth create --pr https://github.com/owner/repo/pull/123
 as review-auth create --pr 123 --trust-pr --json # explicit non-interactive trust
 as review-auth create --pr 123 --dry-run --json  # offline, unresolved preview
 ```
@@ -267,23 +268,38 @@ contains `pr.number`, `pr.resolved: false`, `trustRequired: true`, and null valu
 for unverified PR URL/repository/base/head and the proposed branch/base. This
 previews the request, not PR existence or checkout eligibility.
 
-Supported selection is a PR number in this checkout's GitHub upstream repository.
-The PR must be open, non-draft, target the default branch, and have its source
-branch in the same repository. Its local branch must not already exist or have
-saved configuration. If checked out elsewhere, the error identifies that path.
-URL selection, forks, separate-work mode, `start --pr`, and reuse of an existing
-session are not available. Unsupported requests fail rather than
-falling back to default-branch creation.
+Selection accepts a positive PR number or an HTTPS `github.com` PR URL. Both
+identify a PR targeting this checkout's configured upstream repository; repository
+names are compared case-insensitively. A URL for another target repository is
+refused without GitHub lookup or cloning. Numbers never select another project.
+PRs may come from forks; checkout does not require push permission.
 
-The new local branch tracks the PR's source branch for `git push`. Conflicting
-push URLs, explicit remote push refspecs, mirror mode, and `push.default=matching`
+The PR must be open, non-draft, and target the default branch. Its local source
+branch must not already exist or have saved configuration. If checked out
+elsewhere, the error identifies that path. Separate-work mode, `start --pr`, and
+reuse of an existing session are not available. Unsupported requests fail rather
+than falling back to default-branch creation.
+
+The new local branch tracks the PR's source branch for `git push`. For a fork,
+creation reuses a matching configured remote without changing it, or adds
+`as-pr-<slug>` pointing to the source repository over HTTPS. Conflicting remote
+configuration or an existing ref namespace is preserved and refused. A failed
+creation removes only a source remote created by that attempt. Successful
+sessions retain their source remote after cleanup so preserved branches keep
+working tracking; remote repositories and their branches are never deleted.
+
+Conflicting push URLs, explicit remote push refspecs, mirror mode,
+`push.default=matching`, and fetch mappings that would track another source branch
 are refused rather than rewritten. Git transport rewrites and credentials remain
 under the user's control. Creation verifies that the resolved PR head, fetched
 PR ref, and fetched source branch agree before preparing the checkout.
 
 Creation receipts and `status --json` expose a `pr` object containing `number`,
 `url`, `repository`, `baseBranch`, `headBranch`, `headCommit`, `state`, `isDraft`,
-`mode`, and `trustedHeadCommit`. Existing non-PR session records are unchanged.
+`mode`, `trustedHeadCommit`, `sourceRepository`, and `sourceRemote`. Older records
+without source fields remain readable. Status is offline by default; explicit
+refresh and guarded cleanup fetch both the target and source remotes when they
+differ. Freshness uses the target branch; publication uses the source upstream.
 Normal cleanup protects unpushed review fixes and removes only session-owned
 local assets; it never deletes the remote PR branch.
 
