@@ -122,13 +122,39 @@ let
       && builtins.match ".*DEEPSEEK_API_KEY.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
       && builtins.match ".*pass show dev/deepseek-api-key.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
       && builtins.match ".*HUB_PASS_LAUNCHERS_BYPASS.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
-      && builtins.match ".*--model deepseek-v4-flash.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
+      && builtins.match ".*--model deepseek/deepseek-flash.*" ds4Cfg.home.file.".local/bin/pi-ds4".text != null
       && !builtins.elem "secretspec" (packageNames ds4Cfg));
+  ds4Wrapper = pkgs.writeText "pi-ds4" ds4Cfg.home.file.".local/bin/pi-ds4".text;
+  stubPi = pkgs.writeShellScriptBin "pi" ''
+    printf '%s\n' "$@"
+    printf 'key=%s\n' "''${DEEPSEEK_API_KEY:-unset}"
+    exit "''${STUB_EXIT:-0}"
+  '';
 in
 pkgs.runCommand "pi-module-tests" { } ''
   cat <<'RESULTS'
   ── Pi Home Manager module ──
   ${disabledCheck}${plainCheck}${selfManagedCheck}${piAttentionCheck}${relativePathsCheck}${tmuxAttentionCheck}${localCheck}${ds4Check}RESULTS
+  # Exercise the generated launcher without pass, network access, or real credentials.
+  sh=${pkgs.dash}/bin/dash
+  "$sh" -n ${ds4Wrapper}
+  export PATH=${stubPi}/bin
+  actual=$(DEEPSEEK_API_KEY=test-key "$sh" ${ds4Wrapper} "two words" --offline)
+  expected=$(printf '%s\n' --model deepseek/deepseek-flash "two words" --offline key=test-key)
+  test "$actual" = "$expected"
+
+  actual=$(HUB_PASS_LAUNCHERS_BYPASS=1 DEEPSEEK_API_KEY= "$sh" ${ds4Wrapper} --help)
+  expected=$(printf '%s\n' --model deepseek/deepseek-flash --help key=unset)
+  test "$actual" = "$expected"
+
+  status=0
+  HUB_PASS_LAUNCHERS_BYPASS=1 STUB_EXIT=17 "$sh" ${ds4Wrapper} >/dev/null || status=$?
+  test "$status" = 17
+
+  status=0
+  PATH= HUB_PASS_LAUNCHERS_BYPASS=1 "$sh" ${ds4Wrapper} >missing.log 2>&1 || status=$?
+  test "$status" = 1
+  ${pkgs.gnugrep}/bin/grep -F "could not locate the real pi binary" missing.log
   echo "All Pi module tests passed."
   echo ok > $out
 ''

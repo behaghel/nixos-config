@@ -252,8 +252,8 @@ in
 
       model = lib.mkOption {
         type = lib.types.str;
-        default = "deepseek-v4-flash";
-        description = "Pi model name used by pi-ds4.";
+        default = "deepseek/deepseek-flash";
+        description = "Provider-qualified Pi model name used by pi-ds4.";
       };
     };
 

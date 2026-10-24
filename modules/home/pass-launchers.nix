@@ -52,6 +52,7 @@ let
       IFS=$OLD_IFS
 
       if [ -z "$target" ]; then
+        : # Keep the shell body valid when no fallback candidates are configured.
         ${lib.concatStringsSep "\n" (map (candidate: ''
           if [ -z "$target" ] && [ -x ${lib.escapeShellArg candidate} ]; then
             target=${lib.escapeShellArg candidate}
@@ -124,10 +125,12 @@ in
   };
 
   config = {
-    assertions = lib.mapAttrsToList (name: launcher: {
-      assertion = !launcher.enable || ((launcher.lookupCommand != null) != (launcher.command != [ ]));
-      message = "hub.passLaunchers.${name}: choose exactly one of lookupCommand or command.";
-    }) cfg;
+    assertions = lib.mapAttrsToList
+      (name: launcher: {
+        assertion = !launcher.enable || ((launcher.lookupCommand != null) != (launcher.command != [ ]));
+        message = "hub.passLaunchers.${name}: choose exactly one of lookupCommand or command.";
+      })
+      cfg;
 
     home.file = lib.mapAttrs'
       (name: launcher: lib.nameValuePair ".local/bin/${name}" {
