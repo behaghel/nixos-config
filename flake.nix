@@ -34,9 +34,15 @@
     treefmt-nix.inputs.nixpkgs.follows = "nixpkgs";
   };
 
-  # Wired using https://nixos-unified.org/autowiring.html
+  # Keep nixos-unified autowiring, but avoid its mkFlake helper's string
+  # coercion of root, which recopies the source during read-only checking.
   outputs = inputs:
-    inputs.nixos-unified.lib.mkFlake
-      { inherit inputs; root = ./.; };
+    inputs.flake-parts.lib.mkFlake { inherit inputs; } {
+      systems = [ "x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin" ];
+      _module.args.root = ./.;
+      imports = map
+        (name: ./modules/flake + "/${name}")
+        (builtins.attrNames (builtins.readDir ./modules/flake));
+    };
 
 }

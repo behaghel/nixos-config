@@ -12,7 +12,13 @@ git config core.hooksPath githooks
 
 ## Running checks
 
-Use `nix flake check` to evaluate the defined system configurations and verify formatting.
+Use `nix flake check` to evaluate the flake and build/run checks for the current
+system. `--no-build` evaluates without running checks; combine it with
+`--all-systems` to evaluate the other declared systems without cross-building.
+
+The source-discovery regression is `as . run python3 tests/test-flake-source-root.py`.
+It exercises the actual flake entrypoint against fresh sources, without fetching
+project inputs or relying on previously realised source copies.
 
 ## Pi and managed worktrees
 
