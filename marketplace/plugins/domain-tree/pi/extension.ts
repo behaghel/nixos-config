@@ -384,6 +384,13 @@ For detailed reference, load the \`domain-navigator\` skill.
 			const resolved = await resolveDomainForFile(targetPath, domainRoot, domainsCache);
 			if (!resolved) return; // not in any domain
 
+			// Specs must be writable before they can satisfy the code-change gate.
+			// Exempt only sibling Markdown in this owner's canonical spec directory.
+			const entry = entryForResolution(domainsCache, resolved);
+			const specDir = entry ? specDirForEntry(domainRoot, entry) : null;
+			const absoluteTarget = resolve(domainRoot, targetPath);
+			if (specDir && absoluteTarget.endsWith(".md") && dirname(absoluteTarget) === resolve(specDir)) return;
+
 			// Check spec-on-touch for core domains
 			const domainType = resolved.type;
 			if (domainType === "core" || domainType === "shared-kernel") {
@@ -399,8 +406,9 @@ For detailed reference, load the \`domain-navigator\` skill.
 							reason:
 								`⚠️ **Domain boundary violation: ${domainLabel}** (type: **core**)\n\n` +
 								`This is a **core** domain — it is the competitive advantage of the project. ` +
-								`No spec exists for this domain yet. **Spec required before any code change.**\n\n` +
-								`Use \`/domain-tree:init\` to scaffold the domain tree, or run \`/domain-tree:check\` to see the current state.`,
+								`No valid spec exists for this domain yet. **Spec required before any code change.**\n\n` +
+								`Create or repair the domain's \`README.md\`; specification Markdown edits are allowed. ` +
+								`Run \`/domain-tree:check\` for validation diagnostics.`,
 						};
 					}
 
@@ -410,7 +418,8 @@ For detailed reference, load the \`domain-navigator\` skill.
 							reason:
 								`⚠️ **Domain boundary violation: ${domainLabel}** (type: **shared-kernel**)\n\n` +
 								`This is **shared kernel** — changes affect ALL consuming domains. ` +
-								`No spec exists yet. **Spec required and all consumers must be notified.**\n\n` +
+								`No valid spec exists yet. **Spec required and all consumers must be notified.**\n\n` +
+								`Create or repair the domain's \`README.md\`; specification Markdown edits are allowed. ` +
 								`Check the context map in \`domains.yaml\` for which domains depend on this.`,
 						};
 					}

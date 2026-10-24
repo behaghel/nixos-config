@@ -518,6 +518,68 @@ domains:
   assert.match(resolvedTerm.content[0].text, /Blip/);
   assert.match(resolvedTerm.content[0].text, /business\/operations/);
   assert.equal(resolvedTerm.details.path, "src/operations/blip.md");
+
+  // Spec repair must remain possible without weakening the production-code gate.
+  const guard = registeredHandlers.get("tool_call")[0];
+  for (const type of ["core", "shared-kernel"]) {
+    for (const explicitSpec of [false, true]) {
+      const codeDir = `src/${type}-${explicitSpec}`;
+      const specDir = explicitSpec ? `spec/${type}-${explicitSpec}` : codeDir;
+      const readmePath = join(root, specDir, "README.md");
+      await mkdir(join(root, codeDir), { recursive: true });
+      await mkdir(join(root, specDir), { recursive: true });
+      await writeFile(join(root, "domains.yaml"), `
+domains:
+  business:
+    kind: group
+    domains:
+      operations:
+        type: ${type}
+        code: [${codeDir}/]
+        ${explicitSpec ? `spec: ${specDir}/` : ""}
+`);
+      const check = (toolName, path) => guard({ toolName, input: { path } }, context);
+      const label = `${type}, explicit spec: ${explicitSpec}`;
+      const invalidSpec = "---\ndomain: business/operations\nstatus: draft\nlast-reviewed: 2026-01-01\n---\n# Operations\n";
+      const validSpec = invalidSpec.replace("last-reviewed: 2026-01-01\n", "");
+
+      for (const state of ["missing", "invalid"]) {
+        if (state === "invalid") await writeFile(readmePath, invalidSpec);
+        for (const toolName of ["write", "edit"]) {
+          for (const path of [
+            `${specDir}/README.md`,
+            join(root, specDir, "README.md"),
+            `${specDir}/behavior.md`,
+          ]) {
+            assert.equal(await check(toolName, path), undefined,
+              `Allow ${state} spec authoring: ${label}, ${toolName}, ${path}`);
+          }
+          for (const path of [
+            `${codeDir}/worker.ts`,
+            join(root, codeDir, "worker.ts"),
+            `${specDir}/helper.ts`,
+            `${specDir}/nested/behavior.md`,
+            `${specDir}/nested/../worker.ts`,
+          ]) {
+            assert.equal((await check(toolName, path))?.block, true,
+              `Block code while spec is ${state}: ${label}, ${toolName}, ${path}`);
+          }
+          if (explicitSpec) {
+            assert.equal((await check(toolName, `${codeDir}/README.md`))?.block, true,
+              `Markdown outside the overridden spec directory is not exempt: ${label}`);
+          }
+        }
+      }
+
+      // Simulate the allowed repair, then recheck in the same extension session.
+      assert.equal(await check("edit", readmePath), undefined);
+      await writeFile(readmePath, validSpec);
+      for (const toolName of ["write", "edit"]) {
+        assert.equal(await check(toolName, `${codeDir}/worker.ts`), undefined,
+          `A repaired spec unlocks code changes: ${label}, ${toolName}`);
+      }
+    }
+  }
 } finally {
   await rm(root, { recursive: true, force: true });
 }
