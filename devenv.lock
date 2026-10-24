@@ -1,5 +1,22 @@
 {
   "nodes": {
+    "agent-sandbox": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1792310846,
+        "narHash": "sha256-xhzlQbdvyLNRR+W57Yyx5GD/ly2yMvknDJGXIKwVvec=",
+        "owner": "archie-judd",
+        "repo": "agent-sandbox.nix",
+        "rev": "bda0de5679017097f3a46f32b9d6b35dfd9b6327",
+        "type": "github"
+      },
+      "original": {
+        "owner": "archie-judd",
+        "repo": "agent-sandbox.nix",
+        "rev": "bda0de5679017097f3a46f32b9d6b35dfd9b6327",
+        "type": "github"
+      }
+    },
     "devenv": {
       "locked": {
         "dir": "src/modules",
@@ -114,6 +131,7 @@
     },
     "root": {
       "inputs": {
+        "agent-sandbox": "agent-sandbox",
         "devenv": "devenv",
         "git-hooks": "git-hooks",
         "nixpkgs": "nixpkgs",

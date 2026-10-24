@@ -55,6 +55,58 @@ Doctor may identify missing links in older worktrees; metadata `repair` does not
 restore links, and existing files must never be overwritten blindly. Worktrees
 separate Git work, not operating-system permissions or credential access.
 
+### Restricted Pi mode (experimental, macOS)
+
+The opt-in `agent-sandbox` devenv profile wraps the existing Pi npm runtime
+with revision-pinned [agent-sandbox.nix](https://github.com/archie-judd/agent-sandbox.nix).
+Normal `as` commands and the host Nix configuration are unchanged. The wrapper
+requires Pi at `~/.local/share/pi-npm` and a prepared linked worktree; it refuses
+a primary checkout or a launch from a worktree subdirectory.
+
+From a host terminal, launch it in an existing managed worktree:
+
+```sh
+as my-task run devenv -q --profile agent-sandbox shell -- pi-sandboxed
+```
+
+The inner devenv command provisions the opt-in profile on the host **before**
+entering the sandbox. Inside, use the supplied tools directly: Python, Node,
+Git and basic CLI tools. Nix/devenv, MCP, discovered extensions/skills/context,
+Git signing and publication stay outside this mode. No host credential variables
+or global Git configuration are forwarded; commit signing remains required.
+Pi management subcommands are refused, except `auth check`.
+Review changes, commit, sign and push from the host with normal `as` commands.
+
+State is separate at `~/.local/state/pi-sandbox/agent`, initially empty. No
+credentials, settings, extensions or histories are copied from normal Pi.
+To authenticate, start ordinary Pi on the host with this dedicated state:
+
+```sh
+PI_CODING_AGENT_DIR="$HOME/.local/state/pi-sandbox/agent" \
+  pi --no-approve --no-extensions --no-mcp --no-context-files \
+     --no-skills --no-prompt-templates --no-themes
+```
+
+Use `/login`, then exit; return to `pi-sandboxed` for actual work. Dedicated
+credentials are visible to the sandboxed agent and must be treated accordingly.
+Your ordinary Pi runtime is read-only inside; updating that runtime remains a
+separate host operation. This mode does not pin or replace the Pi installation.
+
+The sandbox permits worktree edits and dedicated state writes while hiding
+unrelated home files. Internet access is **unrestricted**; host-local ports and
+UNIX sockets (including the Nix daemon) are denied. Shared Git history and much
+of its metadata remain accessible, so this is not isolation between branches
+or a guarantee that other agents' Git work cannot be affected. Protected Git
+configuration/hooks are read-only. macOS uses deprecated `sandbox-exec`, not a
+VM; do not treat the pilot as an absolute security boundary.
+
+Run the real boundary checks from a linked worktree; the test uses a disposable
+fixture, does not call a model, and never invokes your signing key:
+
+```sh
+as . run devenv -q --profile agent-sandbox shell -- python3 tests/test-agent-sandbox.py -v
+```
+
 ### Nix discovery in Pi
 
 The project-local `.pi/mcp.json` connects current Pi's native MCP support to a
