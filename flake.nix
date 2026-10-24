@@ -26,10 +26,8 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
 
-    devenv = {
-      url = "github:cachix/devenv/v2.1";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    # Keep devenv's own nixpkgs pin: its build tools can be newer than ours.
+    devenv.url = "github:cachix/devenv/v2.4.0";
 
     # Devshell
     treefmt-nix.url = "github:numtide/treefmt-nix";
