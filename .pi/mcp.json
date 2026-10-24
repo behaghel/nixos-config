@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "nixos": {
+      "command": "nix",
+      "args": [
+        "shell",
+        "github:utensils/mcp-nixos/6a517811658c21f97bd7703b35546085117fc310#mcp-nixos",
+        "--command",
+        "mcp-nixos"
+      ],
+      "exposure": "direct",
+      "description": "Read-only Nix package and option discovery, online documentation, and pinned flake source inspection. Online results are not proof of availability in this project's pins: inspect pinned sources and use local Nix evaluation before asserting pinned package versions or option availability."
+    }
+  }
+}

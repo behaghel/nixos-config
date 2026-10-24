@@ -55,6 +55,36 @@ Doctor may identify missing links in older worktrees; metadata `repair` does not
 restore links, and existing files must never be overwritten blindly. Worktrees
 separate Git work, not operating-system permissions or credential access.
 
+### Nix discovery in Pi
+
+The project-local `.pi/mcp.json` connects current Pi's native MCP support to a
+revision-pinned [MCP-NixOS](https://github.com/utensils/mcp-nixos) server. It runs
+through `nix shell`, needs no API credentials, and provides package/option
+lookups and read-only flake source inspection, not configuration activation.
+The first connection may take longer while Nix builds the server. Pi's project
+trust controls loading this configuration; it does not install a global server.
+Run Pi from the worktree root so it discovers the project configuration.
+
+Check connectivity with `as . run pi mcp list`; inside Pi, use `/mcp` to inspect
+or disable the server. Run `/reload` after changing the configuration, or start
+a fresh session. `pi --no-mcp` disables MCP for one launch.
+
+Online documentation describes its own release/channel, not necessarily this
+project's locked dependencies. Inspect pinned flake sources and evaluate the
+local package/option before asserting availability. Source inspection can
+establish a declaration; it cannot prove a successful build or runtime result.
+The server exposes read-only query operations but is not a security sandbox;
+local Nix discovery can fetch inputs and populate caches/the Nix store, and
+online searches send query text to upstream services. Keep secrets out of queries.
+
+Run the checks from the worktree root:
+
+```sh
+as . run python3 tests/test-pi-mcp.py
+# Opt in to real server, online search, and pinned-source checks:
+as . run env MCP_NIXOS_LIVE=1 python3 tests/test-pi-mcp.py
+```
+
 ### Clickable file references in Pi
 
 With `hub.pi.enable`, Pi and `pi-local` make existing inline-code file paths
