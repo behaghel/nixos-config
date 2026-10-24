@@ -68,9 +68,11 @@
         cp -r scala-basic/* . 2>/dev/null || true
         cp -r scala-basic/.* . 2>/dev/null || true
         rm -rf scala-basic
-        # Generated dotfiles can replace the template's worktree ignore rule.
-        grep -qxF '/.worktrees/' .gitignore ||
-          printf '\n# Managed coding-agent worktrees\n/.worktrees/\n' >> .gitignore
+        # Scaffolding can replace the template's generated-output ignore rules.
+        for ignored_path in '/.worktrees/' '/.claude/' '/.opencode/' '/.mcp.json' '/opencode.jsonc'; do
+          grep -qxF "$ignored_path" .gitignore ||
+            printf '\n%s\n' "$ignored_path" >> .gitignore
+        done
         echo "  ✓ Project files moved to root and scala-basic/ cleaned up"
       fi
       

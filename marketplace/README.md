@@ -52,7 +52,18 @@ When you evolve this marketplace, prefer structural reuse over consumer-specific
 
 ### New project from template
 
-Templates ship with the marketplace pre-wired:
+Templates ship with the marketplace pre-wired. Their `.gitignore` excludes
+root-level devenv-generated `.claude/`, `.opencode/`, `.mcp.json`, and
+`opencode.jsonc`; Scala and Guile Hall restore these rules after scaffolding.
+Keep authored assets outside generated destinations and wire them through
+`devenv.nix`. `.agents/` and Pi source configuration under `.pi/` remain
+trackable; these ignores do not manage Pi installations or state.
+
+This applies to newly generated projects, not existing checkouts. Ignore rules
+do not untrack files already in Git. Review existing generated links and
+hand-authored files individually rather than deleting or untracking an entire
+agent directory.
+
 
 ```bash
 nix flake new my-project --template github:behaghel/nixos-config#python-basic-devenv

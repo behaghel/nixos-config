@@ -2,6 +2,12 @@
 # Managed coding-agent worktrees
 /.worktrees/
 
+# devenv-managed agent outputs (edit devenv.nix, not generated files)
+/.claude/
+/.opencode/
+/.mcp.json
+/opencode.jsonc
+
 # Python
 __pycache__/
 *.py[cod]
