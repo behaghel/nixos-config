@@ -107,6 +107,19 @@ fixture, does not call a model, and never invokes your signing key:
 as . run devenv -q --profile agent-sandbox shell -- python3 tests/test-agent-sandbox.py -v
 ```
 
+Each boundary run prints individual outcomes and retains a mode-0600 JSON report
+in `.devenv/state/sandbox-evidence/` (ignored, never committed). It records the
+original absolute host paths, the sandbox's synthetic HOME, actual errno values,
+and successful host controls before and after the sandbox attempt. An unavailable
+host control fails the test; `ENOENT` is labelled `not_visible`, not a permission
+denial. Reports also identify the probe executable and hash of the test source.
+Normal Pi state is tested by listing its original host directory, not by reading
+credential contents; directory entries are not recorded. The Nix positive control
+opens and closes a daemon socket connection without sending requests.
+
+These are specific boundary probes using the same confinement policy as Pi,
+not model-driven Pi turns or proof against every escape/exfiltration route.
+
 ### Nix discovery in Pi
 
 The project-local `.pi/mcp.json` connects current Pi's native MCP support to a
