@@ -168,6 +168,8 @@ Rigor scales with classification:
 - **Supporting** domains: warning when missing
 - **Generic** domains: only when the integration boundary changes
 
+The Pi spec-on-touch guard permits `write` and `edit` of `.md` files directly in the owning domain's specification directory, including a missing or invalid `README.md`. This allows specification creation and repair without disabling enforcement. The directory is the explicit `spec:` override or, otherwise, the first `code:` path. Markdown elsewhere and non-Markdown files in that directory are not exempt. Core and shared-kernel code changes remain blocked until the domain's `README.md` passes normative validation; repairing it unlocks code changes in the same session.
+
 ## License
 
 `domain-tree` is free software licensed under the [Mozilla Public License 2.0](LICENSE).
