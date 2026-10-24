@@ -12,7 +12,13 @@ git config core.hooksPath githooks
 
 ## Running checks
 
-Use `nix flake check` to evaluate the defined system configurations and verify formatting.
+Use `nix flake check` to evaluate the flake and build/run checks for the current
+system. `--no-build` evaluates without running checks; combine it with
+`--all-systems` to evaluate the other declared systems without cross-building.
+
+The source-discovery regression is `as . run python3 tests/test-flake-source-root.py`.
+It exercises the actual flake entrypoint against fresh sources, without fetching
+project inputs or relying on previously realised source copies.
 
 ## Pi and managed worktrees
 
@@ -54,6 +60,101 @@ Git; no contents are copied or committed. Existing worktrees are not changed.
 Doctor may identify missing links in older worktrees; metadata `repair` does not
 restore links, and existing files must never be overwritten blindly. Worktrees
 separate Git work, not operating-system permissions or credential access.
+
+### Restricted Pi mode (experimental, macOS)
+
+The opt-in `agent-sandbox` devenv profile wraps the existing Pi npm runtime
+with revision-pinned [agent-sandbox.nix](https://github.com/archie-judd/agent-sandbox.nix).
+Normal `as` commands and the host Nix configuration are unchanged. The wrapper
+requires Pi at `~/.local/share/pi-npm` and a prepared linked worktree; it refuses
+a primary checkout or a launch from a worktree subdirectory.
+
+From a host terminal, launch it in an existing managed worktree:
+
+```sh
+as my-task run devenv -q --profile agent-sandbox shell -- pi-sandboxed
+```
+
+The inner devenv command provisions the opt-in profile on the host **before**
+entering the sandbox. Inside, use the supplied tools directly: Python, Node,
+Git and basic CLI tools. Nix/devenv, MCP, discovered extensions/skills/context,
+Git signing and publication stay outside this mode. No host credential variables
+or global Git configuration are forwarded; commit signing remains required.
+Pi management subcommands are refused, except `auth check`.
+Review changes, commit, sign and push from the host with normal `as` commands.
+
+State is separate at `~/.local/state/pi-sandbox/agent`, initially empty. No
+credentials, settings, extensions or histories are copied from normal Pi.
+To authenticate, start ordinary Pi on the host with this dedicated state:
+
+```sh
+PI_CODING_AGENT_DIR="$HOME/.local/state/pi-sandbox/agent" \
+  pi --no-approve --no-extensions --no-mcp --no-context-files \
+     --no-skills --no-prompt-templates --no-themes
+```
+
+Use `/login`, then exit; return to `pi-sandboxed` for actual work. Dedicated
+credentials are visible to the sandboxed agent and must be treated accordingly.
+Your ordinary Pi runtime is read-only inside; updating that runtime remains a
+separate host operation. This mode does not pin or replace the Pi installation.
+
+The sandbox permits worktree edits and dedicated state writes while hiding
+unrelated home files. Internet access is **unrestricted**; host-local ports and
+UNIX sockets (including the Nix daemon) are denied. Shared Git history and much
+of its metadata remain accessible, so this is not isolation between branches
+or a guarantee that other agents' Git work cannot be affected. Protected Git
+configuration/hooks are read-only. macOS uses deprecated `sandbox-exec`, not a
+VM; do not treat the pilot as an absolute security boundary.
+
+Run the real boundary checks from a linked worktree; the test uses a disposable
+fixture, does not call a model, and never invokes your signing key:
+
+```sh
+as . run devenv -q --profile agent-sandbox shell -- python3 tests/test-agent-sandbox.py -v
+```
+
+Each boundary run prints individual outcomes and retains a mode-0600 JSON report
+in `.devenv/state/sandbox-evidence/` (ignored, never committed). It records the
+original absolute host paths, the sandbox's synthetic HOME, actual errno values,
+and successful host controls before and after the sandbox attempt. An unavailable
+host control fails the test; `ENOENT` is labelled `not_visible`, not a permission
+denial. Reports also identify the probe executable and hash of the test source.
+Normal Pi state is tested by listing its original host directory, not by reading
+credential contents; directory entries are not recorded. The Nix positive control
+opens and closes a daemon socket connection without sending requests.
+
+These are specific boundary probes using the same confinement policy as Pi,
+not model-driven Pi turns or proof against every escape/exfiltration route.
+
+### Nix discovery in Pi
+
+The project-local `.pi/mcp.json` connects current Pi's native MCP support to a
+revision-pinned [MCP-NixOS](https://github.com/utensils/mcp-nixos) server. It runs
+through `nix shell`, needs no API credentials, and provides package/option
+lookups and read-only flake source inspection, not configuration activation.
+The first connection may take longer while Nix builds the server. Pi's project
+trust controls loading this configuration; it does not install a global server.
+Run Pi from the worktree root so it discovers the project configuration.
+
+Check connectivity with `as . run pi mcp list`; inside Pi, use `/mcp` to inspect
+or disable the server. Run `/reload` after changing the configuration, or start
+a fresh session. `pi --no-mcp` disables MCP for one launch.
+
+Online documentation describes its own release/channel, not necessarily this
+project's locked dependencies. Inspect pinned flake sources and evaluate the
+local package/option before asserting availability. Source inspection can
+establish a declaration; it cannot prove a successful build or runtime result.
+The server exposes read-only query operations but is not a security sandbox;
+local Nix discovery can fetch inputs and populate caches/the Nix store, and
+online searches send query text to upstream services. Keep secrets out of queries.
+
+Run the checks from the worktree root:
+
+```sh
+as . run python3 tests/test-pi-mcp.py
+# Opt in to real server, online search, and pinned-source checks:
+as . run env MCP_NIXOS_LIVE=1 python3 tests/test-pi-mcp.py
+```
 
 ### Clickable file references in Pi
 

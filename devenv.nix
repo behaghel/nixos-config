@@ -51,6 +51,9 @@ in
     ];
   };
 
+  # Provision on the host, then enter the restricted pilot explicitly.
+  profiles.agent-sandbox.module = import ./modules/flake/agent-session/sandbox.nix;
+
   # Bun is only needed for the migrated regression suite, not everyday shells.
   profiles.agent-session-tests.module = { pkgs, lib, ... }: {
     packages = [ pkgs.bun pkgs.nodejs_24 pkgs.zsh pkgs.fish pkgs.python3 ];
