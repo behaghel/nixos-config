@@ -3,9 +3,10 @@
 ## Agent Marketplace
 
 - The agent marketplace lives at `github:behaghel/nixos-config`, input name `agent-marketplace`, `flake: false`.
-- API: `import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; }`.
-- Returns: `plugins`, `bundles`, `select`, `skills`, `hooks`, `mcpServers`, `memory`.
-- See `marketplace/README.md` for full wiring examples (Claude Code and OpenCode).
+- Select shared workflows through Pi packages or native Pi resource settings.
+- The devenv input supplies project tooling and the managed worktree launcher,
+  not generated client configuration or resource symlinks.
+- See `marketplace/README.md` for installation and ownership boundaries.
 
 ## Development Environment
 
