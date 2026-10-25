@@ -45,8 +45,8 @@ working directories. Existing managed tasks use `as . status --json`,
 `as . run <command>`, and `as . doctor --json` from their worktree, including nested
 directories. A shell `cd` does not move an already-running Pi process or change
 future tool-call directories. Pi automatically loads [AGENTS.md](AGENTS.md), which
-contains the coding-agent workflow; no custom Pi extension or generated
-Claude/OpenCode configuration is required.
+contains the coding-agent workflow. Pi resources use native Pi settings and
+packages; devenv provides the environment and launcher, not client configuration.
 
 Creation requires the primary checkout to be clean and on its upstream default
 branch. A feature branch or someone else's dirty work is a blocker to report,

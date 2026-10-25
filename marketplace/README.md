@@ -1,352 +1,118 @@
-# Agent Marketplace
+# Pi Marketplace
 
-Reusable skills, hooks, MCP servers, and settings for AI coding agents (Claude Code, OpenCode).
+Reusable workflow skills and extensions distributed through Pi's native package
+and resource settings. There is no Nix resource exporter or generated-client
+symlink layer.
 
-Projects consume this marketplace via [devenv](https://devenv.sh). devenv generates all agent configuration files declaratively — no manual JSON editing required.
+## Ownership
 
-## Directory Structure
+| Resource | Owner |
+|---|---|
+| Shared extension, skill and playbook source | This Git repository |
+| Personal package/resource selection | `~/.pi/agent/settings.json` and Pi commands |
+| Project package/resource selection | Trusted `.pi/settings.json` |
+| Package installation and updates | Pi |
+| Authentication, histories and runtime state | Pi; never copied into worktrees |
+| Project tools and managed worktree launcher | devenv |
 
-```
-marketplace/
-├── lib.nix                 # Explicit opt-in API
-├── plugins/                # Modular plugins (skills + commands + agents)
-│   ├── devenv-workflow/
-│   ├── spec-driven/
-│   ├── spec-tdd/
-│   ├── domain-tree/
-│   └── ux-stories/
-├── memory.md               # Shared agent rules (git policy, dev workflow, etc.)
-├── skills/                 # Standalone tool-agnostic skills
-├── commands/               # Standalone slash-commands
-├── mcp/                    # MCP server definitions
-├── hooks/                  # Claude Code hook definitions
-└── settings/               # Per-tool settings fragments
-```
+Importing this repository as a devenv input does not install Pi resources.
+Templates import the shared agent-session module and launch the Pi already on
+PATH. They generate no client configuration and do not modify personal Pi
+settings. Existing Home Manager application configuration is outside this layer.
 
----
+## Install
 
-## Contributor Guidance
+### Published package
 
-When you evolve this marketplace, prefer structural reuse over consumer-specific drift.
+Use the published domain-tree package for normal distribution:
 
-- Put durable workflow knowledge in shared markdown assets first.
-- If guidance would help multiple consumers (Claude Code, OpenCode, Pi, or future adapters), do not leave it only in one consumer runtime file.
-- Use the plugin-local files with clear ownership:
-  - `skills/*/SKILL.md` = reusable knowledge and reference material
-  - `commands/*.md` = procedural playbooks and operator flows
-  - `agents/*.md` = passive guardrails and redirect language
-  - consumer adapters (for example `pi/extension.ts`) = runtime detection, tool registration, interception, and UI glue only
-- Keep generated consumer config declarative. If a consumer is generated from `devenv.nix`, update the source wiring rather than the generated output.
-- Keep native JavaScript build tools such as `esbuild` in `devenv.nix`, not plugin npm lockfiles consumed by `pkgs.importNpmLock`. Their optional native packages otherwise make Nix fetch tarballs for every supported OS and architecture.
-- Mark platform-specific advice explicitly (for example macOS-only or Linux-only) so one platform workaround does not silently become the default rule for every consumer.
-- When in doubt, upstream the shared policy to the marketplace-level docs or plugin shared markdown first, then keep only the minimum consumer-specific runtime bridge.
-
----
-
-## Installation
-
-### Prerequisites
-
-- [devenv](https://devenv.sh) installed
-- [direnv](https://direnv.net/) installed and hooked into your shell
-
-### New project from template
-
-Templates ship with the marketplace pre-wired:
-
-```bash
-nix flake new my-project --template github:behaghel/nixos-config#python-basic-devenv
-cd my-project
-direnv allow
-```
-
-Available templates: `python-basic-devenv`, `scala-basic-devenv`, `guile-basic-devenv`, `guile-hall-devenv`, `pharo-basic-devenv`. Done — plugins are active for both Claude Code and OpenCode.
-
-### Existing project
-
-**Step 1.** If the project has no devenv yet, scaffold it:
-
-```bash
-devenv init --override-input agent-marketplace "github:behaghel/nixos-config flake=false"
-```
-
-If devenv is already set up, add the input to `devenv.yaml` instead:
-
-```yaml
-inputs:
-  agent-marketplace:
-    url: github:behaghel/nixos-config
-    flake: false
-```
-
-**Step 2.** Wire plugins in `devenv.nix`. Add `inputs` to the function args if missing, then add the section for your agent. See the Claude Code or OpenCode tabs below.
-
-**Step 3.** Activate: `direnv allow` (or `devenv shell`).
-
-Once loaded, `/devenv-init` is available to flesh out languages, services, and processes. `/devenv-add` and `/devenv-diagnose` help from there.
-
----
-
-## Claude Code
-
-Add to `devenv.nix`:
-
-```nix
-{ pkgs, lib, config, inputs, ... }:
-
-let
-  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-in {
-  # ... your existing config ...
-
-  claude.code = {
-    enable = true;
-    commands = mp.plugins.devenv-workflow.commands;
-    hooks = mp.hooks;
-    mcpServers.devenv = mp.mcpServers.devenv;
-  };
-}
-```
-
-### What gets generated
-
-On `devenv shell`, devenv creates `.claude/settings.json` and `.claude/commands/*.md`. These are managed by devenv — change `devenv.nix`, not the generated files. Add `.claude/` to `.gitignore`.
-
-### What becomes available
-
-- `/devenv-init` — scaffold languages, services, processes from project intent
-- `/devenv-add` — add a language, service, process, task, or tool
-- `/devenv-diagnose` — systematic troubleshooting for devenv issues
-- `devenv` MCP server — live `search_packages` and `search_options` queries
-
-> **Let your agent do it.** Paste this prompt into Claude Code:
->
-> *"Add a devenv input called agent-marketplace pointing to github:behaghel/nixos-config (flake: false). Then in devenv.nix, import its lib at /marketplace/lib.nix and wire mp.plugins.devenv-workflow into claude.code — enable commands, hooks (mp.hooks), and the devenv MCP server (mp.mcpServers.devenv)."*
-
----
-
-## OpenCode
-
-Add to `devenv.nix`:
-
-```nix
-{ pkgs, lib, config, inputs, ... }:
-
-let
-  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-  devenv = mp.plugins.devenv-workflow;
-in {
-  # ... your existing config ...
-
-  opencode = {
-    enable = true;
-    skills = devenv.skills;
-    commands = devenv.commands;
-    agents = devenv.agents;
-    mcp.devenv = {
-      type = "local";
-      command = [ "devenv" "mcp" ];
-      environment.DEVENV_TUI = "false";
-    };
-  };
-}
-```
-
-### What gets generated
-
-On `devenv shell`, devenv creates `.opencode/skills/*/SKILL.md`, `.opencode/commands/*.md`, and `.opencode/agents/*.md`. These are managed by devenv — change `devenv.nix`, not the generated files. Add `.opencode/` to `.gitignore`.
-
-### Important wiring note
-
-- Use `mp.plugins.devenv-workflow` (or `let devenv = mp.plugins.devenv-workflow;`) as the source for `skills`, `commands`, and `agents`.
-- Do **not** point `opencode.agents` at raw files under `marketplace/plugins/devenv-workflow/agents/` and do **not** `builtins.readFile` those agent markdown files directly.
-- Why: `marketplace/lib.nix` applies compatibility processing for OpenCode agents, including stripping Claude-style YAML frontmatter that OpenCode rejects.
-
-Wrong:
-
-```nix
-opencode.agents = {
-  "devenv-expert" = builtins.readFile (inputs.agent-marketplace + "/marketplace/plugins/devenv-workflow/agents/devenv-expert.md");
-};
-```
-
-Right:
-
-```nix
-let
-  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-  devenv = mp.plugins.devenv-workflow;
-in {
-  opencode.agents = devenv.agents;
-}
-```
-
-### What becomes available
-
-- **Skill**: `devenv-project` — core devenv knowledge, loaded automatically
-- **Commands**: `/devenv-init`, `/devenv-add`, `/devenv-diagnose`
-- **Agent**: `devenv-expert` — catches imperative installs, commands outside devenv shell, config anti-patterns
-- **MCP**: `devenv` server — live `search_packages` and `search_options` queries
-
-> **Let your agent do it.** Paste this prompt into OpenCode:
->
-> *"Add a devenv input called agent-marketplace pointing to github:behaghel/nixos-config (flake: false). Then in devenv.nix, import /marketplace/lib.nix as `mp`, bind `devenv = mp.plugins.devenv-workflow`, and wire `devenv.skills`, `devenv.commands`, and `devenv.agents` into `opencode`. Do not read files from `/marketplace/plugins/devenv-workflow/...` directly; use `mp.plugins...` so OpenCode agent compatibility processing is preserved. Also add `mcp.devenv = { type = \"local\"; command = [ \"devenv\" \"mcp\" ]; environment.DEVENV_TUI = \"false\"; };`."*
-
----
-
-## Using both agents
-
-If the project uses both Claude Code and OpenCode, combine both sections:
-
-```nix
-let
-  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-  devenv = mp.plugins.devenv-workflow;
-in {
-  claude.code = {
-    enable = true;
-    commands = devenv.commands;
-    hooks = mp.hooks;
-    mcpServers.devenv = mp.mcpServers.devenv;
-  };
-
-  opencode = {
-    enable = true;
-    skills = devenv.skills;
-    commands = devenv.commands;
-    agents = devenv.agents;
-    mcp.devenv = {
-      type = "local";
-      command = [ "devenv" "mcp" ];
-      environment.DEVENV_TUI = "false";
-    };
-  };
-}
-```
-
----
-
-## Selecting plugins
-
-### Bundles
-
-Pre-defined plugin collections:
-
-- `total-spec`: `spec-driven` + `spec-tdd` + `domain-tree` + `ux-stories`
-
-### Cherry-pick
-
-```nix
-opencode.skills = mp.plugins.devenv-workflow.skills;
-opencode.commands = mp.plugins.devenv-workflow.commands;
-```
-
-### Select multiple
-
-```nix
-let chosen = mp.select [ "spec-tdd" "devenv-workflow" ];
-in {
-  opencode.skills = chosen.skills;
-  opencode.commands = chosen.commands;
-  opencode.agents = chosen.agents;
-}
-```
-
-### Combine plugins and bundles
-
-```nix
-let
-  bundle = mp.bundles.total-spec;
-  devenv = mp.plugins.devenv-workflow;
-in {
-  opencode.skills = bundle.skills // devenv.skills;
-  opencode.commands = bundle.commands // devenv.commands;
-  opencode.agents = bundle.agents // devenv.agents;
-}
-```
-
----
-
-## Adding a new plugin
-
-```
-marketplace/plugins/my-plugin/
-├── .claude-plugin/plugin.json   # { "name", "version", "description" }
-├── README.md
-├── skills/
-│   └── my-skill/SKILL.md       # YAML frontmatter + markdown
-├── commands/
-│   └── my-command.md            # YAML frontmatter + instructions
-└── agents/
-    └── my-agent.md              # YAML frontmatter + system prompt
-```
-
-`lib.nix` auto-discovers plugins. No registration needed — create the directory and it appears in `mp.plugins`. Run `nix flake check` to validate.
-
----
-
-## Pi
-
-Each plugin ships as a [pi](https://pi.dev) package. Skills and extensions load automatically when pi discovers the package:
-
-### Global install
-
-```bash
-pi install /path/to/nixos-config/marketplace/plugins/devenv-workflow
-pi install /path/to/nixos-config/marketplace/plugins/domain-tree
-pi install /path/to/nixos-config/marketplace/plugins/spec-driven
-pi install /path/to/nixos-config/marketplace/plugins/spec-tdd
-pi install /path/to/nixos-config/marketplace/plugins/ux-stories
-```
-
-These local paths are development installs. Pi loads them in place and does not install their dependencies. Prepare `domain-tree` first with `npm ci --prefix /path/to/nixos-config/marketplace/plugins/domain-tree`.
-
-For normal distribution, install the published npm package instead; Pi then owns dependency installation and updates:
-
-```bash
+```sh
 pi install npm:@behaghel/pi-domain-tree
 ```
 
-The npm command becomes available after the package's first registry release.
+Use a versioned npm specification when a project needs a pinned release. Pi
+installs runtime dependencies for npm packages. A project declaration replaces
+a personal declaration of the same npm package name; this is an intentional
+project override, not a second instance.
 
-### Per-project install
+### Local development packages
 
-Add to `.pi/settings.json`:
+Install a plugin directory from an existing checkout:
+
+```sh
+pi install /absolute/path/to/nixos-config/marketplace/plugins/devenv-workflow
+pi install /absolute/path/to/nixos-config/marketplace/plugins/spec-driven
+pi install /absolute/path/to/nixos-config/marketplace/plugins/spec-tdd
+pi install /absolute/path/to/nixos-config/marketplace/plugins/ux-stories
+```
+
+Local packages load in place, without copying or dependency installation. Keep
+local dependencies prepared through the project's declared environment. Local
+paths follow changes in that checkout; a project's devenv lock does not pin
+personal Pi resources loaded from those paths. Avoid configuring both an
+explicit extension path and a package that supplies that same extension.
+
+For project-only selection, use `pi install -l <source>` or edit the project's
+`.pi/settings.json`. For example:
 
 ```json
 {
   "packages": [
-    "<absolute-path>/nixos-config/marketplace/plugins/domain-tree"
+    "/absolute/path/to/nixos-config/marketplace/plugins/spec-driven"
   ]
 }
 ```
 
-### What becomes available
+Pi loads project resources only after project trust is granted. After changing
+resource selection, start a fresh Pi session or use `/reload`. Inspect selection
+with `pi list` / `pi config`; update resources through Pi, not devenv generators.
 
-Each plugin contributes:
+The standalone `skills/grill-me` can be selected through Pi's `skills` setting.
+Repository-local skills in `.agents/skills/` remain separate from this catalogue.
 
-| Plugin | Extensions | Skills | Commands |
-|--------|-----------|--------|----------|
-| **devenv-workflow** | Auto-detect, tool monitoring, 3 custom tools | `devenv-project` | `/devenv-init`, `/devenv-add`, `/devenv-diagnose` |
-| **domain-tree** | Auto-detect, spec-on-touch enforcement, 4 custom tools including canonical-term lookup | `domain-navigator` | `/domain-tree:init`, `/domain-tree:check`, `/domain-tree:map` |
-| **spec-driven** | Expertise injection, spec coverage tool | `spec-collector`, `spec-verifier` | `/spec-collect`, `/spec-verify` |
-| **spec-tdd** | Expertise injection | `tdd-planner` | `/tdd-plan`, `/tdd-iterate` |
-| **ux-stories** | Expertise injection | `story-writer` | `/story-write`, `/story-scenarios`, `/story-deliver` |
+## Contents
 
----
+| Plugin | Pi extension capabilities | Skills |
+|---|---|---|
+| `devenv-workflow` | Detection, tool monitoring, environment discovery, `/devenv-*` | `devenv-project` |
+| `domain-tree` | Domain navigation, coverage enforcement, `/domain-tree:*` | `domain-navigator` |
+| `spec-driven` | Specification collection/verification, coverage tool | `spec-collector`, `spec-verifier` |
+| `spec-tdd` | Iterative delivery guidance, `/tdd-*` | `tdd-planner` |
+| `ux-stories` | Graphical UX workflow, `/story-*` | `story-writer` |
 
-## Updating in projects
+Each plugin's `package.json` declares its Pi extensions and skills. Commands are
+registered by the extensions. Markdown under `commands/` and `agents/` is shared
+playbook/reference material; it is not exported into other client directories.
+`memory.md` contains shared rules, not an automatically installed configuration.
 
-```bash
-devenv update agent-marketplace
-```
+## Contributor guidance
 
-Then `direnv reload` or `devenv shell` to regenerate agent config files.
+Put durable workflow knowledge in shared markdown assets first. Keep consumer
+adapters focused on runtime detection, tool registration, interception, and UI
+glue only. In particular:
 
----
+- `skills/*/SKILL.md` owns reusable knowledge and reference material.
+- `commands/*.md` owns procedural playbooks and operator flows.
+- `agents/*.md` retains reference guardrails, not a separate running actor.
+- `pi/extension.ts` owns the native Pi integration.
+- Declare extension runtime dependencies in the plugin package manifest.
+- Keep host-provided Pi packages as peers, not bundled runtime dependencies.
+- Keep native JavaScript build tools such as `esbuild` in `devenv.nix`, not npm
+  lockfiles consumed by `pkgs.importNpmLock`.
+- Mark platform-specific guidance explicitly.
 
-## Relationship to `.agents/skills/`
+Run `nix flake check` to validate Pi manifests/resources, extension syntax,
+behavioral tests and template ownership boundaries.
 
-`.agents/skills/` at the repo root contains **repo-local** skills specific to this nixos-config repository. These are NOT part of the marketplace.
+## Existing consumers
 
-The marketplace contains **general-purpose** skills suitable for any project.
+The previous Nix exporter API and generated-client integrations are removed.
+Before updating an older consumer to this revision, remove its retired
+integration blocks and exporter imports from its own source configuration, and
+select the desired resources through native Pi settings.
+
+This change does not migrate existing projects or delete local resources.
+Review legacy links by path, target and tracked status before removing any
+individual symlink. Preserve regular files, authored assets, histories and
+unrelated application installations. Removing an ignore rule does not untrack
+anything already committed; do not bulk-delete or untrack a whole directory.

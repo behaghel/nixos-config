@@ -1,5 +1,0 @@
-{
-  "name": "domain-tree",
-  "version": "0.3.0",
-  "description": "Domain-driven codebase structure with root domains.yaml and colocated README.md specs across business and technical domains"
-}

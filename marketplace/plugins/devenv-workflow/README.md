@@ -10,7 +10,7 @@ Declarative dev environment management with [devenv](https://devenv.sh) — scaf
 | `/devenv-init` | Command | Scaffold devenv.nix from project intent and existing clues |
 | `/devenv-add` | Command | Add a language, service, process, task, or tool |
 | `/devenv-diagnose` | Command | Systematic troubleshooting for devenv issues |
-| `devenv-expert` | Agent | Catches imperative installs, commands outside devenv shell, and config anti-patterns |
+| Devenv expert guidance | Extension + references | Catches imperative installs, commands outside devenv shell, and config anti-patterns |
 
 ## Philosophy
 
@@ -48,40 +48,11 @@ The skill covers all major devenv 2.0 features:
 /devenv-diagnose → fix issues when they arise
 ```
 
-The `devenv-expert` agent runs passively, catching anti-patterns and redirecting toward declarative configuration.
+The Pi extension monitors tool calls and redirects anti-patterns toward
+declarative configuration. Markdown under `agents/` is reference guidance,
+not a separately running agent.
 
-## Wiring Notes
-
-### OpenCode
-Wire this plugin through `mp.plugins.devenv-workflow` from `marketplace/lib.nix`.
-Do not read agent markdown files from `plugins/devenv-workflow/agents/` directly.
-Reason: the marketplace library applies OpenCode compatibility processing to agents, including stripping Claude-style frontmatter that OpenCode rejects.
-Safe pattern:
-
-```nix
-let
-  mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-  devenv = mp.plugins.devenv-workflow;
-in {
-  opencode.skills = devenv.skills;
-  opencode.commands = devenv.commands;
-  opencode.agents = devenv.agents;
-}
-```
-
-### Claude Code
-Wire commands and MCP server through the `claude.code` block in `devenv.nix`:
-
-```nix
-claude.code = {
-  enable = true;
-  commands = mp.plugins.devenv-workflow.commands;
-  hooks = mp.hooks;
-  mcpServers.devenv = mp.mcpServers.devenv;
-};
-```
-
-### Pi (coding agent)
+## Pi setup
 
 Pi uses the `pi` package manifest in `package.json` to discover the extension and skill.
 
@@ -101,14 +72,12 @@ Add to `.pi/settings.json`:
 }
 ```
 
-#### Via pi install (portable)
+#### Via pi install (local development package)
 
 ```bash
 pi install /absolute/path/to/marketplace/plugins/devenv-workflow
-# or from git:
-pi install git:github.com:behaghel/nixos-config
-# then enable just the devenv-workflow plugin:
-pi config
+# For project-only selection:
+pi install -l /absolute/path/to/nixos-config/marketplace/plugins/devenv-workflow
 ```
 
 #### What you get

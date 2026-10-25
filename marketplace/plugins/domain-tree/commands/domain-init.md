@@ -187,7 +187,7 @@ For domains that already have documentation or specs:
 1. **OpenAPI files** → Extract endpoint descriptions into the domain's spec as behavioral requirements.
 2. **Architecture docs** → Extract relevant sections into domain `README.md` files.
 3. **Test suites** → Note which domains have test coverage (for the coverage map).
-4. **CLAUDE.md / AGENTS.md** → Extract domain-relevant guidelines.
+4. **AGENTS.md and other repository guidance** → Extract domain-relevant guidelines.
 
 Mark all seeded content as `status: draft` — it needs human review before it's authoritative.
 

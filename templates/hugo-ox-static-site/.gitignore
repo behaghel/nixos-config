@@ -10,6 +10,3 @@
 /devenv.local.nix
 /devenv.local.yaml
 /.pre-commit-config.yaml
-/.mcp.json
-/.claude/
-/.opencode/

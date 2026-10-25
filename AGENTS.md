@@ -14,7 +14,7 @@ Pi loads this `AGENTS.md` automatically. For new tasks that edit repository file
 8. Commit coherent verified changes with configured authorship and signing intact; never disable signing to work around a locked token. Push the task branch, open/update its PR, and report tests, commit, worktree and check state. Never merge PRs or deploy/activate automatically.
 9. Do not repair, force-clean, or remove other sessions without explicit user intent. After review/merge, offer a preview/finish command from another worktree rather than deleting the invoking worktree. Doctor findings are not permission to mutate resources; metadata repair does not repair local links.
 
-Only the explicitly configured ignored local settings are linked into new worktrees. Never copy credentials, private Pi histories, `.pi/npm/`, runtime state, or generated agent configuration. Pi-specific settings remain under `.pi/`; do not manage them through Claude/OpenCode configuration. Read-only questions do not require allocating a coding worktree. System activation still requires the explicit permission described below.
+Only the explicitly configured ignored local settings are linked into new worktrees. Never copy credentials, private Pi histories, `.pi/npm/`, runtime state, or generated agent configuration. Pi-specific settings remain under `.pi/` and use native Pi resource/package management; do not generate client configuration through devenv. Read-only questions do not require allocating a coding worktree. System activation still requires the explicit permission described below.
 
 ## Project Structure & Module Organization
 - `flake.nix`/`flake.lock`: Flake entry and inputs (nixos-unified autowiring).

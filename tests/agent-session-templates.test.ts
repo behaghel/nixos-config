@@ -8,6 +8,24 @@ const templates = readdirSync("templates").filter((name) =>
   existsSync(join("templates", name, "devenv.nix")),
 );
 
+describe("Pi-only marketplace distribution", () => {
+  for (const name of templates) {
+    test(`${name} retains managed sessions without legacy generation`, () => {
+      const path = resolve("templates", name, "devenv.nix");
+      const expression = `builtins.attrNames (import ${path} { pkgs = {}; lib = {}; config.env.GREETING = ""; inputs = {}; })`;
+      const evaluated = spawnSync("nix-instantiate", ["--eval", "--strict", "--json", "--expr", expression], { encoding: "utf8" });
+      expect(evaluated.status).toBe(0);
+      const keys = JSON.parse(evaluated.stdout);
+      expect(keys).toContain("agentSession");
+      expect(keys).not.toContain("claude");
+      expect(keys).not.toContain("opencode");
+      const source = readFileSync(path, "utf8");
+      expect(source).not.toMatch(/claude|opencode|marketplace\/lib\.nix/i);
+      expect(readFileSync(join("templates", name, ".gitignore"), "utf8")).not.toMatch(/claude|opencode/i);
+    });
+  }
+});
+
 describe("default-on agent sessions in project templates", () => {
   for (const name of ["scala-basic", "guile-hall"]) {
     test(`${name} preserves worktree ignores after project generation`, () => {
@@ -70,6 +88,10 @@ fi
         expect(spawnSync("git", ["init", root]).status).toBe(0);
         const ignored = spawnSync("git", ["check-ignore", "--quiet", ".worktrees/probe"], { cwd: root });
         expect(ignored.status).toBe(0);
+        for (const source of [".pi/settings.json", ".pi/mcp.json", ".agents/skills/project/SKILL.md"]) {
+          const visible = spawnSync("git", ["-c", "core.excludesFile=/dev/null", "check-ignore", "--quiet", source], { cwd: root });
+          expect(visible.status).toBe(1);
+        }
       } finally {
         rmSync(root, { recursive: true, force: true });
       }

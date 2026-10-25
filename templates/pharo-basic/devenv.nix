@@ -162,27 +162,8 @@ Project structure:
 Environment ready!'';
   };
 
-  # Agent marketplace: explicit plugin opt-in via bundles.
-  # See marketplace/README.md for per-plugin and select usage.
-  claude.code = let
-    mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-    bundle = mp.bundles.total-spec;
-  in {
-    enable = true;
-    commands = bundle.commands;
-    hooks = mp.hooks;
-    mcpServers.devenv = mp.mcpServers.devenv;
-  };
-
-  opencode = let
-    mp = import (inputs.agent-marketplace + "/marketplace/lib.nix") { inherit lib; };
-    bundle = mp.bundles.total-spec;
-  in {
-    enable = true;
-    skills = mp.skills // bundle.skills;
-    commands = bundle.commands;
-    agents = bundle.agents;
-  };
+  # Select Pi resources with pi install or Pi settings, independently of devenv.
+  # See marketplace/README.md; this template generates no client configuration.
 
   # Use devenv's built-in test functionality
   enterTest = ''
