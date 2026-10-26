@@ -177,7 +177,17 @@ export function writeMetadata(root: string, metadata: SessionMetadata): void {
 }
 
 export function readMetadata(root: string, slug: string): SessionMetadata {
-	const path = metadataPath(root, slug);
+	return readSessionMetadata(root, slug, primaryRoot(root));
+}
+
+export function readMetadataInventory(root: string): SessionMetadata[] {
+	// Repository topology is shared across this inventory, not a per-record probe.
+	const primary = primaryRoot(root), directory = sessionsDirectory(root);
+	return metadataSlugs(root).map((slug) =>
+		readSessionMetadata(root, slug, primary, join(directory, `${slug}.json`)));
+}
+
+function readSessionMetadata(root: string, slug: string, primary: string, path = metadataPath(root, slug)): SessionMetadata {
 	if (!existsSync(path)) throw new CliError(`No managed session: ${slug}`);
 	let value: unknown;
 	try {
@@ -218,7 +228,7 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 		(metadata.initialBranchOwned === false &&
 			(metadata.pr?.mode !== "review" || !metadata.preexistingBranches?.includes(metadata.branch))) ||
 		!isAbsolute(metadata.worktreePath) ||
-		canonicalWorktree === primaryRoot(root)
+		canonicalWorktree === primary
 	) {
 		throw new CliError(`Unsafe session metadata for ${slug}.`);
 	}
@@ -227,11 +237,17 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 
 export function metadataSlugs(root: string): string[] {
 	const directory = sessionsDirectory(root);
-	if (!existsSync(directory)) return [];
-	return readdirSync(directory)
-		.filter((name) => name.endsWith(".json"))
-		.sort()
-		.map((name) => name.slice(0, -".json".length));
+	try {
+		return readdirSync(directory)
+			.filter((name) => name.endsWith(".json"))
+			.sort()
+			.map((name) => name.slice(0, -".json".length));
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		// ENOENT through a dangling store is not a complete empty inventory.
+		assertMetadataStore(root);
+		return [];
+	}
 }
 
 export function resolveWorktreeRoot(root: string, configured: string): string {
@@ -307,6 +323,19 @@ export function assertConfiguredWorktreePath(
 	}
 }
 
+// ENOENT through a dangling store symlink is not a missing record.
+function assertMetadataStore(root: string): void {
+	const store = sessionsDirectory(root);
+	for (const directory of [store, dirname(store)]) {
+		try {
+			const stat = lstatSync(directory);
+			if (stat.isSymbolicLink() ? !existsSync(directory) : !stat.isDirectory()) throw new CliError("Invalid metadata store.");
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new CliError("Cannot establish session metadata-store availability.");
+		}
+	}
+}
+
 // A dangling record or inaccessible metadata store is not evidence of absence.
 export function sessionRecordExists(root: string, slug: string): boolean {
 	validateSlug(slug);
@@ -314,15 +343,7 @@ export function sessionRecordExists(root: string, slug: string): boolean {
 	try { lstatSync(path); return true; } catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new CliError(`Cannot establish session-record absence for ${slug}.`);
 	}
-	// ENOENT through a dangling store symlink is not a missing record.
-	for (const directory of [dirname(path), dirname(dirname(path))]) {
-		try {
-			const stat = lstatSync(directory);
-			if (stat.isSymbolicLink() ? !existsSync(directory) : !stat.isDirectory()) throw new CliError("Invalid metadata store.");
-		} catch (error) {
-			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw new CliError(`Cannot establish session-record absence for ${slug}.`);
-		}
-	}
+	assertMetadataStore(root);
 	return false;
 }
 

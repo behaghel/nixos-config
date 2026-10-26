@@ -4,7 +4,7 @@ as() {
   local action="${2-}"
   case "${1-}" in
     --) action="${3-}" ;;
-    status|doctor|finish|completion|__complete) action= ;;
+    status|list|doctor|finish|completion|__complete) action= ;;
   esac
   if [ "$action" = cd ] && [ -n "${AGENT_SESSION_CONFIG-}" ]; then
     local target

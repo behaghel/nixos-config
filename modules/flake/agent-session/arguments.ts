@@ -11,14 +11,15 @@ export const commandNames = [
 	"start",
 	"resume",
 	"status",
+	"list",
 	"doctor",
 	"repair",
 	"finish",
 	"completion",
 ];
 
-export const sessionCommandNames = commandNames.filter((name) => name !== "completion");
-export const globalCommandNames = ["status", "doctor", "completion", "finish"];
+export const sessionCommandNames = commandNames.filter((name) => !["completion", "list"].includes(name));
+export const globalCommandNames = ["status", "list", "doctor", "completion", "finish"];
 export const currentSessionCommandNames = sessionCommandNames.filter((name) => !["create", "start", "repair"].includes(name));
 
 export function sessionCommand(slug: string, command: string): string {
@@ -312,6 +313,7 @@ function usage(): string {
 		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
+		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",
 		"  agent-session status [--json] [--refresh]",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session completion <bash|zsh|fish>",

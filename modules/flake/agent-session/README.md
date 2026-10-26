@@ -30,6 +30,7 @@ The default agent is `pi`, which must be available in your environment.
 ```sh
 as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
+as list --json                      # cheap recorded-binding inventory
 as status                           # reconcile all sessions
 as my-task status                   # inspect one session
 as my-task launch                   # launch in an existing worktree
@@ -43,7 +44,7 @@ as my-task finish                   # guarded local cleanup, with confirmation
 ## Command grammar and migration
 
 Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
-Repository-wide commands remain command-first: `as status`, `as doctor`,
+Repository-wide commands remain command-first: `as list`, `as status`, `as doctor`,
 `as finish --all|--gone`, and `as completion bash|zsh|fish`.
 
 Command words are reserved in the first position so old command-first calls cannot
@@ -69,6 +70,25 @@ Interactive cleanup uses Node-compatible confirmation for normal, forced and bul
 finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a failed
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
+
+## Recorded-binding inventory
+
+`as list [--json]` reads recorded session bindings without inspecting checkout
+Git state, refreshing remotes, or running preparation or agent commands. JSON is
+one document with `version: 1`, `command: "list"`, and `sessions`, each containing
+only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
+branch, not an observation of the current branch, ownership, or clean state.
+Use the selected `slug` with `as <slug> status --json` and guarded `finish` for
+fresh inspection and cleanup; inventory alone never authorizes removal.
+
+The inventory includes valid records whose checkout is missing, but not
+unrecorded Git worktrees. An empty inventory therefore does not prove a resource
+is absent: consumers also check native Git registration and the filesystem.
+Malformed, unreadable, or unsafe records fail the whole inventory before any
+output rather than silently omitting potential bindings. A dangling metadata
+store is not reported as an empty inventory. Listing does not repair records,
+prune registrations, or remove files. It accepts only `--json`, not `--refresh`,
+and is repository-wide rather than a session action.
 
 ## Current-session targeting
 
