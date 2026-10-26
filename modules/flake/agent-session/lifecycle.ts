@@ -25,6 +25,7 @@ import {
 	unrecordedWorktree,
 	discoverManagedWorktrees,
 	writeMetadata,
+	withSessionActivity,
 	resolveWorktreeRoot,
 } from "./sessions.ts";
 import {
@@ -89,15 +90,16 @@ function executeConfigured(
 }
 
 function launchAgent(
+	root: string,
 	config: AgentSessionConfig,
 	metadata: SessionMetadata,
 	additionalArguments: string[] = [],
 ): number {
 	process.stderr.write(`Launching agent in ${metadata.worktreePath}\n`);
-	const agentStatus = executeConfigured(
+	const agentStatus = withSessionActivity(root, metadata.slug, () => executeConfigured(
 		[...config.agent_command, ...additionalArguments],
 		metadata.worktreePath,
-	);
+	));
 	if (agentStatus !== 0) {
 		process.stderr.write(
 			`Agent exited with status ${agentStatus}; the session remains available to resume.\n`,
@@ -146,15 +148,15 @@ export function launch(
 	const prepared = withOperationLock(root, operation, () =>
 		prepareLaunch(root, slug),
 	);
-	return launchAgent(prepared.config, prepared.metadata, additionalArguments);
+	return launchAgent(root, prepared.config, prepared.metadata, additionalArguments);
 }
 
 export function runInSession(root: string, slug: string, command: string[]): number {
 	const cwd = sessionDirectory(root, slug);
-	const result = spawnSync("devenv", ["-q", "shell", "--", ...command], {
+	const result = withSessionActivity(root, slug, () => spawnSync("devenv", ["-q", "shell", "--", ...command], {
 		cwd,
 		stdio: "inherit",
-	});
+	}));
 	if (result.error) {
 		throw new CliError(`Cannot run devenv: ${result.error.message}`);
 	}
@@ -572,7 +574,7 @@ export function start(
 		prepareSession(root, slug, progressReporter("start", false), false, selection, trustPr),
 	);
 	if (launchConfiguredAgent) {
-		return launchAgent(prepared.config, prepared.metadata);
+		return launchAgent(root, prepared.config, prepared.metadata);
 	}
 	reportCreated(prepared.metadata, false, prepared.reused);
 	return 0;

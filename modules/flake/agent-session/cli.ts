@@ -3,9 +3,10 @@ import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
-import { showInventory, showStatus } from "./inspection.ts";
+import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk } from "./finish.ts";
+import { batchFinish } from "./batch.ts";
 import {
 	commandNames,
 	argumentError,
@@ -14,6 +15,7 @@ import {
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
+	parseBatchArguments,
 	parseDoctorArguments,
 	parseRequiredSlug,
 	parseInvocation,
@@ -82,6 +84,11 @@ export function main(args: string[]): number {
 				"--continue",
 			]);
 		}
+		if (command === "batch") {
+			const options = parseBatchArguments(rest);
+			const invocationRoot = repositoryRoot();
+			return batchFinish(primaryRoot(invocationRoot), invocationRoot, options);
+		}
 		if (command === "list") {
 			if (rest.some((argument) => argument !== "--json"))
 				throw argumentError("Use: agent-session list [--json].");
@@ -90,6 +97,10 @@ export function main(args: string[]): number {
 		}
 		if (command === "status") {
 			const options = parseStatusArguments(rest);
+			if (options.worktree) {
+				showExactStatus(primaryRoot(repositoryRoot()), options.worktree, options.json);
+				return 0;
+			}
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			showStatus(
 				primaryRoot(repositoryRoot()),

@@ -1,14 +1,17 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { assertReviewSource, pullRequestSummary } from "./github.ts";
 import { sessionCommand } from "./arguments.ts";
 import {
 	countRevisionRange,
+	commonGitDirectory,
 	git,
 	localBranches,
 	reflogEntries,
 	remoteDefaultBranch,
 } from "./git.ts";
 import {
+	assertConfiguredWorktreePath,
 	discoverManagedWorktrees,
 	loadConfig,
 	metadataPath,
@@ -16,6 +19,7 @@ import {
 	readMetadata,
 	readMetadataInventory,
 	readOperationLock,
+	resolveWorktreeRoot,
 	validateSlug,
 } from "./sessions.ts";
 import { CliError, run } from "./runtime.ts";
@@ -47,6 +51,7 @@ function brokenStatus(slug: string, problem: string): SessionStatus {
 function unrecordedStatus(worktree: ManagedWorktree): SessionStatus {
 	const clean =
 		git(worktree.worktreePath, [
+			"--no-optional-locks",
 			"status",
 			"--porcelain",
 			"--untracked-files=all",
@@ -187,6 +192,7 @@ export function inspectSession(
 	const branch = actualBranch.stdout;
 	const clean =
 		git(metadata.worktreePath, [
+			"--no-optional-locks",
 			"status",
 			"--porcelain",
 			"--untracked-files=all",
@@ -279,6 +285,93 @@ export function showInventory(root: string, json: boolean): void {
 	for (const session of sessions)
 		process.stdout.write(`${session.slug}  ${session.branch}\n  ${session.worktreePath}\n`);
 	if (!sessions.length) process.stdout.write("No recorded agent sessions.\n");
+}
+
+// Resolve aliases even when the final component is missing, without treating
+// dangling symlinks or inaccessible ancestors as evidence of absence.
+function canonicalResourcePath(path: string): string {
+	const absolute = resolve(path);
+	try {
+		lstatSync(absolute);
+		return realpathSync(absolute);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		try {
+			if (lstatSync(absolute).isSymbolicLink()) throw new CliError("Target is a dangling symlink.");
+		} catch (probe) {
+			if ((probe as NodeJS.ErrnoException).code !== "ENOENT") throw probe;
+		}
+		const parent = dirname(absolute);
+		if (parent === absolute) throw error;
+		return join(canonicalResourcePath(parent), basename(absolute));
+	}
+}
+
+export function inspectExactResource(root: string, path: string) {
+	let worktreePath = resolve(path);
+	let resourceState: "present" | "absent" | "inconsistent" | "unknown" = "unknown";
+	const evidence: { filesystem: string; metadata: string; registered: boolean | null } = {
+		filesystem: "unknown", metadata: "unknown", registered: null,
+	};
+	const sessions: SessionStatus[] = [];
+	let bindingSlugs: string[] = [];
+	let problem: string | undefined;
+	try {
+		worktreePath = canonicalResourcePath(path);
+		const config = loadConfig(root);
+		const configuredRoot = canonicalResourcePath(resolveWorktreeRoot(root, config.worktree_root));
+		const slug = basename(worktreePath);
+		validateSlug(slug);
+		if (worktreePath !== join(configuredRoot, slug)) throw new CliError("Target is outside the configured managed-worktree slots.");
+		try {
+			const stat = lstatSync(worktreePath);
+			evidence.filesystem = stat.isDirectory() ? "present" : "not-directory";
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			evidence.filesystem = "absent";
+		}
+		const registrations = git(root, ["worktree", "list", "--porcelain", "-z"])
+			.split("\0").filter((field) => field.startsWith("worktree "))
+			.map((field) => resolve(field.slice("worktree ".length)));
+		evidence.registered = registrations.includes(worktreePath);
+		// A directory name supplies a slot, not ownership or absence proof.
+		// Read binding metadata, never unrelated checkout Git state. Ambiguous,
+		// moved or unreadable records must not manufacture an absent resource.
+		const records = readMetadataInventory(root);
+		const ownRecord = records.find((record) => record.slug === slug);
+		const bindings = records.filter((record) => canonicalResourcePath(record.worktreePath) === worktreePath);
+		bindingSlugs = bindings.map((binding) => binding.slug);
+		const recorded = ownRecord !== undefined;
+		evidence.metadata = recorded || bindings.length ? "recorded" : "absent";
+		if (bindings.length > 1 || (bindings.length === 1 && bindings[0]?.slug !== slug) || (ownRecord && !bindings.includes(ownRecord))) {
+			resourceState = "inconsistent";
+			problem = "Managed bindings are moved or ambiguous for this exact path. Inspect the binding catalogue; no resources were changed.";
+		} else if (!recorded && !evidence.registered && evidence.filesystem === "absent") {
+			resourceState = "absent";
+		} else if (recorded && evidence.registered && evidence.filesystem === "present") {
+			const metadata = readMetadata(root, slug);
+			assertConfiguredWorktreePath(root, config, metadata);
+			if (canonicalResourcePath(metadata.worktreePath) !== worktreePath || commonGitDirectory(worktreePath) !== commonGitDirectory(root)) {
+				throw new CliError("Managed metadata and native checkout identity do not agree.");
+			}
+			const status = inspectSession(metadata);
+			sessions.push(status);
+			resourceState = statusCannotOperate(status) ? "inconsistent" : "present";
+			problem = status.problem;
+		} else {
+			resourceState = "inconsistent";
+			problem = "Filesystem, managed record and Git registration do not agree. Inspect with doctor; no resources were changed.";
+		}
+	} catch (error) {
+		problem = `Cannot establish exact resource state: ${String(error)} No resources were changed.`;
+	}
+	return { version: 1, worktreePath, resourceState, evidence, bindingSlugs, sessions, ...(problem ? { problem } : {}) };
+}
+
+export function showExactStatus(root: string, path: string, json: boolean): void {
+	const result = inspectExactResource(root, path);
+	if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
+	else process.stdout.write(`${result.worktreePath}  ${result.resourceState.toUpperCase()}${result.problem ? `\n${result.problem}` : ""}\n`);
 }
 
 export function showStatus(

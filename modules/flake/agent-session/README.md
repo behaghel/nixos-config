@@ -90,6 +90,140 @@ store is not reported as an empty inventory. Listing does not repair records,
 prune registrations, or remove files. It accepts only `--json`, not `--refresh`,
 and is repository-wide rather than a session action.
 
+## Exact-resource inspection
+
+```sh
+as status --worktree /absolute/path/to/.worktrees/my-task --json
+```
+
+Exact status runs from another checkout of the same repository, even when the
+selected directory is missing. The path must identify a configured managed slot.
+It reads the binding catalogue and shared native worktree registration list,
+then only the selected checkout's Git state. Unrelated checkout status and
+reflogs are not queried. A directory-name convention alone does not identify a
+binding: duplicate/moved path claims are inconsistent, and incomplete catalogue
+evidence is unknown rather than proof of absence.
+Relative paths resolve against the calling directory; aliases are canonicalized.
+`--worktree` cannot be combined with a slug or `--refresh`.
+
+JSON includes `worktreePath`, `resourceState`, `evidence`, `bindingSlugs` and `sessions`:
+- `present`: directory, managed metadata and native registration agree. The one
+  selected session's ordinary status reports cleanliness and branch state.
+- `absent`: the configured slot has no directory, managed record or registration.
+  Branches may still exist; absence does not mean commits were deleted.
+- `inconsistent`: evidence disagrees (including stale metadata/registration,
+  unrecorded directories or a branch conflict). No absence is inferred.
+- `unknown`: evidence cannot be established, for example malformed metadata,
+  inaccessible paths, dangling target symlinks or paths outside configured slots.
+
+`evidence` exposes `filesystem`, `metadata` and `registered` observations; values
+not established remain `"unknown"` or `null`. A successful JSON response can report
+any resource state: consumers must examine `resourceState`, not just exit status.
+These observations are not cleanup authorization. Neither command fetches,
+repairs, prunes, removes resources, starts an agent or updates session metadata.
+
+## Inactive-session retirement
+
+```sh
+as batch finish --inactive-for 7d --exclude retained-task --dry-run --json
+```
+
+`--dry-run` is a **read-only preview**. `--inactive-for` is required;
+positive integer durations use `s`, `m`, `h`, `d` or `w`. Repeat `--exclude <slug>`
+for resources retained by you or another owner. Exclusions are explicit per call,
+not persisted ownership declarations. Branch preservation is unconditional;
+`--keep-branch` is accepted for clarity. There is no batch force option.
+
+JSON `resources` reports each recorded/discovered session's exact slug, path when
+established, and eligibility/refusal `reason`. Excluded names remain visible even
+when no record exists. Eligible entries expose `activity.lastWorkAt` and evidence
+sources. `observedAt` and `cutoff` define the explicit observation window.
+Preview also returns an opaque `receipt` freezing only the eligible selection.
+Apply requires that receipt, the same duration and exclusions, and explicit
+`--yes`; no newly eligible resource is added during apply:
+
+```sh
+preview=$(as batch finish --inactive-for 7d --exclude retained-task --dry-run --json)
+receipt=$(printf '%s' "$preview" | jq -r .receipt)
+as batch finish --inactive-for 7d --exclude retained-task \
+  --expected "$receipt" --yes --json
+```
+
+The receipt binds repository/configuration identity, exact selected paths,
+metadata digests, checkout/Git-directory identity, HEAD, branch refs and observed
+activity. It is self-contained, so preview creates no saved state. Its checksum
+catches corruption; it is **not a signature or ownership authorization**. The
+caller remains responsible for retained-work exclusions and consumer authority.
+Treat it as opaque and obtain a fresh preview when it no longer matches.
+
+Apply holds the provider operation lock and freshly checks each selected target's
+identity, inactivity, cleanliness, ignored data and live/process evidence before
+non-forced native removal. Managed work starting through `as` uses the same lock
+when recording activity. Native worktree locks and submodules are also refused.
+There is no branch deletion, force fallback, remote/PR mutation or consumer case
+bookkeeping. Local checks do not reserve the filesystem against arbitrary
+unmanaged processes; ownership fences and exclusions remain necessary.
+
+Apply JSON reports per-resource `outcome` (`finished`, `absent`, `refused` or
+`uncertain`) with a `reason` and diagnostic when available. `finished` requires
+confirmed directory, binding and native-registration removal; `absent` requires
+all three sources to confirm absence. `success` is true only when every selected
+resource is finished/absent; `partial` identifies mixed success and refusal or
+uncertainty. Exit status is 0 for full success (including an empty selection),
+1 for refusal/uncertainty, and 64 for invalid/mismatched receipt arguments before
+any cleanup. Apply does not abort reporting after one target fails.
+
+### Interrupted apply and reconciliation
+
+Only apply writes a small per-receipt intent journal under the shared Git
+`agent-session/retirements/` directory. Atomic, synced intent recording precedes
+native removal; preview and observation never create or repair this state.
+This records provider cleanup intent, not consumer case history.
+
+Replay the same apply command after a process interruption:
+- Confirmed filesystem, managed-binding and native-registration absence returns
+  `absent`, without repeating a destructive effect.
+- If recorded intent exists, the original directory and native registration are
+  confirmed gone, and the unique residual metadata and preserved branch refs
+  still match the preview, replay removes only that residual metadata and
+  confirms `finished` with reason `reconciled-removal`.
+- A present target is reconsidered only after fresh safe, unchanged-identity
+  checks. A replacement checkout, changed metadata, stale native registration,
+  unavailable evidence or invalid journal is refused/uncertain, not force-cleaned
+  or claimed finished. Inspect the reported evidence; do not delete records or
+  registrations merely to make a replay succeed.
+
+The process-kill recovery path is tested; a power-loss durability guarantee is
+not claimed. Caller bookkeeping remains a separate step after observing the
+provider result.
+
+Activity evidence:
+- Managed `start`/`launch`/`resume` and `run` record work start and completion in
+  shared session metadata. Failed work still counts as activity. `run` counts its
+  command conservatively, even when the command itself is read-only.
+- Live managed operation records block eligibility. An interrupted owner leaves
+  an unresolved activity record; polling neither clears it nor invents a completion time.
+  A record belonging to another host also blocks eligibility.
+- Outside `as`, checkout and session-owned branch **reflog event times** and
+  current non-ignored working-file mtimes contribute to the latest observed work.
+  Commit author dates and Git-index mtimes are not inactivity clocks: checking
+  out an old commit is recent work, while status can refresh the index.
+- Same-user processes whose cwd is the worktree or a subdirectory block
+  eligibility. The packaged `lsof` supplies this evidence; unavailable,
+  unrecognized or failed process inspection blocks eligibility.
+
+Direct `status`, `list` and batch-preview polling update none of these clocks.
+Preview does not fetch, repair metadata, prune registrations, remove resources or
+start an agent. Git status inspection disables optional index writes.
+
+**Observed inactivity is not proof of disposability.** These checks cannot see
+editors with cwd elsewhere, all other-user/remote processes, restored timestamps,
+or events removed by reflog expiry. Explicitly exclude retained or otherwise active
+work. Dirty resources, ignored local data, foreign-owned directories, the invoking
+worktree and unresolved resource evidence are refused. Ignored files can contain
+important local work; age alone never authorizes their removal. A clean workspace
+with no such evidence may be a candidate, not permission to finish it.
+
 ## Current-session targeting
 
 Inside a recorded managed worktree, including its nested directories, use the

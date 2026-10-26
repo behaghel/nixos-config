@@ -1,5 +1,5 @@
 declare const describe: (name: string, fn: () => void) => void;
-declare const it: (name: string, fn: () => void) => void;
+declare const it: (name: string, fn: () => void, timeout?: number) => void;
 declare const beforeAll: (fn: () => void) => void;
 declare const afterAll: (fn: () => void) => void;
 declare const beforeEach: (fn: () => void) => void;
@@ -15,7 +15,7 @@ declare const process: {
 	pid: number;
 };
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -31,7 +31,7 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const cliScript = resolve("modules/flake/agent-session/cli.ts");
@@ -168,6 +168,397 @@ function startManagedSession(
 		agentLog,
 	};
 }
+
+describe("cheap inventory and exact resource inspection", () => {
+	it("lists metadata and inspects only the requested checkout", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "selected");
+			expect(runCli(fixture.checkout, ["unrelated", "create"]).status).toBe(0);
+			const bin = join(fixture.root, "guard-bin");
+			mkdirSync(bin);
+			const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const calls = join(fixture.root, "git-calls");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s %s\\n' "$PWD" "$*" >> ${tomlString(calls)}\ncase "$PWD" in */unrelated) echo 'unrelated inspection blocked' >&2; exit 97;; esac\nexec ${tomlString(realGit)} "$@"\n`);
+			chmodSync(join(bin, "git"), 0o755);
+			const env = { PATH: `${bin}:${process.env.PATH}` };
+			const inventory = runCli(fixture.checkout, ["list", "--json"], env);
+			expect(inventory.status).toBe(0);
+			expect(JSON.parse(inventory.stdout).sessions.length).toBe(2);
+			expect(readFileSync(calls, "utf8").includes("status --porcelain")).toBe(false);
+			const exact = runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"], env);
+			expect(exact.status).toBe(0);
+			const result = JSON.parse(exact.stdout);
+			expect(result.resourceState).toBe("present");
+			expect(result.sessions.length).toBe(1);
+			expect(result.sessions[0].slug).toBe("selected");
+			expect(readFileSync(calls, "utf8").includes(`${fixture.worktrees}/unrelated `)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("distinguishes stale registration and metadata from confirmed absence without repair", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "missing");
+			const metadata = sessionMetadataPath(fixture.checkout, "missing");
+			const saved = readFileSync(metadata, "utf8");
+			writeFileSync(metadata, "{malformed");
+			const malformed = runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
+			expect(malformed.status).toBe(0);
+			expect(JSON.parse(malformed.stdout).resourceState).toBe("unknown");
+			const inventory = runCli(fixture.checkout, ["list", "--json"]);
+			expect(inventory.status).toBe(1);
+			expect(inventory.stdout).toBe("");
+			writeFileSync(metadata, saved);
+			rmSync(worktree, { recursive: true });
+			const inspect = () => runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
+			const stale = inspect();
+			expect(stale.status).toBe(0);
+			expect(JSON.parse(stale.stdout).resourceState).toBe("inconsistent");
+			expect(JSON.parse(stale.stdout).evidence.registered).toBe(true);
+			expect(readFileSync(metadata, "utf8")).toBe(saved);
+			git(fixture.checkout, "worktree", "prune");
+			expect(JSON.parse(inspect().stdout).resourceState).toBe("inconsistent");
+			rmSync(metadata);
+			const absent = inspect();
+			expect(absent.status).toBe(0);
+			expect(JSON.parse(absent.stdout).resourceState).toBe("absent");
+			expect(git(fixture.checkout, "branch", "--list", "agent/missing")).toContain("agent/missing");
+			symlinkSync(join(fixture.root, "nonexistent"), metadata);
+			expect(JSON.parse(inspect().stdout).resourceState).toBe("unknown");
+			expect(lstatSync(metadata).isSymbolicLink()).toBe(true);
+			rmSync(metadata);
+			symlinkSync(join(fixture.root, "nonexistent"), worktree);
+			expect(JSON.parse(inspect().stdout).resourceState).toBe("unknown");
+			expect(lstatSync(worktree).isSymbolicLink()).toBe(true);
+			const outside = runCli(fixture.checkout, ["status", "--worktree", fixture.seed, "--json"]);
+			expect(JSON.parse(outside.stdout).resourceState).toBe("unknown");
+			for (const args of [
+				["status", "--worktree"],
+				["status", "--worktree", worktree, "--refresh"],
+				["missing", "status", "--worktree", worktree],
+				["list", "--refresh"],
+			]) expect(runCli(fixture.checkout, args).status).toBe(64);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+function backdateSession(fixture: ReturnType<typeof createRepositoryFixture>, slug: string): void {
+	const old = new Date("2000-01-01T00:00:00Z");
+	const path = sessionMetadataPath(fixture.checkout, slug);
+	const metadata = JSON.parse(readFileSync(path, "utf8"));
+	metadata.createdAt = old.toISOString();
+	metadata.lastWorkAt = old.toISOString();
+	writeFileSync(path, JSON.stringify(metadata));
+	const worktree = join(realpathSync(fixture.worktrees), slug);
+	for (const log of [git(worktree, "rev-parse", "--git-path", "logs/HEAD"), join(fixture.checkout, ".git", "logs", "refs", "heads", "agent", slug)]) {
+		writeFileSync(log, readFileSync(log, "utf8").replace(/ \d+ [+-]\d{4}(?=\t|\n|$)/g, " 946684800 +0000"));
+	}
+	for (const file of git(worktree, "ls-files").split("\n")) utimesSync(join(worktree, file), old, old);
+}
+
+describe("inactive-session batch preview", () => {
+	it("previews eligible, recent, dirty, live and excluded sessions without mutation", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture, "eligible");
+			for (const slug of ["recent", "dirty", "live", "retained"]) {
+				expect(runCli(fixture.checkout, [slug, "create"]).status).toBe(0);
+			}
+			for (const slug of ["eligible", "dirty", "live", "retained"]) backdateSession(fixture, slug);
+			const livePath = sessionMetadataPath(fixture.checkout, "live");
+			const liveMetadata = JSON.parse(readFileSync(livePath, "utf8"));
+			liveMetadata.activeOperations = [{ id: "test-live", pid: process.pid, hostname: hostname(), startedAt: liveMetadata.createdAt }];
+			writeFileSync(livePath, JSON.stringify(liveMetadata));
+			writeFileSync(join(fixture.worktrees, "dirty", "WIP"), "keep me\n");
+			const before = readFileSync(sessionMetadataPath(fixture.checkout, "eligible"), "utf8");
+			const indexPath = git(join(fixture.worktrees, "eligible"), "rev-parse", "--git-path", "index");
+			const indexBefore = readFileSync(indexPath).toString("hex");
+			const args = ["batch", "finish", "--inactive-for", "7d", "--exclude", "retained", "--keep-branch", "--dry-run", "--json"];
+			const preview = runCli(fixture.checkout, args);
+			expect(preview.status).toBe(0);
+			const result = JSON.parse(preview.stdout);
+			expect(result.keepBranch).toBe(true);
+			const outcomes = Object.fromEntries(result.resources.map((resource: { slug: string; reason: string }) => [resource.slug, resource.reason]));
+			expect(outcomes.eligible).toBe("eligible");
+			expect(outcomes.recent).toBe("recent-activity");
+			expect(outcomes.dirty).toBe("dirty");
+			expect(outcomes.live).toBe("live-operation");
+			expect(outcomes.retained).toBe("excluded");
+			expect(runCli(fixture.checkout, ["eligible", "status", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["list", "--json"]).status).toBe(0);
+			const polled = runCli(fixture.checkout, args);
+			expect(polled.status).toBe(0);
+			expect(JSON.parse(polled.stdout).resources.find((resource: { slug: string }) => resource.slug === "eligible").reason).toBe("eligible");
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "eligible"), "utf8")).toBe(before);
+			expect(readFileSync(indexPath).toString("hex")).toBe(indexBefore);
+			for (const slug of ["eligible", "recent", "dirty", "live", "retained"]) {
+				expect(existsSync(join(fixture.worktrees, slug))).toBe(true);
+				expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("observes unmanaged file and checkout activity and refuses ignored or uncertain evidence", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "external");
+			backdateSession(fixture, "external");
+			const args = ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"];
+			const reason = (env: Record<string, string> = {}) => {
+				const result = runCli(fixture.checkout, args, env);
+				expect(result.status).toBe(0);
+				return JSON.parse(result.stdout).resources[0].reason;
+			};
+			expect(reason()).toBe("eligible");
+			const now = new Date();
+			utimesSync(join(worktree, "README.md"), now, now);
+			expect(reason()).toBe("recent-activity");
+			backdateSession(fixture, "external");
+			git(worktree, "checkout", "--detach", "HEAD");
+			git(worktree, "checkout", "agent/external");
+			expect(reason()).toBe("recent-activity");
+			mkdirSync(join(worktree, ".worktrees"));
+			writeFileSync(join(worktree, ".worktrees", "ignored-notes"), "retain\n");
+			expect(reason()).toBe("ignored-local-data");
+			rmSync(join(worktree, ".worktrees"), { recursive: true });
+			const path = sessionMetadataPath(fixture.checkout, "external");
+			const metadata = JSON.parse(readFileSync(path, "utf8"));
+			metadata.activeOperations = [{ id: "interrupted", pid: 2147483647, hostname: hostname(), startedAt: metadata.createdAt }];
+			writeFileSync(path, JSON.stringify(metadata));
+			const saved = readFileSync(path, "utf8");
+			expect(reason()).toBe("uncertain-operation");
+			expect(readFileSync(path, "utf8")).toBe(saved);
+			metadata.activeOperations = [];
+			writeFileSync(path, JSON.stringify(metadata));
+			const bin = join(fixture.root, "no-lsof");
+			mkdirSync(bin);
+			writeFileSync(join(bin, "lsof"), "#!/bin/sh\nexit 1\n");
+			chmodSync(join(bin, "lsof"), 0o755);
+			expect(reason({ PATH: `${bin}:${process.env.PATH}` })).toBe("unknown-process-evidence");
+			for (const tail of [[], ["--inactive-for", "0d"], ["--inactive-for", "7d", "--force"], ["--inactive-for", "7d"]]) {
+				expect(runCli(fixture.checkout, ["batch", "finish", ...tail]).status).toBe(64);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("refuses a real unmanaged process with cwd in the selected worktree", () => {
+		const fixture = createRepositoryFixture();
+		let child: ReturnType<typeof spawn> | undefined;
+		try {
+			const { worktree } = startManagedSession(fixture, "occupied");
+			backdateSession(fixture, "occupied");
+			child = spawn("node", ["-e", "setInterval(() => {}, 1000)"], { cwd: worktree, stdio: "ignore" });
+			const result = runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"]);
+			expect(result.status).toBe(0);
+			expect(JSON.parse(result.stdout).resources[0].reason).toBe("live-cwd");
+		} finally {
+			child?.kill();
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("tracks meaningful managed work without treating status as activity", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture, "working");
+			const path = sessionMetadataPath(fixture.checkout, "working");
+			const metadata = JSON.parse(readFileSync(path, "utf8"));
+			expect(Number.isFinite(Date.parse(metadata.lastWorkAt))).toBe(true);
+			expect(metadata.activeOperations.length).toBe(0);
+			const before = readFileSync(path, "utf8");
+			expect(runCli(fixture.checkout, ["working", "status", "--json"]).status).toBe(0);
+			expect(readFileSync(path, "utf8")).toBe(before);
+			metadata.lastWorkAt = "2000-01-01T00:00:00Z";
+			writeFileSync(path, JSON.stringify(metadata));
+			expect(runCli(fixture.checkout, ["working", "launch"]).status).toBe(0);
+			const after = JSON.parse(readFileSync(path, "utf8"));
+			expect(Date.parse(after.lastWorkAt) > Date.parse(metadata.lastWorkAt)).toBe(true);
+			expect(after.activeOperations.length).toBe(0);
+			const bin = join(fixture.root, "fake-devenv");
+			mkdirSync(bin);
+			const observed = join(fixture.root, "activity-during-run");
+			writeFileSync(join(bin, "devenv"), `#!/bin/sh\nnode -e 'const fs = require("node:fs"); const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); fs.writeFileSync(process.argv[2], String(m.activeOperations.length));' ${tomlString(path)} ${tomlString(observed)}\nexit 7\n`);
+			chmodSync(join(bin, "devenv"), 0o755);
+			const failed = runCli(fixture.checkout, ["working", "run", "any-command"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(failed.status).toBe(7);
+			expect(readFileSync(observed, "utf8")).toBe("1");
+			expect(JSON.parse(readFileSync(path, "utf8")).activeOperations.length).toBe(0);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+describe("guarded inactive batch finish", () => {
+	it("finishes only unchanged preview candidates, preserves branches and replays confirmed absence", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree: donePath } = startManagedSession(fixture, "done");
+			commitSessionWork(donePath);
+			const doneHead = git(donePath, "rev-parse", "HEAD");
+			for (const slug of ["changed", "late", "dirty", "live", "retained"]) expect(runCli(fixture.checkout, [slug, "create"]).status).toBe(0);
+			for (const slug of ["done", "changed", "dirty", "live", "retained"]) backdateSession(fixture, slug);
+			writeFileSync(join(fixture.worktrees, "dirty", "WIP"), "keep\n");
+			const livePath = sessionMetadataPath(fixture.checkout, "live");
+			const live = JSON.parse(readFileSync(livePath, "utf8"));
+			live.activeOperations = [{ id: "live", pid: process.pid, hostname: hostname(), startedAt: live.createdAt }];
+			writeFileSync(livePath, JSON.stringify(live));
+			const common = ["batch", "finish", "--inactive-for", "7d", "--exclude", "retained"];
+			const preview = runCli(fixture.checkout, [...common, "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const receipt = JSON.parse(preview.stdout).receipt;
+			expect(typeof receipt).toBe("string");
+			writeFileSync(join(fixture.worktrees, "changed", "new-work"), "preserve\n");
+			backdateSession(fixture, "late");
+			const bin = join(fixture.root, "guard-bin");
+			mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const removals = join(fixture.root, "removals");
+			const unrelated = join(fixture.root, "unrelated-inspected");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$PWD" in */late) printf blocked > ${tomlString(unrelated)}; exit 97;; esac\nif [ "$1 $2" = "worktree remove" ]; then printf '%s\\n' "$*" >> ${tomlString(removals)}; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const env = { PATH: `${bin}:${process.env.PATH}` };
+			const args = [...common, "--expected", receipt, "--yes", "--json"];
+			for (const invalid of [
+				[...common, "--expected", receipt, "--json"],
+				[...common, "--expected", `${receipt}x`, "--yes", "--json"],
+				["batch", "finish", "--inactive-for", "8d", "--exclude", "retained", "--expected", receipt, "--yes", "--json"],
+				["batch", "finish", "--inactive-for", "7d", "--expected", receipt, "--yes", "--json"],
+			]) expect(runCli(fixture.checkout, invalid, env).status).toBe(64);
+			const foreign = createRepositoryFixture();
+			try {
+				writeConfig(foreign.checkout, "/unused");
+				expect(runCli(foreign.checkout, args).status).toBe(64);
+			} finally { rmSync(foreign.root, { recursive: true, force: true }); }
+			const apply = runCli(fixture.checkout, args, env);
+			expect(apply.status).toBe(1);
+			const result = JSON.parse(apply.stdout);
+			expect(result.partial).toBe(true);
+			expect(result.resources.length).toBe(2);
+			const outcomes = Object.fromEntries(result.resources.map((resource: { slug: string; outcome: string }) => [resource.slug, resource.outcome]));
+			expect(outcomes.done).toBe("finished");
+			expect(outcomes.changed).toBe("refused");
+			expect(existsSync(join(fixture.worktrees, "done"))).toBe(false);
+			expect(git(fixture.checkout, "rev-parse", "agent/done")).toBe(doneHead);
+			expect(readFileSync(join(fixture.worktrees, "changed", "new-work"), "utf8")).toBe("preserve\n");
+			for (const slug of ["changed", "late", "dirty", "live", "retained"]) expect(existsSync(join(fixture.worktrees, slug))).toBe(true);
+			for (const slug of ["done", "changed", "late", "dirty", "live", "retained"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			const replay = runCli(fixture.checkout, args, env);
+			expect(replay.status).toBe(1);
+			expect(JSON.parse(replay.stdout).resources.find((resource: { slug: string }) => resource.slug === "done").outcome).toBe("absent");
+			expect(readFileSync(removals, "utf8").trim().split("\n").length).toBe(1);
+			expect(existsSync(unrelated)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 120000);
+
+	it("reconciles a process killed after native removal without repeating that effect", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "interrupted");
+			backdateSession(fixture, "interrupted");
+			const common = ["batch", "finish", "--inactive-for", "7d"];
+			const receipt = JSON.parse(runCli(fixture.checkout, [...common, "--dry-run", "--json"]).stdout).receipt;
+			const bin = join(fixture.root, "crash-bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const removals = join(fixture.root, "removals");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1 $2" = "worktree remove" ]; then printf attempted >> ${tomlString(removals)}; ${tomlString(executable)} "$@" || exit; kill -KILL "$PPID"; exit 0; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const env = { PATH: `${bin}:${process.env.PATH}` };
+			const args = [...common, "--expected", receipt, "--yes", "--json"];
+			const interrupted = runCli(fixture.checkout, args, env);
+			expect(interrupted.signal).toBe("SIGKILL");
+			expect(existsSync(worktree)).toBe(false);
+			const recordPath = sessionMetadataPath(fixture.checkout, "interrupted");
+			expect(existsSync(recordPath)).toBe(true);
+			const saved = readFileSync(recordPath, "utf8");
+			writeFileSync(recordPath, `${saved} `);
+			const changed = runCli(fixture.checkout, args, env);
+			expect(changed.status).toBe(1);
+			expect(JSON.parse(changed.stdout).resources[0].outcome).toBe("refused");
+			expect(readFileSync(recordPath, "utf8")).toBe(`${saved} `);
+			writeFileSync(recordPath, saved);
+			const replay = runCli(fixture.checkout, args, env);
+			expect(replay.status).toBe(0);
+			expect(JSON.parse(replay.stdout).resources[0].outcome).toBe("finished");
+			expect(JSON.parse(replay.stdout).resources[0].reason).toBe("reconciled-removal");
+			expect(readFileSync(removals, "utf8")).toBe("attempted");
+			expect(git(fixture.checkout, "branch", "--list", "agent/interrupted")).toContain("agent/interrupted");
+			expect(JSON.parse(runCli(fixture.checkout, args, env).stdout).resources[0].outcome).toBe("absent");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("refuses uncertain partial removal and fresh native locks without force or pruning", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "uncertain");
+			backdateSession(fixture, "uncertain");
+			const common = ["batch", "finish", "--inactive-for", "7d"];
+			const receipt = JSON.parse(runCli(fixture.checkout, [...common, "--dry-run", "--json"]).stdout).receipt;
+			const args = [...common, "--expected", receipt, "--yes", "--json"];
+			git(fixture.checkout, "worktree", "lock", worktree);
+			const locked = runCli(fixture.checkout, args);
+			expect(locked.status).toBe(1);
+			expect(JSON.parse(locked.stdout).resources[0].reason).toBe("worktree-locked");
+			git(fixture.checkout, "worktree", "unlock", worktree);
+			const bin = join(fixture.root, "fail-bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const removals = join(fixture.root, "removals");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1 $2" = "worktree remove" ]; then printf attempted >> ${tomlString(removals)}; echo 'native failure' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const env = { PATH: `${bin}:${process.env.PATH}` };
+			const failure = runCli(fixture.checkout, args, env);
+			expect(failure.status).toBe(1);
+			expect(JSON.parse(failure.stdout).resources[0].outcome).toBe("uncertain");
+			rmSync(worktree, { recursive: true });
+			const replay = runCli(fixture.checkout, args, env);
+			expect(replay.status).toBe(1);
+			expect(JSON.parse(replay.stdout).resources[0].outcome).toBe("refused");
+			expect(readFileSync(removals, "utf8")).toBe("attempted");
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain")).toContain(worktree);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "uncertain"))).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("rechecks new live activity and ignored data rather than trusting eligibility alone", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture, "live-after-preview");
+			expect(runCli(fixture.checkout, ["ignored-after-preview", "create"]).status).toBe(0);
+			for (const slug of ["live-after-preview", "ignored-after-preview"]) backdateSession(fixture, slug);
+			const common = ["batch", "finish", "--inactive-for", "7d"];
+			const receipt = JSON.parse(runCli(fixture.checkout, [...common, "--dry-run", "--json"]).stdout).receipt;
+			const path = sessionMetadataPath(fixture.checkout, "live-after-preview");
+			const metadata = JSON.parse(readFileSync(path, "utf8"));
+			metadata.activeOperations = [{ id: "new-live", pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString() }];
+			writeFileSync(path, JSON.stringify(metadata));
+			const ignored = join(fixture.worktrees, "ignored-after-preview", ".worktrees");
+			mkdirSync(ignored); writeFileSync(join(ignored, "notes"), "retain\n");
+			const result = runCli(fixture.checkout, [...common, "--expected", receipt, "--yes", "--json"]);
+			expect(result.status).toBe(1);
+			const reasons = Object.fromEntries(JSON.parse(result.stdout).resources.map((resource: { slug: string; reason: string }) => [resource.slug, resource.reason]));
+			expect(reasons["live-after-preview"]).toBe("live-operation");
+			expect(reasons["ignored-after-preview"]).toBe("ignored-local-data");
+			for (const slug of ["live-after-preview", "ignored-after-preview"]) expect(existsSync(join(fixture.worktrees, slug))).toBe(true);
+			expect(existsSync(join(fixture.checkout, ".git", "agent-session", "retirements"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("does not infer unique ownership or absence from a directory-name convention", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "selected");
+			const aliasPath = sessionMetadataPath(fixture.checkout, "alias");
+			const metadata = JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "selected"), "utf8"));
+			writeFileSync(aliasPath, JSON.stringify({ ...metadata, slug: "alias", branch: "agent/alias" }));
+			const inspect = () => JSON.parse(runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]).stdout);
+			expect(inspect().resourceState).toBe("inconsistent");
+			git(fixture.checkout, "worktree", "remove", worktree);
+			rmSync(sessionMetadataPath(fixture.checkout, "selected"));
+			expect(inspect().resourceState).toBe("inconsistent");
+			rmSync(aliasPath);
+			writeFileSync(aliasPath, "{malformed");
+			expect(inspect().resourceState).toBe("unknown");
+			rmSync(aliasPath);
+			expect(inspect().resourceState).toBe("absent");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
 
 function commitSessionWork(worktree: string): void {
 	git(worktree, "config", "user.name", "Agent Session Test");
@@ -979,7 +1370,10 @@ describe("PR launch, reuse and borrowed branches", () => {
 			expect(readFileSync(fixture.agentLog, "utf8").trim()).toBe(metadata.worktreePath);
 			expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(head);
 			expect(readFileSync(join(metadata.worktreePath, "dirty.txt"), "utf8")).toBe("unfinished\n");
-			expect(readFileSync(sessionMetadataPath(fixture.checkout, "review-auth"), "utf8")).toBe(before);
+			const { lastWorkAt, activeOperations, ...identity } = JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "review-auth"), "utf8"));
+			expect(JSON.stringify(identity)).toBe(JSON.stringify(JSON.parse(before)));
+			expect(Number.isFinite(Date.parse(lastWorkAt))).toBe(true);
+			expect(activeOperations.length).toBe(0);
 			expect(readFileSync(fixture.ghLog, "utf8").trim().split("\n").length).toBe(1);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
