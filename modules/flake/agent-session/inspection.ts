@@ -1,20 +1,26 @@
-import { existsSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, realpathSync } from "node:fs";
+import { basename, dirname, join, resolve } from "node:path";
 import { assertReviewSource, pullRequestSummary } from "./github.ts";
 import { sessionCommand } from "./arguments.ts";
 import {
 	countRevisionRange,
+	commonGitDirectory,
 	git,
 	localBranches,
 	reflogEntries,
 	remoteDefaultBranch,
 } from "./git.ts";
 import {
+	assertConfiguredWorktreePath,
 	discoverManagedWorktrees,
 	loadConfig,
 	metadataPath,
 	metadataSlugs,
 	readMetadata,
+	readMetadataRecord,
 	readOperationLock,
+	resolveWorktreeRoot,
+	sessionRecordExists,
 	validateSlug,
 } from "./sessions.ts";
 import { CliError, run } from "./runtime.ts";
@@ -264,6 +270,92 @@ export function refreshMetadataRemote(
 		if (fetch.status !== 0) throw new CliError(`Failed to fetch remote ${remote}.`);
 	}
 	return remoteDefaultBranch(root, metadata.remote);
+}
+
+// Inventory deliberately avoids native worktree discovery and checkout status.
+// Invalid records remain visible instead of silently disappearing from the list.
+export function showInventory(root: string, json: boolean): void {
+	const directory = join(commonGitDirectory(root), "agent-session", "sessions");
+	const sessions = metadataSlugs(root).map((slug) => {
+		try { return { ...readMetadataRecord(join(directory, `${slug}.json`), slug), metadataState: "recorded" }; }
+		catch (error) { return { slug, metadataState: "unknown", problem: String(error) }; }
+	});
+	if (json) process.stdout.write(`${JSON.stringify({ version: 1, inventory: "metadata-only", sessions })}\n`);
+	else for (const session of sessions) process.stdout.write(`${session.slug}  ${session.metadataState}\n`);
+}
+
+// Resolve aliases even when the final component is missing, without treating
+// dangling symlinks or inaccessible ancestors as evidence of absence.
+function canonicalResourcePath(path: string): string {
+	const absolute = resolve(path);
+	try {
+		lstatSync(absolute);
+		return realpathSync(absolute);
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		try {
+			if (lstatSync(absolute).isSymbolicLink()) throw new CliError("Target is a dangling symlink.");
+		} catch (probe) {
+			if ((probe as NodeJS.ErrnoException).code !== "ENOENT") throw probe;
+		}
+		const parent = dirname(absolute);
+		if (parent === absolute) throw error;
+		return join(canonicalResourcePath(parent), basename(absolute));
+	}
+}
+
+export function showExactStatus(root: string, path: string, json: boolean): void {
+	let worktreePath = resolve(path);
+	let resourceState: "present" | "absent" | "inconsistent" | "unknown" = "unknown";
+	const evidence: { filesystem: string; metadata: string; registered: boolean | null } = {
+		filesystem: "unknown", metadata: "unknown", registered: null,
+	};
+	const sessions: SessionStatus[] = [];
+	let problem: string | undefined;
+	try {
+		worktreePath = canonicalResourcePath(path);
+		const config = loadConfig(root);
+		const configuredRoot = canonicalResourcePath(resolveWorktreeRoot(root, config.worktree_root));
+		const slug = basename(worktreePath);
+		validateSlug(slug);
+		if (worktreePath !== join(configuredRoot, slug)) throw new CliError("Target is outside the configured managed-worktree slots.");
+		try {
+			const stat = lstatSync(worktreePath);
+			evidence.filesystem = stat.isDirectory() ? "present" : "not-directory";
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+			evidence.filesystem = "absent";
+		}
+		const registrations = git(root, ["worktree", "list", "--porcelain", "-z"])
+			.split("\0").filter((field) => field.startsWith("worktree "))
+			.map((field) => resolve(field.slice("worktree ".length)));
+		evidence.registered = registrations.includes(worktreePath);
+		// Inspect only this slot's record. Other records cannot authorize this
+		// configured slot, and corrupt unrelated records must not block lookup.
+		const recorded = sessionRecordExists(root, slug);
+		evidence.metadata = recorded ? "recorded" : "absent";
+		if (!recorded && !evidence.registered && evidence.filesystem === "absent") {
+			resourceState = "absent";
+		} else if (recorded && evidence.registered && evidence.filesystem === "present") {
+			const metadata = readMetadata(root, slug);
+			assertConfiguredWorktreePath(root, config, metadata);
+			if (canonicalResourcePath(metadata.worktreePath) !== worktreePath || commonGitDirectory(worktreePath) !== commonGitDirectory(root)) {
+				throw new CliError("Managed metadata and native checkout identity do not agree.");
+			}
+			const status = inspectSession(metadata);
+			sessions.push(status);
+			resourceState = statusCannotOperate(status) ? "inconsistent" : "present";
+			problem = status.problem;
+		} else {
+			resourceState = "inconsistent";
+			problem = "Filesystem, managed record and Git registration do not agree. Inspect with doctor; no resources were changed.";
+		}
+	} catch (error) {
+		problem = `Cannot establish exact resource state: ${String(error)} No resources were changed.`;
+	}
+	const result = { version: 1, worktreePath, resourceState, evidence, sessions, ...(problem ? { problem } : {}) };
+	if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
+	else process.stdout.write(`${worktreePath}  ${resourceState.toUpperCase()}${problem ? `\n${problem}` : ""}\n`);
 }
 
 export function showStatus(

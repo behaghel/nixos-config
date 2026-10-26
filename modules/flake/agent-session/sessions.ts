@@ -176,8 +176,9 @@ export function writeMetadata(root: string, metadata: SessionMetadata): void {
 	}
 }
 
-export function readMetadata(root: string, slug: string): SessionMetadata {
-	const path = metadataPath(root, slug);
+// Parse persisted data without querying any checkout. This is not authority to
+// operate on its paths; readMetadata performs the additional safety checks.
+export function readMetadataRecord(path: string, slug: string): SessionMetadata {
 	if (!existsSync(path)) throw new CliError(`No managed session: ${slug}`);
 	let value: unknown;
 	try {
@@ -206,6 +207,11 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 	) {
 		throw new CliError(`Invalid session metadata for ${slug}.`);
 	}
+	return metadata as SessionMetadata;
+}
+
+export function readMetadata(root: string, slug: string): SessionMetadata {
+	const metadata = readMetadataRecord(metadataPath(root, slug), slug);
 	const canonicalWorktree = existsSync(metadata.worktreePath)
 		? realpathSync(metadata.worktreePath)
 		: resolve(metadata.worktreePath);

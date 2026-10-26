@@ -169,6 +169,79 @@ function startManagedSession(
 	};
 }
 
+describe("cheap inventory and exact resource inspection", () => {
+	it("lists metadata and inspects only the requested checkout", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "selected");
+			expect(runCli(fixture.checkout, ["unrelated", "create"]).status).toBe(0);
+			const bin = join(fixture.root, "guard-bin");
+			mkdirSync(bin);
+			const realGit = spawnSync("which", ["git"], { encoding: "utf8" }).stdout.trim();
+			const calls = join(fixture.root, "git-calls");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s %s\\n' "$PWD" "$*" >> ${tomlString(calls)}\ncase "$PWD" in */unrelated) echo 'unrelated inspection blocked' >&2; exit 97;; esac\nexec ${tomlString(realGit)} "$@"\n`);
+			chmodSync(join(bin, "git"), 0o755);
+			const env = { PATH: `${bin}:${process.env.PATH}` };
+			const inventory = runCli(fixture.checkout, ["list", "--json"], env);
+			expect(inventory.status).toBe(0);
+			expect(JSON.parse(inventory.stdout).sessions.length).toBe(2);
+			expect(readFileSync(calls, "utf8").includes("status --porcelain")).toBe(false);
+			const exact = runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"], env);
+			expect(exact.status).toBe(0);
+			const result = JSON.parse(exact.stdout);
+			expect(result.resourceState).toBe("present");
+			expect(result.sessions.length).toBe(1);
+			expect(result.sessions[0].slug).toBe("selected");
+			expect(readFileSync(calls, "utf8").includes(`${fixture.worktrees}/unrelated `)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("distinguishes stale registration and metadata from confirmed absence without repair", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "missing");
+			const metadata = sessionMetadataPath(fixture.checkout, "missing");
+			const saved = readFileSync(metadata, "utf8");
+			writeFileSync(metadata, "{malformed");
+			const malformed = runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
+			expect(malformed.status).toBe(0);
+			expect(JSON.parse(malformed.stdout).resourceState).toBe("unknown");
+			const inventory = runCli(fixture.checkout, ["list", "--json"]);
+			expect(JSON.parse(inventory.stdout).sessions[0].metadataState).toBe("unknown");
+			writeFileSync(metadata, saved);
+			rmSync(worktree, { recursive: true });
+			const inspect = () => runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
+			const stale = inspect();
+			expect(stale.status).toBe(0);
+			expect(JSON.parse(stale.stdout).resourceState).toBe("inconsistent");
+			expect(JSON.parse(stale.stdout).evidence.registered).toBe(true);
+			expect(readFileSync(metadata, "utf8")).toBe(saved);
+			git(fixture.checkout, "worktree", "prune");
+			expect(JSON.parse(inspect().stdout).resourceState).toBe("inconsistent");
+			rmSync(metadata);
+			const absent = inspect();
+			expect(absent.status).toBe(0);
+			expect(JSON.parse(absent.stdout).resourceState).toBe("absent");
+			expect(git(fixture.checkout, "branch", "--list", "agent/missing")).toContain("agent/missing");
+			symlinkSync(join(fixture.root, "nonexistent"), metadata);
+			expect(JSON.parse(inspect().stdout).resourceState).toBe("inconsistent");
+			expect(lstatSync(metadata).isSymbolicLink()).toBe(true);
+			rmSync(metadata);
+			symlinkSync(join(fixture.root, "nonexistent"), worktree);
+			expect(JSON.parse(inspect().stdout).resourceState).toBe("unknown");
+			expect(lstatSync(worktree).isSymbolicLink()).toBe(true);
+			const outside = runCli(fixture.checkout, ["status", "--worktree", fixture.seed, "--json"]);
+			expect(JSON.parse(outside.stdout).resourceState).toBe("unknown");
+			for (const args of [
+				["status", "--worktree"],
+				["status", "--worktree", worktree, "--refresh"],
+				["missing", "status", "--worktree", worktree],
+				["list", "--refresh"],
+			]) expect(runCli(fixture.checkout, args).status).toBe(64);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 function commitSessionWork(worktree: string): void {
 	git(worktree, "config", "user.name", "Agent Session Test");
 	git(worktree, "config", "user.email", "agent-session@example.invalid");

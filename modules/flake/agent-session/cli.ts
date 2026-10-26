@@ -3,7 +3,7 @@ import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
-import { showStatus } from "./inspection.ts";
+import { showStatus, showInventory, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk } from "./finish.ts";
 import {
@@ -82,8 +82,17 @@ export function main(args: string[]): number {
 				"--continue",
 			]);
 		}
+		if (command === "list") {
+			if (rest.some((argument) => argument !== "--json") || rest.length > 1) throw argumentError("list accepts only --json.");
+			showInventory(primaryRoot(repositoryRoot()), rest.includes("--json"));
+			return 0;
+		}
 		if (command === "status") {
 			const options = parseStatusArguments(rest);
+			if (options.worktree) {
+				showExactStatus(primaryRoot(repositoryRoot()), options.worktree, options.json);
+				return 0;
+			}
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			showStatus(
 				primaryRoot(repositoryRoot()),

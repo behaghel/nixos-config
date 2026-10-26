@@ -43,7 +43,7 @@ as my-task finish                   # guarded local cleanup, with confirmation
 ## Command grammar and migration
 
 Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
-Repository-wide commands remain command-first: `as status`, `as doctor`,
+Repository-wide commands remain command-first: `as list`, `as status`, `as doctor`,
 `as finish --all|--gone`, and `as completion bash|zsh|fish`.
 
 Command words are reserved in the first position so old command-first calls cannot
@@ -69,6 +69,42 @@ Interactive cleanup uses Node-compatible confirmation for normal, forced and bul
 finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a failed
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
+
+## Cheap inventory and exact-resource inspection
+
+```sh
+as list --json
+as status --worktree /absolute/path/to/.worktrees/my-task --json
+```
+
+`list` reads saved session records without discovering or inspecting checkouts.
+Its `sessions` entries contain persisted metadata and `metadataState: "recorded"`;
+malformed records remain visible with `metadataState: "unknown"` and a diagnostic.
+It is an inventory, not proof that a checkout exists or is safe to remove.
+Unrecorded native worktrees are deliberately not included.
+
+Exact status runs from another checkout of the same repository, even when the
+selected directory is missing. The path must identify a configured managed slot.
+It reads only that slot's record and Git state, plus the shared native worktree
+registration list; unrelated checkout status, reflogs and branches are not queried.
+Relative paths resolve against the calling directory; aliases are canonicalized.
+`--worktree` cannot be combined with a slug or `--refresh`.
+
+JSON includes `worktreePath`, `resourceState`, `evidence` and `sessions`:
+- `present`: directory, managed metadata and native registration agree. The one
+  selected session's ordinary status reports cleanliness and branch state.
+- `absent`: the configured slot has no directory, managed record or registration.
+  Branches may still exist; absence does not mean commits were deleted.
+- `inconsistent`: evidence disagrees (including stale metadata/registration,
+  unrecorded directories or a branch conflict). No absence is inferred.
+- `unknown`: evidence cannot be established, for example malformed metadata,
+  inaccessible paths, dangling target symlinks or paths outside configured slots.
+
+`evidence` exposes `filesystem`, `metadata` and `registered` observations; values
+not established remain `"unknown"` or `null`. A successful JSON response can report
+any resource state: consumers must examine `resourceState`, not just exit status.
+These observations are not cleanup authorization. Neither command fetches,
+repairs, prunes, removes resources, starts an agent or updates session metadata.
 
 ## Current-session targeting
 

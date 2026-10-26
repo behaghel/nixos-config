@@ -11,14 +11,15 @@ export const commandNames = [
 	"start",
 	"resume",
 	"status",
+	"list",
 	"doctor",
 	"repair",
 	"finish",
 	"completion",
 ];
 
-export const sessionCommandNames = commandNames.filter((name) => name !== "completion");
-export const globalCommandNames = ["status", "doctor", "completion", "finish"];
+export const sessionCommandNames = commandNames.filter((name) => !["completion", "list"].includes(name));
+export const globalCommandNames = ["status", "list", "doctor", "completion", "finish"];
 export const currentSessionCommandNames = sessionCommandNames.filter((name) => !["create", "start", "repair"].includes(name));
 
 export function sessionCommand(slug: string, command: string): string {
@@ -249,23 +250,31 @@ export function parseFinishArguments(args: string[]): {
 
 export function parseStatusArguments(args: string[]): {
 	slug?: string;
+	worktree?: string;
 	json: boolean;
 	refresh: boolean;
 } {
 	let slug: string | undefined;
+	let worktree: string | undefined;
 	let json = false;
 	let refresh = false;
-	for (const argument of args) {
-		if (argument === "--json") json = true;
+	for (let index = 0; index < args.length; index++) {
+		const argument = args[index] ?? "";
+		if (argument === "--worktree") {
+			const value = args[++index];
+			if (worktree || !value || value.startsWith("-")) throw argumentError("--worktree requires exactly one path.");
+			worktree = value;
+		} else if (argument === "--json") json = true;
 		else if (argument === "--refresh") refresh = true;
 		else if (!argument.startsWith("-") && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("status", argument, ["--json", "--refresh"]);
+			throw unknownOption("status", argument, ["--json", "--refresh", "--worktree"]);
 		} else {
 			throw argumentError(`Unexpected argument '${argument}' for 'status'.`);
 		}
 	}
-	return { slug, json, refresh };
+	if (worktree && (slug || refresh)) throw argumentError("--worktree cannot be combined with a session slug or --refresh.");
+	return { slug, worktree, json, refresh };
 }
 
 export function parseDoctorArguments(args: string[]): { slug?: string; json: boolean } {
@@ -312,7 +321,9 @@ function usage(): string {
 		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
+		"  agent-session list [--json] (metadata-only inventory)",
 		"  agent-session status [--json] [--refresh]",
+		"  agent-session status --worktree <path> [--json] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session completion <bash|zsh|fish>",
 	].join("\n");
