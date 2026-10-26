@@ -14,6 +14,7 @@ import {
 	metadataPath,
 	metadataSlugs,
 	readMetadata,
+	readMetadataInventory,
 	readOperationLock,
 	validateSlug,
 } from "./sessions.ts";
@@ -264,6 +265,20 @@ export function refreshMetadataRemote(
 		if (fetch.status !== 0) throw new CliError(`Failed to fetch remote ${remote}.`);
 	}
 	return remoteDefaultBranch(root, metadata.remote);
+}
+
+// Binding inventory, not a claim about live Git state or cleanup eligibility.
+// Read every record before output: an unreadable record cannot prove absence.
+export function showInventory(root: string, json: boolean): void {
+	const sessions = readMetadataInventory(root).map(({ slug, branch, worktreePath }) =>
+		({ slug, branch, worktreePath }));
+	if (json) {
+		process.stdout.write(`${JSON.stringify({ version: 1, command: "list", sessions })}\n`);
+		return;
+	}
+	for (const session of sessions)
+		process.stdout.write(`${session.slug}  ${session.branch}\n  ${session.worktreePath}\n`);
+	if (!sessions.length) process.stdout.write("No recorded agent sessions.\n");
 }
 
 export function showStatus(

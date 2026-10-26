@@ -17,6 +17,7 @@ const commandOptions: Record<string, string[]> = {
 	"global-doctor": ["--json"],
 	finish: ["--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
 	"global-status": ["--json", "--refresh"],
+	"global-list": ["--json"],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],
 };
 

@@ -3,7 +3,7 @@ import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
-import { showStatus } from "./inspection.ts";
+import { showInventory, showStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk } from "./finish.ts";
 import {
@@ -81,6 +81,12 @@ export function main(args: string[]): number {
 			return launch(primaryRoot(repositoryRoot()), slug, "resume", [
 				"--continue",
 			]);
+		}
+		if (command === "list") {
+			if (rest.some((argument) => argument !== "--json"))
+				throw argumentError("Use: agent-session list [--json].");
+			showInventory(primaryRoot(repositoryRoot()), rest.includes("--json"));
+			return 0;
 		}
 		if (command === "status") {
 			const options = parseStatusArguments(rest);
