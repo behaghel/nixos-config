@@ -106,6 +106,51 @@ any resource state: consumers must examine `resourceState`, not just exit status
 These observations are not cleanup authorization. Neither command fetches,
 repairs, prunes, removes resources, starts an agent or updates session metadata.
 
+## Inactive-session preview
+
+```sh
+as batch finish --inactive-for 7d --exclude retained-task --dry-run --json
+```
+
+This is a **read-only preview**, not batch apply. `--inactive-for` is required;
+positive integer durations use `s`, `m`, `h`, `d` or `w`. Repeat `--exclude <slug>`
+for resources retained by you or another owner. Exclusions are explicit per call,
+not persisted ownership declarations. Branch preservation is unconditional;
+`--keep-branch` is accepted for clarity. There is no batch force option.
+
+JSON `resources` reports each recorded/discovered session's exact slug, path when
+established, and eligibility/refusal `reason`. Excluded names remain visible even
+when no record exists. Eligible entries expose `activity.lastWorkAt` and evidence
+sources. `observedAt` and `cutoff` define the explicit observation window.
+No preview receipt authorizes apply yet; calls without `--dry-run` are rejected.
+
+Activity evidence:
+- Managed `start`/`launch`/`resume` and `run` record work start and completion in
+  shared session metadata. Failed work still counts as activity. `run` counts its
+  command conservatively, even when the command itself is read-only.
+- Live managed operation records block eligibility. An interrupted owner leaves
+  an unresolved activity record; polling neither clears it nor invents a completion time.
+  A record belonging to another host also blocks eligibility.
+- Outside `as`, checkout and session-owned branch **reflog event times** and
+  current non-ignored working-file mtimes contribute to the latest observed work.
+  Commit author dates and Git-index mtimes are not inactivity clocks: checking
+  out an old commit is recent work, while status can refresh the index.
+- Same-user processes whose cwd is the worktree or a subdirectory block
+  eligibility. The packaged `lsof` supplies this evidence; unavailable,
+  unrecognized or failed process inspection blocks eligibility.
+
+Direct `status`, `list` and batch-preview polling update none of these clocks.
+Preview does not fetch, repair metadata, prune registrations, remove resources or
+start an agent. Git status inspection disables optional index writes.
+
+**Observed inactivity is not proof of disposability.** These checks cannot see
+editors with cwd elsewhere, all other-user/remote processes, restored timestamps,
+or events removed by reflog expiry. Explicitly exclude retained or otherwise active
+work. Dirty resources, ignored local data, foreign-owned directories, the invoking
+worktree and unresolved resource evidence are refused. Ignored files can contain
+important local work; age alone never authorizes their removal. A clean workspace
+with no such evidence may be a candidate, not permission to finish it.
+
 ## Current-session targeting
 
 Inside a recorded managed worktree, including its nested directories, use the

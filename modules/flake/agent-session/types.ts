@@ -30,6 +30,13 @@ export interface PullRequestMetadata {
 	sourceBranchMissing?: boolean;
 }
 
+export interface ActiveOperation {
+	id: string;
+	pid: number;
+	hostname: string;
+	startedAt: string;
+}
+
 export interface SessionMetadata {
 	version: 1 | 2;
 	slug: string;
@@ -38,6 +45,8 @@ export interface SessionMetadata {
 	remote: string;
 	defaultBranch: string;
 	createdAt: string;
+	lastWorkAt?: string;
+	activeOperations?: ActiveOperation[];
 	conversation: null;
 	preexistingBranches?: string[];
 	initialBranchOwned?: boolean;

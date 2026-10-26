@@ -56,7 +56,7 @@ in
 
   # Bun is only needed for the migrated regression suite, not everyday shells.
   profiles.agent-session-tests.module = { pkgs, lib, ... }: {
-    packages = [ pkgs.bun pkgs.nodejs_24 pkgs.zsh pkgs.fish pkgs.python3 ];
+    packages = [ pkgs.bun pkgs.nodejs_24 pkgs.zsh pkgs.fish pkgs.python3 pkgs.lsof ];
     outputs.agent-session-tests = import ./tests/agent-session.nix { inherit pkgs lib; };
   };
 

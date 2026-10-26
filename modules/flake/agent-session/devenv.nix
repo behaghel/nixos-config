@@ -11,12 +11,12 @@ let
   });
   agentSessionCommand = pkgs.writeShellApplication {
     name = "agent-session";
-    runtimeInputs = [ pkgs.nodejs_24 pkgs.git pkgs.gh ];
+    runtimeInputs = [ pkgs.nodejs_24 pkgs.git pkgs.gh pkgs.lsof ];
     text = ''
       action="''${2-}"
       case "''${1-}" in
         --) action="''${3-}" ;;
-        status|doctor|finish|completion|__complete) action= ;;
+        status|list|batch|doctor|finish|completion|__complete) action= ;;
       esac
       if [ "''${0##*/}" = as ] && [ "$action" = cd ]; then
         printf '%s\n' "as <slug> cd requires shell integration; source \"\$AGENT_SESSION_SHELL_ROOT/init.sh\" in Bash/Zsh or init.fish in Fish." >&2

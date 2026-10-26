@@ -5,7 +5,7 @@ import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showStatus, showInventory, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
-import { finish, finishBulk } from "./finish.ts";
+import { finish, finishBulk, previewInactiveFinish } from "./finish.ts";
 import {
 	commandNames,
 	argumentError,
@@ -14,6 +14,7 @@ import {
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
+	parseBatchPreviewArguments,
 	parseDoctorArguments,
 	parseRequiredSlug,
 	parseInvocation,
@@ -81,6 +82,12 @@ export function main(args: string[]): number {
 			return launch(primaryRoot(repositoryRoot()), slug, "resume", [
 				"--continue",
 			]);
+		}
+		if (command === "batch") {
+			const options = parseBatchPreviewArguments(rest);
+			const invocationRoot = repositoryRoot();
+			previewInactiveFinish(primaryRoot(invocationRoot), invocationRoot, options);
+			return 0;
 		}
 		if (command === "list") {
 			if (rest.some((argument) => argument !== "--json") || rest.length > 1) throw argumentError("list accepts only --json.");

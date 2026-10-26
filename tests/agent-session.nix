@@ -20,7 +20,7 @@ in
 assert builtins.all (item: item.assertion) cfg.assertions;
 pkgs.runCommand "agent-session-tests"
 {
-  nativeBuildInputs = cfg.packages ++ [ pkgs.bun pkgs.nodejs_24 pkgs.git pkgs.bash pkgs.zsh pkgs.fish pkgs.nix pkgs.python3 ];
+  nativeBuildInputs = cfg.packages ++ [ pkgs.bun pkgs.nodejs_24 pkgs.git pkgs.bash pkgs.zsh pkgs.fish pkgs.nix pkgs.python3 pkgs.lsof ];
   inherit (cfg.env) AGENT_SESSION_CONFIG AGENT_SESSION_COMPLETION_ROOT AGENT_SESSION_SHELL_ROOT;
 }
   ''

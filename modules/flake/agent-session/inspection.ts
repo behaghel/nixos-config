@@ -52,6 +52,7 @@ function brokenStatus(slug: string, problem: string): SessionStatus {
 function unrecordedStatus(worktree: ManagedWorktree): SessionStatus {
 	const clean =
 		git(worktree.worktreePath, [
+			"--no-optional-locks",
 			"status",
 			"--porcelain",
 			"--untracked-files=all",
@@ -192,6 +193,7 @@ export function inspectSession(
 	const branch = actualBranch.stdout;
 	const clean =
 		git(metadata.worktreePath, [
+			"--no-optional-locks",
 			"status",
 			"--porcelain",
 			"--untracked-files=all",
@@ -304,7 +306,7 @@ function canonicalResourcePath(path: string): string {
 	}
 }
 
-export function showExactStatus(root: string, path: string, json: boolean): void {
+export function inspectExactResource(root: string, path: string) {
 	let worktreePath = resolve(path);
 	let resourceState: "present" | "absent" | "inconsistent" | "unknown" = "unknown";
 	const evidence: { filesystem: string; metadata: string; registered: boolean | null } = {
@@ -353,9 +355,13 @@ export function showExactStatus(root: string, path: string, json: boolean): void
 	} catch (error) {
 		problem = `Cannot establish exact resource state: ${String(error)} No resources were changed.`;
 	}
-	const result = { version: 1, worktreePath, resourceState, evidence, sessions, ...(problem ? { problem } : {}) };
+	return { version: 1, worktreePath, resourceState, evidence, sessions, ...(problem ? { problem } : {}) };
+}
+
+export function showExactStatus(root: string, path: string, json: boolean): void {
+	const result = inspectExactResource(root, path);
 	if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
-	else process.stdout.write(`${worktreePath}  ${resourceState.toUpperCase()}${problem ? `\n${problem}` : ""}\n`);
+	else process.stdout.write(`${result.worktreePath}  ${result.resourceState.toUpperCase()}${result.problem ? `\n${result.problem}` : ""}\n`);
 }
 
 export function showStatus(

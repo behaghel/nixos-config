@@ -4,7 +4,7 @@ function as --wraps=agent-session --description 'Coding-agent worktree sessions'
   switch "$argv[1]"
     case --
       set action "$argv[3]"
-    case status doctor finish completion __complete
+    case status list batch doctor finish completion __complete
       set action ''
   end
   if test "$action" = cd; and test -n "$AGENT_SESSION_CONFIG"

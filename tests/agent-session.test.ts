@@ -1,5 +1,5 @@
 declare const describe: (name: string, fn: () => void) => void;
-declare const it: (name: string, fn: () => void) => void;
+declare const it: (name: string, fn: () => void, timeout?: number) => void;
 declare const beforeAll: (fn: () => void) => void;
 declare const afterAll: (fn: () => void) => void;
 declare const beforeEach: (fn: () => void) => void;
@@ -15,7 +15,7 @@ declare const process: {
 	pid: number;
 };
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
 	chmodSync,
 	existsSync,
@@ -31,7 +31,7 @@ import {
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
+import { hostname, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 const cliScript = resolve("modules/flake/agent-session/cli.ts");
@@ -238,6 +238,151 @@ describe("cheap inventory and exact resource inspection", () => {
 				["missing", "status", "--worktree", worktree],
 				["list", "--refresh"],
 			]) expect(runCli(fixture.checkout, args).status).toBe(64);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
+function backdateSession(fixture: ReturnType<typeof createRepositoryFixture>, slug: string): void {
+	const old = new Date("2000-01-01T00:00:00Z");
+	const path = sessionMetadataPath(fixture.checkout, slug);
+	const metadata = JSON.parse(readFileSync(path, "utf8"));
+	metadata.createdAt = old.toISOString();
+	metadata.lastWorkAt = old.toISOString();
+	writeFileSync(path, JSON.stringify(metadata));
+	const worktree = join(realpathSync(fixture.worktrees), slug);
+	for (const log of [git(worktree, "rev-parse", "--git-path", "logs/HEAD"), join(fixture.checkout, ".git", "logs", "refs", "heads", "agent", slug)]) {
+		writeFileSync(log, readFileSync(log, "utf8").replace(/ \d+ [+-]\d{4}(?=\t|\n|$)/g, " 946684800 +0000"));
+	}
+	for (const file of git(worktree, "ls-files").split("\n")) utimesSync(join(worktree, file), old, old);
+}
+
+describe("inactive-session batch preview", () => {
+	it("previews eligible, recent, dirty, live and excluded sessions without mutation", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture, "eligible");
+			for (const slug of ["recent", "dirty", "live", "retained"]) {
+				expect(runCli(fixture.checkout, [slug, "create"]).status).toBe(0);
+			}
+			for (const slug of ["eligible", "dirty", "live", "retained"]) backdateSession(fixture, slug);
+			const livePath = sessionMetadataPath(fixture.checkout, "live");
+			const liveMetadata = JSON.parse(readFileSync(livePath, "utf8"));
+			liveMetadata.activeOperations = [{ id: "test-live", pid: process.pid, hostname: hostname(), startedAt: liveMetadata.createdAt }];
+			writeFileSync(livePath, JSON.stringify(liveMetadata));
+			writeFileSync(join(fixture.worktrees, "dirty", "WIP"), "keep me\n");
+			const before = readFileSync(sessionMetadataPath(fixture.checkout, "eligible"), "utf8");
+			const indexPath = git(join(fixture.worktrees, "eligible"), "rev-parse", "--git-path", "index");
+			const indexBefore = readFileSync(indexPath).toString("hex");
+			const args = ["batch", "finish", "--inactive-for", "7d", "--exclude", "retained", "--keep-branch", "--dry-run", "--json"];
+			const preview = runCli(fixture.checkout, args);
+			expect(preview.status).toBe(0);
+			const result = JSON.parse(preview.stdout);
+			expect(result.keepBranch).toBe(true);
+			const outcomes = Object.fromEntries(result.resources.map((resource: { slug: string; reason: string }) => [resource.slug, resource.reason]));
+			expect(outcomes.eligible).toBe("eligible");
+			expect(outcomes.recent).toBe("recent-activity");
+			expect(outcomes.dirty).toBe("dirty");
+			expect(outcomes.live).toBe("live-operation");
+			expect(outcomes.retained).toBe("excluded");
+			expect(runCli(fixture.checkout, ["eligible", "status", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["list", "--json"]).status).toBe(0);
+			const polled = runCli(fixture.checkout, args);
+			expect(polled.status).toBe(0);
+			expect(JSON.parse(polled.stdout).resources.find((resource: { slug: string }) => resource.slug === "eligible").reason).toBe("eligible");
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "eligible"), "utf8")).toBe(before);
+			expect(readFileSync(indexPath).toString("hex")).toBe(indexBefore);
+			for (const slug of ["eligible", "recent", "dirty", "live", "retained"]) {
+				expect(existsSync(join(fixture.worktrees, slug))).toBe(true);
+				expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("observes unmanaged file and checkout activity and refuses ignored or uncertain evidence", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "external");
+			backdateSession(fixture, "external");
+			const args = ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"];
+			const reason = (env: Record<string, string> = {}) => {
+				const result = runCli(fixture.checkout, args, env);
+				expect(result.status).toBe(0);
+				return JSON.parse(result.stdout).resources[0].reason;
+			};
+			expect(reason()).toBe("eligible");
+			const now = new Date();
+			utimesSync(join(worktree, "README.md"), now, now);
+			expect(reason()).toBe("recent-activity");
+			backdateSession(fixture, "external");
+			git(worktree, "checkout", "--detach", "HEAD");
+			git(worktree, "checkout", "agent/external");
+			expect(reason()).toBe("recent-activity");
+			mkdirSync(join(worktree, ".worktrees"));
+			writeFileSync(join(worktree, ".worktrees", "ignored-notes"), "retain\n");
+			expect(reason()).toBe("ignored-local-data");
+			rmSync(join(worktree, ".worktrees"), { recursive: true });
+			const path = sessionMetadataPath(fixture.checkout, "external");
+			const metadata = JSON.parse(readFileSync(path, "utf8"));
+			metadata.activeOperations = [{ id: "interrupted", pid: 2147483647, hostname: hostname(), startedAt: metadata.createdAt }];
+			writeFileSync(path, JSON.stringify(metadata));
+			const saved = readFileSync(path, "utf8");
+			expect(reason()).toBe("uncertain-operation");
+			expect(readFileSync(path, "utf8")).toBe(saved);
+			metadata.activeOperations = [];
+			writeFileSync(path, JSON.stringify(metadata));
+			const bin = join(fixture.root, "no-lsof");
+			mkdirSync(bin);
+			writeFileSync(join(bin, "lsof"), "#!/bin/sh\nexit 1\n");
+			chmodSync(join(bin, "lsof"), 0o755);
+			expect(reason({ PATH: `${bin}:${process.env.PATH}` })).toBe("unknown-process-evidence");
+			for (const tail of [[], ["--inactive-for", "0d"], ["--inactive-for", "7d", "--force"], ["--inactive-for", "7d"]]) {
+				expect(runCli(fixture.checkout, ["batch", "finish", ...tail]).status).toBe(64);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("refuses a real unmanaged process with cwd in the selected worktree", () => {
+		const fixture = createRepositoryFixture();
+		let child: ReturnType<typeof spawn> | undefined;
+		try {
+			const { worktree } = startManagedSession(fixture, "occupied");
+			backdateSession(fixture, "occupied");
+			child = spawn("node", ["-e", "setInterval(() => {}, 1000)"], { cwd: worktree, stdio: "ignore" });
+			const result = runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"]);
+			expect(result.status).toBe(0);
+			expect(JSON.parse(result.stdout).resources[0].reason).toBe("live-cwd");
+		} finally {
+			child?.kill();
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	it("tracks meaningful managed work without treating status as activity", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			startManagedSession(fixture, "working");
+			const path = sessionMetadataPath(fixture.checkout, "working");
+			const metadata = JSON.parse(readFileSync(path, "utf8"));
+			expect(Number.isFinite(Date.parse(metadata.lastWorkAt))).toBe(true);
+			expect(metadata.activeOperations.length).toBe(0);
+			const before = readFileSync(path, "utf8");
+			expect(runCli(fixture.checkout, ["working", "status", "--json"]).status).toBe(0);
+			expect(readFileSync(path, "utf8")).toBe(before);
+			metadata.lastWorkAt = "2000-01-01T00:00:00Z";
+			writeFileSync(path, JSON.stringify(metadata));
+			expect(runCli(fixture.checkout, ["working", "launch"]).status).toBe(0);
+			const after = JSON.parse(readFileSync(path, "utf8"));
+			expect(Date.parse(after.lastWorkAt) > Date.parse(metadata.lastWorkAt)).toBe(true);
+			expect(after.activeOperations.length).toBe(0);
+			const bin = join(fixture.root, "fake-devenv");
+			mkdirSync(bin);
+			const observed = join(fixture.root, "activity-during-run");
+			writeFileSync(join(bin, "devenv"), `#!/bin/sh\nnode -e 'const fs = require("node:fs"); const m = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); fs.writeFileSync(process.argv[2], String(m.activeOperations.length));' ${tomlString(path)} ${tomlString(observed)}\nexit 7\n`);
+			chmodSync(join(bin, "devenv"), 0o755);
+			const failed = runCli(fixture.checkout, ["working", "run", "any-command"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(failed.status).toBe(7);
+			expect(readFileSync(observed, "utf8")).toBe("1");
+			expect(JSON.parse(readFileSync(path, "utf8")).activeOperations.length).toBe(0);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 });
@@ -952,7 +1097,10 @@ describe("PR launch, reuse and borrowed branches", () => {
 			expect(readFileSync(fixture.agentLog, "utf8").trim()).toBe(metadata.worktreePath);
 			expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(head);
 			expect(readFileSync(join(metadata.worktreePath, "dirty.txt"), "utf8")).toBe("unfinished\n");
-			expect(readFileSync(sessionMetadataPath(fixture.checkout, "review-auth"), "utf8")).toBe(before);
+			const { lastWorkAt, activeOperations, ...identity } = JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "review-auth"), "utf8"));
+			expect(JSON.stringify(identity)).toBe(JSON.stringify(JSON.parse(before)));
+			expect(Number.isFinite(Date.parse(lastWorkAt))).toBe(true);
+			expect(activeOperations.length).toBe(0);
 			expect(readFileSync(fixture.ghLog, "utf8").trim().split("\n").length).toBe(1);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});

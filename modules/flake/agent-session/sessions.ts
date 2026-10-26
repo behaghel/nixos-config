@@ -10,6 +10,8 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { hostname } from "node:os";
+import { randomUUID } from "node:crypto";
 import {
 	commonGitDirectory,
 	git,
@@ -198,6 +200,11 @@ export function readMetadataRecord(path: string, slug: string): SessionMetadata 
 		typeof metadata.remote !== "string" ||
 		typeof metadata.defaultBranch !== "string" ||
 		typeof metadata.createdAt !== "string" ||
+		(metadata.lastWorkAt !== undefined && (typeof metadata.lastWorkAt !== "string" || !Number.isFinite(Date.parse(metadata.lastWorkAt)))) ||
+		(metadata.activeOperations !== undefined &&
+			(!Array.isArray(metadata.activeOperations) || metadata.activeOperations.some((operation) =>
+				!operation || typeof operation.id !== "string" || !Number.isSafeInteger(operation.pid) || operation.pid <= 0 ||
+				typeof operation.hostname !== "string" || typeof operation.startedAt !== "string" || !Number.isFinite(Date.parse(operation.startedAt))))) ||
 		(metadata.initialBranchOwned !== undefined && typeof metadata.initialBranchOwned !== "boolean") ||
 		(metadata.preexistingBranches !== undefined &&
 			(!Array.isArray(metadata.preexistingBranches) ||
@@ -229,6 +236,32 @@ export function readMetadata(root: string, slug: string): SessionMetadata {
 		throw new CliError(`Unsafe session metadata for ${slug}.`);
 	}
 	return metadata as SessionMetadata;
+}
+
+// Hold the global lock only while updating evidence, never while work runs.
+// A crashed or interrupted owner leaves a lease: polling must not erase it or
+// invent a completion time. Preview refuses such uncertain activity evidence.
+export function withSessionActivity<T>(root: string, slug: string, work: () => T): T {
+	const operation = { id: randomUUID(), pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString() };
+	withOperationLock(root, "activity-start", () => {
+		const metadata = readMetadata(root, slug);
+		writeMetadata(root, {
+			...metadata,
+			lastWorkAt: operation.startedAt,
+			activeOperations: [...(metadata.activeOperations ?? []), operation],
+		});
+	});
+	try { return work(); }
+	finally {
+		withOperationLock(root, "activity-end", () => {
+			const metadata = readMetadata(root, slug);
+			writeMetadata(root, {
+				...metadata,
+				lastWorkAt: new Date().toISOString(),
+				activeOperations: (metadata.activeOperations ?? []).filter((entry) => entry.id !== operation.id),
+			});
+		});
+	}
 }
 
 export function metadataSlugs(root: string): string[] {

@@ -12,14 +12,15 @@ export const commandNames = [
 	"resume",
 	"status",
 	"list",
+	"batch",
 	"doctor",
 	"repair",
 	"finish",
 	"completion",
 ];
 
-export const sessionCommandNames = commandNames.filter((name) => !["completion", "list"].includes(name));
-export const globalCommandNames = ["status", "list", "doctor", "completion", "finish"];
+export const sessionCommandNames = commandNames.filter((name) => !["completion", "list", "batch"].includes(name));
+export const globalCommandNames = ["status", "list", "batch", "doctor", "completion", "finish"];
 export const currentSessionCommandNames = sessionCommandNames.filter((name) => !["create", "start", "repair"].includes(name));
 
 export function sessionCommand(slug: string, command: string): string {
@@ -248,6 +249,37 @@ export function parseFinishArguments(args: string[]): {
 	return { slug, yes, force, keepBranch, all, gone, dryRun, json, expected };
 }
 
+export function parseBatchPreviewArguments(args: string[]): { inactiveFor: string; inactiveMs: number; exclusions: string[]; json: boolean } {
+	if (args[0] !== "finish") throw argumentError("batch requires the finish subcommand.");
+	let inactiveFor: string | undefined;
+	let inactiveMs = 0;
+	let dryRun = false;
+	let json = false;
+	const exclusions: string[] = [];
+	for (let index = 1; index < args.length; index++) {
+		const argument = args[index] ?? "";
+		if (argument === "--inactive-for") {
+			const value = args[++index] ?? "";
+			const match = value.match(/^([1-9]\d*)(s|m|h|d|w)$/);
+			if (inactiveFor || !match) throw argumentError("--inactive-for requires one positive duration, e.g. 7d.");
+			const units: Record<string, number> = { s: 1000, m: 60000, h: 3600000, d: 86400000, w: 604800000 };
+			inactiveMs = Number(match[1]) * (units[match[2] ?? ""] ?? 0);
+			if (!Number.isSafeInteger(inactiveMs) || inactiveMs > Date.now()) throw argumentError("Inactivity window is out of range.");
+			inactiveFor = value;
+		} else if (argument === "--exclude") {
+			const slug = args[++index] ?? "";
+			validateSlug(slug);
+			exclusions.push(slug);
+		} else if (argument === "--dry-run") dryRun = true;
+		else if (argument === "--json") json = true;
+		else if (argument === "--keep-branch") { /* Always preserve branches. */ }
+		else throw unknownOption("batch finish", argument, ["--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--json"]);
+	}
+	if (!inactiveFor) throw argumentError("batch finish requires --inactive-for.");
+	if (!dryRun) throw argumentError("batch finish currently requires --dry-run; apply is not implemented.");
+	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json };
+}
+
 export function parseStatusArguments(args: string[]): {
 	slug?: string;
 	worktree?: string;
@@ -322,6 +354,7 @@ function usage(): string {
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session list [--json] (metadata-only inventory)",
+		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] --dry-run [--json]",
 		"  agent-session status [--json] [--refresh]",
 		"  agent-session status --worktree <path> [--json] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",

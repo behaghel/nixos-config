@@ -18,6 +18,7 @@ const commandOptions: Record<string, string[]> = {
 	finish: ["--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
 	"global-status": ["--json", "--refresh", "--worktree"],
 	"global-list": ["--json"],
+	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--json"],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],
 };
 
