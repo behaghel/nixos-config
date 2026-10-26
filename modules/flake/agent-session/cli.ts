@@ -3,7 +3,7 @@ import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
-import { showStatus, showInventory, showExactStatus } from "./inspection.ts";
+import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk, previewInactiveFinish } from "./finish.ts";
 import {
@@ -90,7 +90,8 @@ export function main(args: string[]): number {
 			return 0;
 		}
 		if (command === "list") {
-			if (rest.some((argument) => argument !== "--json") || rest.length > 1) throw argumentError("list accepts only --json.");
+			if (rest.some((argument) => argument !== "--json"))
+				throw argumentError("Use: agent-session list [--json].");
 			showInventory(primaryRoot(repositoryRoot()), rest.includes("--json"));
 			return 0;
 		}

@@ -207,7 +207,8 @@ describe("cheap inventory and exact resource inspection", () => {
 			expect(malformed.status).toBe(0);
 			expect(JSON.parse(malformed.stdout).resourceState).toBe("unknown");
 			const inventory = runCli(fixture.checkout, ["list", "--json"]);
-			expect(JSON.parse(inventory.stdout).sessions[0].metadataState).toBe("unknown");
+			expect(inventory.status).toBe(1);
+			expect(inventory.stdout).toBe("");
 			writeFileSync(metadata, saved);
 			rmSync(worktree, { recursive: true });
 			const inspect = () => runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
@@ -479,6 +480,106 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(responsePath)}, 'utf8'));
 	const environment = { PATH: `${bin}:${process.env.PATH ?? ""}` };
 	return { ...fixture, branch, head, response, responsePath, ghLog, agentLog, prepareLog, environment };
 }
+
+describe("metadata-only inventory", () => {
+	it("lists bindings without inspecting unrelated checkouts, then inspects only the named target", () => {
+		const fixture = createRepositoryFixture("agent-inventory-");
+		try {
+			const { worktree } = startManagedSession(fixture, "target");
+			expect(runCli(fixture.checkout, ["unrelated", "create"]).status).toBe(0);
+			git(worktree, "switch", "-c", "renamed-target");
+			const metadataDirectory = join(fixture.checkout, ".git/agent-session/sessions");
+			const before = readFileSync(join(metadataDirectory, "target.json"), "utf8");
+			const registrations = git(fixture.checkout, "worktree", "list", "--porcelain");
+			const bin = join(fixture.root, "guard-bin");
+			mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const marker = join(fixture.root, "unrelated-inspected");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$PWD" = ${tomlString(join(realpathSync(fixture.worktrees), "unrelated"))} ]; then printf blocked > ${tomlString(marker)}; exit 91; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const environment = { PATH: `${bin}:${process.env.PATH}` };
+			const result = runCli(fixture.checkout, ["list", "--json"], environment);
+			expect(result.status).toBe(0);
+			const inventory = JSON.parse(result.stdout);
+			expect(inventory.version).toBe(1);
+			expect(inventory.command).toBe("list");
+			expect(inventory.sessions.length).toBe(2);
+			const target = inventory.sessions.find((s: { slug: string }) => s.slug === "target");
+			expect(target.slug).toBe("target");
+			expect(target.branch).toBe("agent/target");
+			expect(target.worktreePath).toBe(worktree);
+			expect(Object.keys(target).sort().join(",")).toBe("branch,slug,worktreePath");
+			const selected = runCli(fixture.checkout, [target.slug, "status", "--json"], environment);
+			expect(selected.status).toBe(0);
+			expect(JSON.parse(selected.stdout).sessions[0].branch).toBe("renamed-target");
+			expect(existsSync(marker)).toBe(false);
+			expect(readFileSync(join(metadataDirectory, "target.json"), "utf8")).toBe(before);
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain")).toBe(registrations);
+			expect(runCli(fixture.checkout, ["list"], environment).stdout).toContain("target");
+			expect(runCli(fixture.checkout, ["list", "--refresh"], environment).status).toBe(64);
+			expect(runCli(fixture.checkout, ["target", "list"], environment).status).toBe(64);
+			expect(runCli(fixture.checkout, ["__complete", "targets"]).stdout).toContain("list");
+			expect(runCli(fixture.checkout, ["__complete", "options:global-list"]).stdout).toContain("--json");
+			const preview = runCli(fixture.checkout, [target.slug, "finish", "--keep-branch", "--dry-run", "--json"], environment);
+			expect(preview.status).toBe(0);
+			const receipt = JSON.parse(preview.stdout).plan.receipt;
+			const finished = runCli(fixture.checkout, [target.slug, "finish", "--keep-branch", "--expected", receipt, "--yes"], environment);
+			expect(finished.status).toBe(0);
+			expect(existsSync(worktree)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "renamed-target")).toContain("renamed-target");
+			expect(existsSync(join(fixture.worktrees, "unrelated"))).toBe(true);
+			expect(existsSync(marker)).toBe(false);
+			const remaining = JSON.parse(runCli(fixture.checkout, ["list", "--json"], environment).stdout);
+			expect(remaining.sessions.length).toBe(1);
+			expect(remaining.sessions[0].slug).toBe("unrelated");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not rediscover the Git namespace for every inventory record", () => {
+		const fixture = createRepositoryFixture("agent-inventory-scale-");
+		try {
+			writeConfig(fixture.checkout, "/unused");
+			const store = join(fixture.checkout, ".git/agent-session/sessions"), bin = join(fixture.root, "bin"), log = join(fixture.root, "git-calls");
+			mkdirSync(store, { recursive: true }); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nprintf '%s\\n' "$*" >> ${tomlString(log)}\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const populate = (count: number) => {
+				for (let index = 0; index < count; index++) {
+					const slug = `inventory-${index}`;
+					writeFileSync(join(store, `${slug}.json`), JSON.stringify({ version: 1, slug, branch: `agent/${slug}`, worktreePath: join(fixture.worktrees, slug), remote: "origin", defaultBranch: "master", createdAt: "2026-10-26T00:00:00Z", conversation: null }));
+				}
+			};
+			const measure = (count: number) => {
+				populate(count); writeFileSync(log, "");
+				const result = runCli(fixture.checkout, ["list", "--json"], { PATH: `${bin}:${process.env.PATH}` });
+				expect(result.status).toBe(0);
+				expect(JSON.parse(result.stdout).sessions.length).toBe(count);
+				return readFileSync(log, "utf8").trim().split("\n").length;
+			};
+			const small = measure(2), large = measure(50);
+			expect(large).toBe(small);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not misreport invalid or dangling metadata as an empty complete inventory", () => {
+		const fixture = createRepositoryFixture("agent-inventory-invalid-");
+		try {
+			writeConfig(fixture.checkout, "/unused");
+			expect(runCli(fixture.checkout, ["list", "--json"]).status).toBe(0);
+			const store = join(fixture.checkout, ".git/agent-session/sessions");
+			mkdirSync(store, { recursive: true });
+			writeFileSync(join(store, "broken.json"), "{invalid");
+			const broken = runCli(fixture.checkout, ["list", "--json"]);
+			expect(broken.status).toBe(1);
+			expect(broken.stdout).toBe("");
+			rmSync(store, { recursive: true });
+			symlinkSync(join(fixture.root, "missing-store"), store);
+			const dangling = runCli(fixture.checkout, ["list", "--json"]);
+			expect(dangling.status).toBe(1);
+			expect(dangling.stdout).toBe("");
+			expect(lstatSync(store).isSymbolicLink()).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
 
 describe("PR review session creation", () => {
 	it("creates the exact PR source head with push tracking, metadata and a clean receipt (AC-1, AC-4)", () => {

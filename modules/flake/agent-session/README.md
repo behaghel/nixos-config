@@ -30,6 +30,7 @@ The default agent is `pi`, which must be available in your environment.
 ```sh
 as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
+as list --json                      # cheap recorded-binding inventory
 as status                           # reconcile all sessions
 as my-task status                   # inspect one session
 as my-task launch                   # launch in an existing worktree
@@ -70,18 +71,30 @@ finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a fa
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
 
-## Cheap inventory and exact-resource inspection
+## Recorded-binding inventory
+
+`as list [--json]` reads recorded session bindings without inspecting checkout
+Git state, refreshing remotes, or running preparation or agent commands. JSON is
+one document with `version: 1`, `command: "list"`, and `sessions`, each containing
+only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
+branch, not an observation of the current branch, ownership, or clean state.
+Use the selected `slug` with `as <slug> status --json` and guarded `finish` for
+fresh inspection and cleanup; inventory alone never authorizes removal.
+
+The inventory includes valid records whose checkout is missing, but not
+unrecorded Git worktrees. An empty inventory therefore does not prove a resource
+is absent: consumers also check native Git registration and the filesystem.
+Malformed, unreadable, or unsafe records fail the whole inventory before any
+output rather than silently omitting potential bindings. A dangling metadata
+store is not reported as an empty inventory. Listing does not repair records,
+prune registrations, or remove files. It accepts only `--json`, not `--refresh`,
+and is repository-wide rather than a session action.
+
+## Exact-resource inspection
 
 ```sh
-as list --json
 as status --worktree /absolute/path/to/.worktrees/my-task --json
 ```
-
-`list` reads saved session records without discovering or inspecting checkouts.
-Its `sessions` entries contain persisted metadata and `metadataState: "recorded"`;
-malformed records remain visible with `metadataState: "unknown"` and a diagnostic.
-It is an inventory, not proof that a checkout exists or is safe to remove.
-Unrecorded native worktrees are deliberately not included.
 
 Exact status runs from another checkout of the same repository, even when the
 selected directory is missing. The path must identify a configured managed slot.

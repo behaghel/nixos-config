@@ -353,7 +353,7 @@ function usage(): string {
 		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
-		"  agent-session list [--json] (metadata-only inventory)",
+		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",
 		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] --dry-run [--json]",
 		"  agent-session status [--json] [--refresh]",
 		"  agent-session status --worktree <path> [--json] (read-only exact inspection)",

@@ -17,7 +17,7 @@ import {
 	metadataPath,
 	metadataSlugs,
 	readMetadata,
-	readMetadataRecord,
+	readMetadataInventory,
 	readOperationLock,
 	resolveWorktreeRoot,
 	sessionRecordExists,
@@ -274,16 +274,18 @@ export function refreshMetadataRemote(
 	return remoteDefaultBranch(root, metadata.remote);
 }
 
-// Inventory deliberately avoids native worktree discovery and checkout status.
-// Invalid records remain visible instead of silently disappearing from the list.
+// Binding inventory, not a claim about live Git state or cleanup eligibility.
+// Read every record before output: an unreadable record cannot prove absence.
 export function showInventory(root: string, json: boolean): void {
-	const directory = join(commonGitDirectory(root), "agent-session", "sessions");
-	const sessions = metadataSlugs(root).map((slug) => {
-		try { return { ...readMetadataRecord(join(directory, `${slug}.json`), slug), metadataState: "recorded" }; }
-		catch (error) { return { slug, metadataState: "unknown", problem: String(error) }; }
-	});
-	if (json) process.stdout.write(`${JSON.stringify({ version: 1, inventory: "metadata-only", sessions })}\n`);
-	else for (const session of sessions) process.stdout.write(`${session.slug}  ${session.metadataState}\n`);
+	const sessions = readMetadataInventory(root).map(({ slug, branch, worktreePath }) =>
+		({ slug, branch, worktreePath }));
+	if (json) {
+		process.stdout.write(`${JSON.stringify({ version: 1, command: "list", sessions })}\n`);
+		return;
+	}
+	for (const session of sessions)
+		process.stdout.write(`${session.slug}  ${session.branch}\n  ${session.worktreePath}\n`);
+	if (!sessions.length) process.stdout.write("No recorded agent sessions.\n");
 }
 
 // Resolve aliases even when the final component is missing, without treating
