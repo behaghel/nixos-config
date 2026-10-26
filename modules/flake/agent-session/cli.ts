@@ -5,7 +5,8 @@ import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
-import { finish, finishBulk, previewInactiveFinish } from "./finish.ts";
+import { finish, finishBulk } from "./finish.ts";
+import { batchFinish } from "./batch.ts";
 import {
 	commandNames,
 	argumentError,
@@ -14,7 +15,7 @@ import {
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
-	parseBatchPreviewArguments,
+	parseBatchArguments,
 	parseDoctorArguments,
 	parseRequiredSlug,
 	parseInvocation,
@@ -84,10 +85,9 @@ export function main(args: string[]): number {
 			]);
 		}
 		if (command === "batch") {
-			const options = parseBatchPreviewArguments(rest);
+			const options = parseBatchArguments(rest);
 			const invocationRoot = repositoryRoot();
-			previewInactiveFinish(primaryRoot(invocationRoot), invocationRoot, options);
-			return 0;
+			return batchFinish(primaryRoot(invocationRoot), invocationRoot, options);
 		}
 		if (command === "list") {
 			if (rest.some((argument) => argument !== "--json"))

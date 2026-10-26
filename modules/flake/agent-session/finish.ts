@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync, lstatSync, unlinkSync } from "node:fs";
-import { hostname } from "node:os";
-import { join } from "node:path";
+import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
 import {
 	git,
@@ -22,11 +20,9 @@ import {
 	metadataSlugs,
 	sessionRecordExists,
 	unrecordedWorktree,
-	discoverManagedWorktrees,
 } from "./sessions.ts";
 import {
 	inspectSession,
-	inspectExactResource,
 	statusCannotOperate,
 	refreshMetadataRemote,
 	sessionRemotes,
@@ -399,105 +395,6 @@ export function finish(
 				: finishUnlocked(root, invocationRoot, slug, yes, keepBranch);
 		}),
 	);
-}
-
-// Same-user cwd evidence supplements managed leases. It does not claim to
-// discover editors with cwd elsewhere, detached jobs or remote owners.
-function processDirectories(): { pid: number; path: string }[] {
-	if (!process.getuid) throw new CliError("Process cwd evidence is unavailable on this platform.");
-	const result = run("lsof", ["-n", "-P", "-a", "-d", "cwd", "-u", String(process.getuid()), "-F0pn"], process.cwd());
-	if (result.status !== 0 || result.stderr) throw new CliError("Cannot establish process cwd evidence; check lsof availability and permissions.");
-	const directories: { pid: number; path: string }[] = [];
-	let pid: number | undefined;
-	for (const raw of result.stdout.split("\0")) {
-		const field = raw.replace(/^\n/, "");
-		if (/^p\d+$/.test(field)) pid = Number(field.slice(1));
-		else if (field.startsWith("n") && pid) directories.push({ pid, path: field.slice(1) });
-	}
-	if (!directories.length) throw new CliError("Process cwd evidence was empty or unrecognized.");
-	return directories;
-}
-
-function operationIsLive(pid: number): boolean {
-	try { process.kill(pid, 0); return true; }
-	catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
-}
-
-function latestObservedWork(metadata: SessionMetadata, branches: string[]): { lastWorkAt: string; sources: string[] } {
-	const timestamps = [Date.parse(metadata.createdAt), Date.parse(metadata.lastWorkAt ?? metadata.createdAt)];
-	const sources = ["creation", ...(metadata.lastWorkAt ? ["managed-work"] : []), "checkout-and-owned-branch-reflogs", "working-file-mtimes"];
-	// %ct is the commit timestamp, NOT the time of a checkout/reset. %gD with
-	// --date=unix supplies the actual reflog event time, including old commits.
-	for (const revision of ["HEAD", ...branches]) {
-		const entries = git(metadata.worktreePath, ["reflog", "show", "--date=unix", "--format=%gD", revision]);
-		for (const entry of entries ? entries.split("\n") : []) {
-			const match = entry.match(/@\{(\d+)\}$/);
-			if (!match) throw new CliError("Unrecognized reflog activity evidence.");
-			timestamps.push(Number(match[1]) * 1000);
-		}
-	}
-	const files = git(metadata.worktreePath, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]);
-	for (const file of files.split("\0").filter(Boolean)) timestamps.push(lstatSync(join(metadata.worktreePath, file)).mtimeMs);
-	if (timestamps.some((timestamp) => !Number.isFinite(timestamp))) throw new CliError("Invalid activity timestamps.");
-	return { lastWorkAt: new Date(timestamps.reduce((latest, timestamp) => Math.max(latest, timestamp))).toISOString(), sources };
-}
-
-export function previewInactiveFinish(
-	root: string,
-	invocationRoot: string,
-	options: { inactiveFor: string; inactiveMs: number; exclusions: string[]; json: boolean },
-): void {
-	const config = loadConfig(root);
-	const now = Date.now();
-	let directories: { pid: number; path: string }[] = [];
-	let processProblem: string | undefined;
-	try { directories = processDirectories(); }
-	catch (error) { processProblem = String(error); }
-	const discovered = discoverManagedWorktrees(root, config);
-	const slugs = [...new Set([...metadataSlugs(root), ...discovered.keys(), ...options.exclusions])].sort();
-	const resources = slugs.map((slug) => {
-		const base = { slug, keepBranch: true, allBranchesPreserved: true };
-		if (options.exclusions.includes(slug)) return { ...base, reason: "excluded" };
-		try {
-			const metadata = readMetadata(root, slug);
-			assertConfiguredWorktreePath(root, config, metadata);
-			const target = { ...base, worktreePath: metadata.worktreePath };
-			if (metadata.worktreePath === invocationRoot) return { ...target, reason: "invoking-worktree" };
-			const exact = inspectExactResource(root, metadata.worktreePath);
-			if (exact.resourceState !== "present") return { ...target, reason: "unresolved-resource", evidence: exact.evidence, problem: exact.problem };
-			const status = exact.sessions[0];
-			if (!status?.clean) return { ...target, reason: "dirty" };
-			for (const operation of metadata.activeOperations ?? []) {
-				if (operation.hostname !== hostname()) return { ...target, reason: "uncertain-operation", problem: "Activity owner is on another host." };
-				if (operationIsLive(operation.pid)) return { ...target, reason: "live-operation", pid: operation.pid };
-				return { ...target, reason: "uncertain-operation", problem: "An interrupted managed operation has no confirmed completion. Inspect its saved lease; polling does not clear it." };
-			}
-			if (processProblem) return { ...target, reason: "unknown-process-evidence", problem: processProblem };
-			const live = directories.filter((entry) => entry.path === metadata.worktreePath || entry.path.startsWith(`${metadata.worktreePath}/`));
-			if (live.length) return { ...target, reason: "live-cwd", pids: live.map((entry) => entry.pid) };
-			const stat = lstatSync(metadata.worktreePath);
-			if (process.getuid && stat.uid !== process.getuid()) return { ...target, reason: "other-owner" };
-			const ignored = git(metadata.worktreePath, ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]);
-			if (ignored) return { ...target, reason: "ignored-local-data", problem: "Ignored local files require review; age does not authorize discarding them." };
-			const activity = latestObservedWork(metadata, status.ownedBranches);
-			const reason = Date.parse(activity.lastWorkAt) > now - options.inactiveMs ? "recent-activity" : "eligible";
-			return { ...target, reason, activity };
-		} catch (error) { return { ...base, reason: "unresolved-evidence", problem: String(error) }; }
-	});
-	writeCommandResult({
-		version: 1, command: "batch finish", dryRun: true,
-		inactiveFor: options.inactiveFor, observedAt: new Date(now).toISOString(),
-		cutoff: new Date(now - options.inactiveMs).toISOString(),
-		keepBranch: true, remoteAssetsModified: false, exclusions: options.exclusions,
-		resources,
-		limitations: [
-			"Activity is observed, not proof of disposability. Exclude retained or otherwise active work explicitly.",
-			"Managed launch/resume/run record start and completion; interrupted leases refuse eligibility.",
-			"Unmanaged evidence covers checkout/owned-branch reflogs and current non-ignored file mtimes, not a complete history.",
-			"Process evidence covers same-user cwd in this worktree, not editors elsewhere, other users or remote processes.",
-			"Restored timestamps and expired reflogs can hide older activity; ignored local data is refused.",
-		],
-	}, options.json, `Inactive-session preview: ${resources.filter((resource) => resource.reason === "eligible").length} eligible; no resources changed.\n${resources.map((resource) => `  ${resource.slug}: ${resource.reason}`).join("\n")}\n`);
 }
 
 function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean) {

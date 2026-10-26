@@ -20,7 +20,6 @@ import {
 	readMetadataInventory,
 	readOperationLock,
 	resolveWorktreeRoot,
-	sessionRecordExists,
 	validateSlug,
 } from "./sessions.ts";
 import { CliError, run } from "./runtime.ts";
@@ -315,6 +314,7 @@ export function inspectExactResource(root: string, path: string) {
 		filesystem: "unknown", metadata: "unknown", registered: null,
 	};
 	const sessions: SessionStatus[] = [];
+	let bindingSlugs: string[] = [];
 	let problem: string | undefined;
 	try {
 		worktreePath = canonicalResourcePath(path);
@@ -334,11 +334,19 @@ export function inspectExactResource(root: string, path: string) {
 			.split("\0").filter((field) => field.startsWith("worktree "))
 			.map((field) => resolve(field.slice("worktree ".length)));
 		evidence.registered = registrations.includes(worktreePath);
-		// Inspect only this slot's record. Other records cannot authorize this
-		// configured slot, and corrupt unrelated records must not block lookup.
-		const recorded = sessionRecordExists(root, slug);
-		evidence.metadata = recorded ? "recorded" : "absent";
-		if (!recorded && !evidence.registered && evidence.filesystem === "absent") {
+		// A directory name supplies a slot, not ownership or absence proof.
+		// Read binding metadata, never unrelated checkout Git state. Ambiguous,
+		// moved or unreadable records must not manufacture an absent resource.
+		const records = readMetadataInventory(root);
+		const ownRecord = records.find((record) => record.slug === slug);
+		const bindings = records.filter((record) => canonicalResourcePath(record.worktreePath) === worktreePath);
+		bindingSlugs = bindings.map((binding) => binding.slug);
+		const recorded = ownRecord !== undefined;
+		evidence.metadata = recorded || bindings.length ? "recorded" : "absent";
+		if (bindings.length > 1 || (bindings.length === 1 && bindings[0]?.slug !== slug) || (ownRecord && !bindings.includes(ownRecord))) {
+			resourceState = "inconsistent";
+			problem = "Managed bindings are moved or ambiguous for this exact path. Inspect the binding catalogue; no resources were changed.";
+		} else if (!recorded && !evidence.registered && evidence.filesystem === "absent") {
 			resourceState = "absent";
 		} else if (recorded && evidence.registered && evidence.filesystem === "present") {
 			const metadata = readMetadata(root, slug);
@@ -357,7 +365,7 @@ export function inspectExactResource(root: string, path: string) {
 	} catch (error) {
 		problem = `Cannot establish exact resource state: ${String(error)} No resources were changed.`;
 	}
-	return { version: 1, worktreePath, resourceState, evidence, sessions, ...(problem ? { problem } : {}) };
+	return { version: 1, worktreePath, resourceState, evidence, bindingSlugs, sessions, ...(problem ? { problem } : {}) };
 }
 
 export function showExactStatus(root: string, path: string, json: boolean): void {

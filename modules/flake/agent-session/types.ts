@@ -53,6 +53,16 @@ export interface SessionMetadata {
 	pr?: PullRequestMetadata;
 }
 
+export interface BatchFinishOptions {
+	inactiveFor: string;
+	inactiveMs: number;
+	exclusions: string[];
+	json: boolean;
+	dryRun: boolean;
+	yes: boolean;
+	expected?: string;
+}
+
 export interface OperationLock {
 	pid: number;
 	command: string;
