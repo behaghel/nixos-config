@@ -350,6 +350,12 @@ When an agent runs `devenv` commands non-interactively, prefer `-q` / `--quiet` 
 
 All project lifecycle and code-related commands. Only basic core utilities (`ls`, `cp`, `cat`, `mkdir`, `rm`, `git`) are allowed outside `devenv shell`. For agent-driven checks and automation, prefer the low-noise form: `devenv -q shell -- <cmd>`.
 
+In projects configured with `agent-session`/`as`, first load the
+[agent-session skill](../agent-session/SKILL.md). Its `as <task-slug> run ...`
+launcher already selects the managed worktree and enters the quiet devenv shell;
+do not wrap it in another outer `devenv shell`. Follow that skill for adoption
+only when explicitly requested, rather than proposing installation for every task.
+
 ### What NOT to do
 
 - **Never call `devenv up` from the agent** — it is interactive and blocks. Use non-interactive scripts or `devenv -q shell -- <cmd>` for validation.

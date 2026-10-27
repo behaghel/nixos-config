@@ -117,6 +117,7 @@ let
       node --check ${lib.escapeShellArg (toString path)}
     '') piExtensionPaths}
     node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
+    node ${lib.escapeShellArg (toString ./agent-session-skill.test.mjs)} ${lib.escapeShellArg (toString ../.)}
     echo ok > "$out"
   '';
 

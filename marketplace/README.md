@@ -74,7 +74,7 @@ Repository-local skills in `.agents/skills/` remain separate from this catalogue
 
 | Plugin | Pi extension capabilities | Skills |
 |---|---|---|
-| `devenv-workflow` | Detection, tool monitoring, environment discovery, `/devenv-*` | `devenv-project` |
+| `devenv-workflow` | Detection, tool monitoring, environment discovery, `/devenv-*` | `devenv-project`, `agent-session` |
 | `domain-tree` | Domain navigation, coverage enforcement, `/domain-tree:*` | `domain-navigator` |
 | `spec-driven` | Specification collection/verification, coverage tool | `spec-collector`, `spec-verifier` |
 | `spec-tdd` | Iterative delivery guidance, `/tdd-*` | `tdd-planner` |

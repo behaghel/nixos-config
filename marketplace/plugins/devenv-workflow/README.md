@@ -7,6 +7,7 @@ Declarative dev environment management with [devenv](https://devenv.sh) — scaf
 | Component | Type | Description |
 |-----------|------|-------------|
 | Devenv Project | Skill | Core knowledge for working in devenv-based projects |
+| Agent Session | Skill | Managed worktree operation and approval-gated adoption/repair/retirement |
 | `/devenv-init` | Command | Scaffold devenv.nix from project intent and existing clues |
 | `/devenv-add` | Command | Add a language, service, process, task, or tool |
 | `/devenv-diagnose` | Command | Systematic troubleshooting for devenv issues |
@@ -24,7 +25,7 @@ devenv.nix is the project's **source of truth** for tooling, services, and devel
 
 ## Coverage
 
-The skill covers all major devenv 2.0 features:
+The `devenv-project` skill covers all major devenv 2.0 features:
 
 - Languages, packages, and services
 - Processes with readiness probes, file watching, and dependency ordering
@@ -35,6 +36,20 @@ The skill covers all major devenv 2.0 features:
 - Secrets via SecretSpec, including provider/profile wiring and pass URI mapping
 - Nix language-server support through `devenv lsp` / generated nixd config
 - MCP server integration for live package/option search
+
+## Managed worktrees
+
+The [`agent-session` skill](skills/agent-session/SKILL.md) is the reusable agent
+operating guide for the existing `as` CLI. It loads for configured projects and
+explicit adoption requests, not as an invitation to install tools everywhere.
+The bundled [adoption guide](skills/agent-session/references/adoption.md) covers
+approval-gated devenv wiring and optional native Pi resource selection.
+
+Keep only a mandatory skill pointer and repository-specific workspace/delivery
+policy in `AGENTS.md`; do not copy the operating manual into every project.
+Installation, upgrades, repairs and retirement require explicit approval.
+Loading the skill neither changes CLI behavior nor authorizes cleanup at handoff.
+The installed CLI version remains authoritative for supported capabilities.
 
 ## Workflow
 
@@ -84,6 +99,7 @@ pi install -l /absolute/path/to/nixos-config/marketplace/plugins/devenv-workflow
 | Resource | Type | Description |
 |----------|------|-------------|
 | `devenv-project` | Skill | Core knowledge — loaded on-demand when pi detects a devenv project |
+| `agent-session` | Skill | Worktree operating guide — configured projects or explicit adoption requests |
 | `devenv_search` | Tool | Search packages/options via `devenv search` |
 | `devenv_validate` | Tool | Syntax + evaluation check after editing `devenv.nix` |
 | `devenv_read_config` | Tool | Read and summarize devenv configuration files |
