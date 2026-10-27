@@ -1,6 +1,6 @@
 {
   "name": "devenv-workflow",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Declarative devenv environments and safe agent-session worktree workflows for Pi.",
   "keywords": ["pi-package", "devenv", "nix", "dev-environment"],
   "pi": {
