@@ -1937,14 +1937,12 @@ describe("agent-session create and start", () => {
 		expect(ignore.includes("/.worktrees/")).toBe(true);
 	});
 
-	it("gives future Pi sessions a repository-managed worktree contract without a custom extension", () => {
+	it("points future Pi sessions at the shared worktree skill without a custom extension", () => {
 		const instructions = readFileSync("AGENTS.md", "utf8");
 		expect(instructions).toContain("## Coding-agent sessions (Pi)");
-		expect(instructions).toContain("as <task-slug> create --json");
-		expect(instructions).toContain("as . status --json");
-		expect(instructions).toContain("Do not run `as <task-slug> start` from an existing agent");
-		expect(instructions).toContain("absolute worktree paths");
-		expect(instructions).toContain("do not switch the user's primary branch");
+		expect(instructions).toContain("marketplace/plugins/devenv-workflow/skills/agent-session/SKILL.md");
+		expect(instructions).toContain("Managed worktrees are required");
+		expect(instructions.includes("as <task-slug> create --json")).toBe(false);
 	});
 
 	it("is packaged and configured by the shared devenv module", () => {
