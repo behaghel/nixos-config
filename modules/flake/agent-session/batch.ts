@@ -237,7 +237,7 @@ function inspectCandidate(root: string, invocationRoot: string, slug: string, op
 		candidate.activity = latestObservedWork(metadata, status.ownedBranches, now, options.inactiveMs);
 		if (!candidate.activity.complete) { candidate.inspectionComplete = false; block("unknown-activity", candidate.activity.problems.join("; ")); }
 		else if (!candidate.activity.inactive) block("recent-activity");
-		candidate.ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links,
+		candidate.ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
 			(path, entries) => report?.(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`));
 		if (!candidate.ignoredData.complete) candidate.inspectionComplete = false;
 		if (!candidate.ignoredData.safe) block("ignored-local-data", ignoredDataProblem(candidate.ignoredData));
@@ -392,7 +392,7 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 				"Managed launch/resume/run record start and completion; interrupted activity records refuse eligibility.",
 				"Unmanaged evidence covers checkout/owned-branch reflogs and current non-ignored file mtimes, not a complete history.",
 				"Process evidence covers same-user cwd, not editors elsewhere, other users or remote processes.",
-				"Restored timestamps and expired reflogs can hide activity; ignored local data is refused.",
+				"Restored timestamps and expired reflogs can hide activity; unapproved ignored local data is refused.",
 				"Ignored sizes are metadata-only footprint observations, not reclaimable-space guarantees. Symlink targets and filesystem boundaries are not traversed.",
 				"Byte totals count unique inodes within each reported path, not across separate paths/worktrees. Incomplete scans are explicit and block eligibility.",
 			],

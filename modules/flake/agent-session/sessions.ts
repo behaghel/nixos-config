@@ -19,6 +19,7 @@ import {
 	repositoryRoot,
 	worktreeIsRegistered,
 } from "./git.ts";
+import { validDisposablePath } from "./artifacts.ts";
 import { CliError, run } from "./runtime.ts";
 import { validPullRequest } from "./github.ts";
 import type {
@@ -57,8 +58,11 @@ export function loadConfig(_root: string): AgentSessionConfig {
 			"Invalid devenv module configuration: expected version 1 and worktree_root.",
 		);
 	}
+	const disposablePaths = raw.disposable_paths === undefined ? [] : stringArray(raw.disposable_paths, "disposable_paths");
+	if (disposablePaths.some((path) => !validDisposablePath(path))) throw new CliError("Invalid disposable_paths: use exact non-traversing relative paths, without globs or .git components.");
 	return {
 		version: 1,
+		disposable_paths: [...new Set(disposablePaths)].sort(),
 		worktree_root: raw.worktree_root,
 		agent_command: stringArray(raw.agent_command, "agent_command"),
 		prepare_command: stringArray(raw.prepare_command, "prepare_command"),

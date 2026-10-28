@@ -150,12 +150,12 @@ fingerprints. Apply rechecks the evidence; single finish also rechecks after
 interactive confirmation. New ignored data or changed link evidence requires a
 fresh preview, not a force fallback.
 
-This is not a general artifact-disposal policy. Unconfigured symlinks, generated
-hook links such as `.pre-commit-config.yaml`, `.devenv/`, `node_modules/`,
-`coverage/`, databases and other ignored local data still block non-forced
-retirement. There are no implicit exemptions based on familiar names or Nix-store
-targets. In particular, direct single-session `finish --yes` cannot bypass this
-guard; it may now refuse workspaces that older versions removed.
+There are no implicit artifact exemptions based on familiar names or Nix-store
+targets. Unconfigured symlinks, generated hook links, `.devenv/`, `node_modules/`,
+`coverage/`, databases and other ignored local data block non-forced retirement
+unless explicitly covered by the project policy below. Direct single-session
+`finish --yes` cannot bypass either the data guard or artifact receipt approval;
+it may refuse workspaces that older versions removed.
 
 Obtain fresh previews for present worktrees after upgrading: older receipts did
 not bind this evidence and cannot authorize removal under the new guard. Existing
@@ -163,6 +163,69 @@ interrupted-batch reconciliation still requires confirmed native/filesystem
 absence and unchanged residual binding/branch evidence before metadata-only
 completion. Explicit forced-cleanup semantics are unchanged and are not an
 automatic recovery mechanism for an ignored-data refusal.
+
+## Explicit artifact-disposal policy
+
+`agentSession.disposablePaths` defaults to `[]`. Projects may opt into exact
+workspace-relative ignored paths, for example:
+
+```nix
+agentSession.disposablePaths = [ "node_modules" "coverage" ".pre-commit-config.yaml" ];
+```
+
+This is a declaration of disposal authority, not a generated-file detector.
+Paths are literal: no globs, absolute paths, empty/dot/traversing components or
+`.git` components. A file authorizes that entry; a symlink authorizes only the
+link, never its target. A directory authorizes its **entire subtree**, including
+logs, databases, local patches and other potentially valuable data. In particular,
+listing `.devenv` would authorize its diagnostic logs and task databases too.
+Retain/move needed evidence before approving such a policy, or choose narrower
+exact paths. This provider does not populate a project's policy automatically.
+
+Policy does not waive cleanliness, identity, activity, ownership or native-lock
+checks, nor configured-link replacement protection. Nested policy paths require
+safe non-symlink, same-filesystem ancestors. Structural parents do not authorize
+siblings: `.cache/generated` is not permission to discard `.cache/other-data`.
+Missing optional policy roots are recorded, not repaired or created.
+
+Non-forced previews expose `ignoredData.policy`, `policyRoots` and
+`approvedArtifacts`, alongside the existing blockers and ignored-path evidence.
+Each present policy root has a complete metadata-tree `fingerprint`. The digest
+binds relative entry paths, device/inode identity, type/mode, uid/gid, link count,
+size, nanosecond modification/change times, allocation metadata and symlink
+destination text. Directory traversal is sorted; neither file contents nor
+symlink-target contents are read. Missing/unsafe roots are explicit. Unreadable,
+changing, cross-filesystem or incomplete trees cannot authorize retirement.
+
+Artifact disposal requires **both policy and a matching preview receipt**.
+For one session, use the existing branch-preserving receipt workflow:
+
+```sh
+as task finish --keep-branch --dry-run --json
+as task finish --keep-branch --expected <receipt> --yes
+```
+
+The first response provides `plan.receipt` and
+`plan.artifactDisposalRequiresReceipt`. Direct `finish --yes`, even with
+`--keep-branch`, refuses approved artifacts without that receipt. Legacy bulk
+finish has no receipt contract and skips/refuses artifact disposal; use single
+receipts or inactive-batch preview/apply instead. Inactive batch already requires
+its selection receipt and explicit `--yes`.
+
+Both guarded paths bind policy, root states and recursive metadata fingerprints
+into their receipts and freshly validate them before native removal. A changed
+policy, deep entry, restored content/mtime with changed ctime, renamed/replaced
+entry or newly observed unapproved data requires fresh inspection/approval.
+Single finish also rechecks after interactive confirmation, without repeating
+full-tree walks merely to calculate a receipt. Artifacts are never pre-deleted
+to make Git accept removal; all guards precede non-forced native worktree removal.
+All artifact receipt workflows preserve branches and never modify remote assets.
+
+Metadata fingerprints are change detection, not cryptographic content-integrity
+proof or a filesystem reservation. They do not hash dependency contents, freeze
+unmanaged writers or guarantee reclaimed space. Explicit ownership exclusions
+and a quiet target remain necessary. Forced-cleanup semantics are unchanged;
+there is no automatic force fallback.
 
 ## Inactive-session retirement
 
@@ -228,7 +291,8 @@ condition. Resources with verified physical checkout identity include:
   file, plus `filesChecked`, `problems`, `complete` and `inactive`.
 - `ignoredData`: configured-link evidence, ignored path types/classifications,
   local symlink destinations and size observations, with all data-inspection
-  blockers. Familiar generated-looking names remain `unapproved`.
+  blockers. Paths remain `unapproved` unless verified configured links, structural
+  parents or explicitly policy-covered `approved-artifact` entries.
 - `processEvidence`: the process observation time/source, matching cwd PIDs and
   every managed operation's observed state, including interrupted/foreign owners.
 - `blockers` and `inspectionComplete`: all observable safety refusals and whether

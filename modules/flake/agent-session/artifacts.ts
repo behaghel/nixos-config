@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { gitRaw } from "./git.ts";
@@ -24,7 +25,9 @@ export interface ConfiguredLinkEvidence {
 export interface IgnoredPathEvidence {
 	path: string;
 	type: "directory" | "symlink" | "file" | "other";
-	classification: "configured-link" | "structural-parent" | "unapproved";
+	classification: "configured-link" | "structural-parent" | "approved-artifact" | "unapproved";
+	policyPath?: string;
+	fingerprint?: string;
 	target?: string;
 	modifiedAt: string;
 	size: {
@@ -39,7 +42,18 @@ export interface IgnoredPathEvidence {
 	};
 }
 
+interface PolicyRootEvidence {
+	path: string;
+	state: "present" | "missing" | "unsafe";
+	ancestors: NonNullable<ConfiguredLinkEvidence["ancestors"]>;
+	tree?: IgnoredPathEvidence;
+	problem?: string;
+}
+
 export interface IgnoredDataInspection {
+	policy: { disposablePaths: string[] };
+	policyRoots: PolicyRootEvidence[];
+	approvedArtifacts: string[];
 	safe: boolean;
 	complete: boolean;
 	ignoredPaths: IgnoredPathEvidence[];
@@ -64,6 +78,10 @@ function relativeSetting(path: string): boolean {
 	return path !== "" && !isAbsolute(path) && !/[\\\x00-\x1f\x7f]/.test(path) &&
 		!path.split("/").some((part) => part === "" || part === "." || part === "..") &&
 		path !== ".git" && !path.startsWith(".git/");
+}
+
+export function validDisposablePath(path: string): boolean {
+	return relativeSetting(path) && !/[*?[\]{}]/.test(path) && !path.split("/").includes(".git");
 }
 
 // Neither target existence nor target contents is relevant to unlinking a
@@ -106,12 +124,17 @@ function measurePath(worktree: string, path: string, device: bigint, onProgress?
 		scope: type === "directory" && recursive ? "tree-no-follow" : "entry", apparentBytes: "0", allocatedBytes: "0",
 		entries: 0, uniqueInodes: 0, complete: true, accounting: "unique-inodes-within-path", problems: [],
 	};
+	const fingerprint = createHash("sha256");
+	let rootTarget: string | undefined;
 	let apparent = 0n, allocated = 0n, allocationKnown = true, lastProgress = Date.now();
 	const seen = new Set<string>();
 	const visit = (relative: string): void => {
 		try {
 			const fullPath = join(worktree, relative);
 			const stat = statEntry(fullPath);
+			const target = stat.isSymbolicLink() ? readlinkSync(fullPath) : null;
+			if (relative === path && target !== null) rootTarget = target;
+			fingerprint.update(JSON.stringify([relative, identity(stat), String(stat.uid), String(stat.gid), String(stat.nlink), String(stat.blocks), target]) + "\n");
 			size.entries++;
 			if (size.entries % 2048 === 0 || Date.now() - lastProgress >= 1000) {
 				onProgress?.(path, size.entries); lastProgress = Date.now();
@@ -122,7 +145,7 @@ function measurePath(worktree: string, path: string, device: bigint, onProgress?
 			apparent += stat.size;
 			if (typeof stat.blocks === "bigint" && stat.blocks >= 0n) allocated += stat.blocks * 512n;
 			else allocationKnown = false;
-			if (stat.isDirectory() && stat.dev !== device) throw new Error("Filesystem boundary; subtree not inspected.");
+			if (stat.dev !== device) throw new Error("Filesystem boundary; subtree not inspected.");
 			if (recursive && stat.isDirectory() && !stat.isSymbolicLink()) {
 				for (const child of readdirSync(fullPath).sort()) visit(`${relative}/${child}`);
 			}
@@ -133,17 +156,39 @@ function measurePath(worktree: string, path: string, device: bigint, onProgress?
 		}
 	};
 	visit(path);
+	try {
+		if (JSON.stringify(identity(statEntry(join(worktree, path)))) !== JSON.stringify(identity(rootStat))) throw new Error("Root changed during size inspection.");
+	} catch (error) { size.complete = false; size.problems.push({ path, problem: String(error) }); }
 	size.apparentBytes = apparent.toString();
 	size.allocatedBytes = allocationKnown ? allocated.toString() : null;
 	onProgress?.(path, size.entries);
 	return { path, type, classification: "unapproved", modifiedAt: new Date(Number(rootStat.mtimeMs)).toISOString(),
-		...(type === "symlink" ? { target: readlinkSync(join(worktree, path)) } : {}), size };
+		...(rootTarget !== undefined ? { target: rootTarget } : {}), ...(size.complete ? { fingerprint: fingerprint.digest("hex") } : {}), size };
 }
 
-// Shared by all non-forced retirement paths. This classifies known links only;
-// it deliberately grants no disposal policy to ordinary ignored artifacts.
-export function inspectIgnoredData(root: string, worktree: string, localLinks: string[], onProgress?: (path: string, entries: number) => void): IgnoredDataInspection {
-	const result: IgnoredDataInspection = { safe: false, complete: false, configuredLinks: [], ignoredPaths: [], unapprovedPaths: [], blockers: [] };
+function inspectPolicyRoot(worktree: string, path: string, device: bigint, onProgress?: (path: string, entries: number) => void): PolicyRootEvidence {
+	const ancestors: PolicyRootEvidence["ancestors"] = [];
+	try {
+		if (!validDisposablePath(path)) throw new Error("Invalid exact disposable path.");
+		const parts = path.split("/");
+		for (let index = 1; index < parts.length; index++) {
+			const parent = parts.slice(0, index).join("/"), stat = statEntry(join(worktree, parent));
+			ancestors.push({ path: parent, identity: identity(stat) });
+			if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== device) throw new Error("Disposable path has an unsafe ancestor or filesystem boundary.");
+		}
+		const tree = measurePath(worktree, path, device, onProgress);
+		return { path, ancestors, tree, state: tree.size.complete ? "present" : "unsafe", ...(!tree.size.complete ? { problem: "Incomplete artifact metadata tree." } : {}) };
+	} catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ENOENT"
+			? { path, ancestors, state: "missing" }
+			: { path, ancestors, state: "unsafe", problem: String(error) };
+	}
+}
+
+// Shared by all non-forced paths. Policy is explicit, exact and empty by
+// default; safe evidence alone is not approval to dispose approvedArtifacts.
+export function inspectIgnoredData(root: string, worktree: string, localLinks: string[], disposablePaths: string[] = [], onProgress?: (path: string, entries: number) => void): IgnoredDataInspection {
+	const result: IgnoredDataInspection = { policy: { disposablePaths: [...new Set(disposablePaths)].sort() }, policyRoots: [], approvedArtifacts: [], safe: false, complete: false, configuredLinks: [], ignoredPaths: [], unapprovedPaths: [], blockers: [] };
 	try {
 		const rootStat = statEntry(worktree);
 		if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Worktree is not a non-symlink directory.");
@@ -152,16 +197,27 @@ export function inspectIgnoredData(root: string, worktree: string, localLinks: s
 		for (const link of result.configuredLinks) {
 			if (link.state === "mismatch" || link.state === "unsafe") result.blockers.push({ path: link.path, reason: link.problem! });
 		}
+		result.policyRoots = result.policy.disposablePaths.map((path) => inspectPolicyRoot(worktree, path, rootStat.dev, onProgress));
+		for (const policy of result.policyRoots) {
+			if (policy.state === "unsafe") result.blockers.push({ path: policy.path, reason: policy.problem! });
+		}
 		const verified = new Set(result.configuredLinks.filter((link) => link.state === "verified").map((link) => link.path));
-		const structuralParent = (path: string) => [...verified].some((link) => link.startsWith(`${path}/`));
+		const structuralPaths = [...verified, ...result.policyRoots.filter((policy) => policy.state === "present").map((policy) => policy.path)];
+		const structuralParent = (path: string) => structuralPaths.some((entry) => entry.startsWith(`${path}/`));
 		const inspectIgnoredEntry = (path: string): void => {
-			const evidence = measurePath(worktree, path, rootStat.dev, onProgress, !structuralParent(path));
+			const policy = result.policyRoots.find((policy) => policy.state === "present" && (policy.path === path || (policy.tree?.type === "directory" && path.startsWith(`${policy.path}/`))));
+			const measured = policy?.path === path ? policy.tree! : measurePath(worktree, path, rootStat.dev, onProgress, !!policy || !structuralParent(path));
+			const evidence = { ...measured };
 			result.ignoredPaths.push(evidence);
 			for (const problem of evidence.size.problems) result.blockers.push({ path: problem.path, reason: `Incomplete ignored-data inspection: ${problem.problem}` });
 			if (verified.has(path)) { evidence.classification = "configured-link"; return; }
+			if (policy) {
+				evidence.classification = "approved-artifact"; evidence.policyPath = policy.path;
+				result.approvedArtifacts.push(policy.path); return;
+			}
 			const stat = statEntry(join(worktree, path));
 			// Git may collapse a wholly ignored container. Expand only structural
-			// parents of verified links, never a symlink or an unrelated artifact.
+			// parents of verified links/policy roots, never symlinks or unrelated data.
 			if (structuralParent(path) && stat.isDirectory() && !stat.isSymbolicLink() && stat.dev === rootStat.dev) {
 				evidence.classification = "structural-parent";
 				const children = readdirSync(join(worktree, path)).sort();
@@ -185,10 +241,11 @@ export function inspectIgnoredData(root: string, worktree: string, localLinks: s
 				result.blockers.push({ path, reason: `Cannot inspect ignored entry: ${String(error)}` });
 			}
 		}
+		result.approvedArtifacts = [...new Set(result.approvedArtifacts)].sort();
 		result.unapprovedPaths = [...new Set(result.unapprovedPaths)].sort();
 		for (const path of result.unapprovedPaths) result.blockers.push({ path, reason: "Unapproved ignored local data." });
 		if (JSON.stringify(identity(statEntry(worktree))) !== JSON.stringify(result.worktreeIdentity)) throw new Error("Worktree changed during ignored-data inspection.");
-		result.complete = entriesComplete && result.configuredLinks.every((link) => link.state !== "unsafe") && result.ignoredPaths.every((entry) => entry.size.complete);
+		result.complete = entriesComplete && result.policyRoots.every((policy) => policy.state !== "unsafe") && result.configuredLinks.every((link) => link.state !== "unsafe") && result.ignoredPaths.every((entry) => entry.size.complete);
 		result.safe = result.complete && result.blockers.length === 0;
 	} catch (error) {
 		result.blockers.push({ path: ".", reason: `Cannot establish ignored-data safety: ${String(error)}` });
