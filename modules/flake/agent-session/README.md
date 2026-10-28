@@ -197,8 +197,21 @@ destination text. Directory traversal is sorted; neither file contents nor
 symlink-target contents are read. Missing/unsafe roots are explicit. Unreadable,
 changing, cross-filesystem or incomplete trees cannot authorize retirement.
 
-Artifact disposal requires **both policy and a matching preview receipt**.
-For one session, use the existing branch-preserving receipt workflow:
+Artifact disposal requires **both policy and approval of the inspected scope**.
+For a human at a terminal, use one command:
+
+```sh
+as task finish --keep-branch
+```
+
+It inspects the target, shows the exact worktree, branch disposition and approved
+artifact roots, and asks once. The CLI binds that observation internally; there
+is no receipt to copy. It rechecks after confirmation and refuses changed
+metadata, commits, policy or artifact evidence. No/empty input/EOF cancels without
+removal. Without `--keep-branch`, the existing branch-deletion checks and
+confirmation still apply; this flow does not change branch disposition defaults.
+
+For automation, use the existing branch-preserving receipt workflow:
 
 ```sh
 as task finish --keep-branch --dry-run --json
@@ -206,11 +219,18 @@ as task finish --keep-branch --expected <receipt> --yes
 ```
 
 The first response provides `plan.receipt` and
-`plan.artifactDisposalRequiresReceipt`. Direct `finish --yes`, even with
-`--keep-branch`, refuses approved artifacts without that receipt. Legacy bulk
-finish has no receipt contract and skips/refuses artifact disposal; use single
-receipts or inactive-batch preview/apply instead. Inactive batch already requires
-its selection receipt and explicit `--yes`.
+`plan.artifactDisposalRequiresReceipt` (the automation requirement). Text
+`finish --keep-branch --dry-run` prints the same receipt and a complete apply
+command; `--json` remains one machine-readable result. A branch-deleting text
+preview instead prints the interactive command: public automation receipts still
+require `--keep-branch`.
+
+Direct `finish --yes`, even from a terminal or with `--keep-branch`, refuses
+approved artifacts without a matching receipt. Piped stdin does not confer human
+approval. Legacy bulk finish cannot use one global confirmation to authorize
+artifact disposal and still skips/refuses it; use single-session approval or
+inactive-batch preview/apply instead. Inactive batch requires its selection
+receipt and explicit `--yes`.
 
 Both guarded paths bind policy, root states and recursive metadata fingerprints
 into their receipts and freshly validate them before native removal. A changed
@@ -219,7 +239,8 @@ entry or newly observed unapproved data requires fresh inspection/approval.
 Single finish also rechecks after interactive confirmation, without repeating
 full-tree walks merely to calculate a receipt. Artifacts are never pre-deleted
 to make Git accept removal; all guards precede non-forced native worktree removal.
-All artifact receipt workflows preserve branches and never modify remote assets.
+Automated artifact receipt workflows preserve branches. Neither interactive nor
+automated retirement modifies remote assets.
 
 Metadata fingerprints are change detection, not cryptographic content-integrity
 proof or a filesystem reservation. They do not hash dependency contents, freeze
@@ -331,9 +352,11 @@ information; apply captures fresh process evidence after the target's metadata
 inspection, before removal. A preview snapshot is not a reservation against
 unmanaged activity.
 
-Progress is emitted on stderr: per-resource inspection/apply/recheck events and
-metadata-scan chunk counts for long traversals. With `--json` these are versioned
-progress records; stdout remains one result document. Progress completion means
+Progress is emitted on stderr. Human terminals get one updating metadata-scan
+indicator, cleared before summaries/prompts; redirected text gets throttled scan
+updates instead of one line per chunk. With `--json`, per-resource and every
+metadata-scan chunk event remain versioned progress records; stdout remains one
+result document. Progress completion means
 a scan/chunk completed, not that a workspace was removed—only the final explicit
 outcome confirms that. Observation remains read-only and does not advance managed
 activity clocks, repair metadata, prune registrations or create an intent journal.

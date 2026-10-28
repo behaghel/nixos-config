@@ -37,7 +37,7 @@ import {
 	writeCommandResult,
 	run,
 } from "./runtime.ts";
-import type { SessionMetadata, ProgressReporter } from "./types.ts";
+import type { SessionMetadata, SessionStatus, ProgressReporter } from "./types.ts";
 
 function assertNotInvokingWorktree(
 	metadata: Pick<SessionMetadata, "worktreePath">,
@@ -171,6 +171,28 @@ function forceFinishUnlocked(
 	);
 }
 
+function artifactSummary(evidence: IgnoredDataInspection | undefined): string {
+	if (!evidence?.approvedArtifacts.length) return "";
+	const artifacts = evidence.approvedArtifacts.map((path) => ({ path, tree: evidence.policyRoots.find((root) => root.path === path)?.tree }));
+	const entries = artifacts.map(({ path, tree }) => {
+		return `  artifact: ${path} (${tree?.type ?? "entry"}${tree?.type === "directory" ? `, entire subtree, ${tree.size.entries} entries` : tree?.type === "symlink" ? ", link only; target preserved" : ""})`;
+	});
+	return `${entries.join("\n")}\n${artifacts.some(({ tree }) => tree?.type === "directory") ? "  Directory scopes include all descendants, including logs and task databases.\n" : ""}`;
+}
+
+// Interactive consent binds the observed scope, not a token the user must copy.
+// Include refs and full binding metadata so a confirmation wait cannot approve
+// changed commits or ownership merely because ignored artifacts stayed put.
+function finishApprovalFingerprint(root: string, metadata: SessionMetadata, status: SessionStatus, ignoredData: IgnoredDataInspection): string {
+	const branches = [...new Set([...status.ownedBranches, ...(status.currentBranch ? [status.currentBranch] : [])])].sort();
+	const refs = branches.map((branch) => [branch, git(root, ["rev-parse", "--verify", `refs/heads/${branch}`])]);
+	return createHash("sha256").update(JSON.stringify([
+		metadata, status, ignoredData, refs,
+		git(metadata.worktreePath, ["rev-parse", "--verify", "HEAD"]),
+		git(metadata.worktreePath, ["rev-parse", "--absolute-git-dir"]),
+	])).digest("hex");
+}
+
 function finishUnlocked(
 	root: string,
 	invocationRoot: string,
@@ -202,7 +224,9 @@ function finishUnlocked(
 	const metadataProgress = (path: string, entries: number) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`);
 	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths, metadataProgress);
 	if (!ignoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(ignoredData)}`);
-	if (ignoredData.approvedArtifacts.length && !expected) throw new CliError("Artifact disposal requires a matching preview receipt: use finish --keep-branch --dry-run, then --expected <receipt>.");
+	const interactive = !yes && Boolean(process.stdin.isTTY);
+	if (ignoredData.approvedArtifacts.length && !expected && !interactive) throw new CliError("Artifact disposal requires terminal confirmation or a matching preview receipt: use finish --keep-branch --dry-run, then --expected <receipt>.");
+	const approval = interactive ? finishApprovalFingerprint(root, metadata, status, ignoredData) : undefined;
 	if (expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null, ignoredData).receipt !== expected) throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
 	const diffCheck = run("git", ["diff", "--check"], metadata.worktreePath);
 	if (diffCheck.status !== 0) {
@@ -245,10 +269,11 @@ function finishUnlocked(
 	}
 
 	const branchList = status.ownedBranches
-		.map((branch) => `  branch:   ${branch}${keepBranch ? " (preserved)" : ""}`)
+		.map((branch) => `  branch:   ${branch} (${keepBranch ? "preserved" : "delete"})`)
 		.join("\n");
+	report.flush?.();
 	process.stderr.write(
-		`Ready to remove local session assets:\n  worktree: ${metadata.worktreePath}\n${branchList}\n`,
+		`Ready to remove local session assets:\n  worktree: ${metadata.worktreePath}\n${branchList}\n${artifactSummary(ignoredData)}`,
 	);
 	if (!yes) {
 		if (!process.stdin.isTTY) {
@@ -271,6 +296,13 @@ function finishUnlocked(
 		(expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null, currentIgnoredData).receipt !== expected)) {
 		throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
 	}
+	if (approval) {
+		const currentMetadata = readMetadata(root, slug);
+		assertConfiguredWorktreePath(root, currentConfig, currentMetadata);
+		const currentStatus = inspectSession(currentMetadata, defaultBranch);
+		if (finishApprovalFingerprint(root, currentMetadata, currentStatus, currentIgnoredData) !== approval) throw new CliError("Finish target changed; inspect it again before cleanup.");
+	}
+	report.flush?.();
 	const removed = run(
 		"git",
 		["worktree", "remove", metadata.worktreePath],
@@ -363,6 +395,20 @@ function previewFinish(
 	return phase ? runPhase(report, phase, inspect) : inspect();
 }
 
+function finishPreviewText(plan: Record<string, unknown>, slug: string, keepBranch: boolean): string {
+	if (plan.allBranchesPreserved === true) return `Would remove unrecorded local worktree ${String(plan.worktreePath)} and preserve all branches. Force discards uncommitted and ignored local files.${plan.detachedHeadMayBecomeUnreachable ? " Detached HEAD commits may become unreachable; create a branch first if needed." : ""}\n`;
+	const ignoredData = plan.ignoredData as IgnoredDataInspection | undefined;
+	if (ignoredData?.safe === false) return `Non-forced cleanup blocked: ${ignoredDataProblem(ignoredData)}\nNo resources changed.\n`;
+	if (!plan.force && (plan.clean !== true || !["ready", "stale"].includes(String(plan.state)))) return `Non-forced cleanup blocked: state=${String(plan.state)}, clean=${String(plan.clean)}.\nNo resources changed.\n`;
+	const branches = (plan.ownedBranches as string[]).join(", ") || "none";
+	const summary = `Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n${artifactSummary(ignoredData)}`;
+	if (plan.force) return summary;
+	const command = sessionCommand(slug, "finish").replace(/^agent-session /, "as ");
+	return typeof plan.receipt === "string"
+		? `${summary}Receipt: ${plan.receipt}\nApply: ${command} --keep-branch --expected ${plan.receipt} --yes\n`
+		: `${summary}Confirm interactively: ${command}${keepBranch ? " --keep-branch" : ""}\n`;
+}
+
 export function finish(
 	root: string,
 	invocationRoot: string,
@@ -379,15 +425,9 @@ export function finish(
 		const plan = force && !sessionRecordExists(root, slug)
 			? runPhase(report, "inspect-finish", () => previewUnrecordedFinish(root, invocationRoot, slug))
 			: previewFinish(root, invocationRoot, slug, force, keepBranch, report);
-		const branches = (plan.ownedBranches as string[]).join(", ") || "none";
 		writeCommandResult(
-			{ version: 1, command: "finish", dryRun: true, plan },
-			json,
-			plan.allBranchesPreserved === true
-				? `Would remove unrecorded local worktree ${String(plan.worktreePath)} and preserve all branches. Force discards uncommitted and ignored local files.${plan.detachedHeadMayBecomeUnreachable ? " Detached HEAD commits may become unreachable; create a branch first if needed." : ""}\n`
-				: (plan.ignoredData as IgnoredDataInspection | undefined)?.safe === false
-					? `Non-forced cleanup blocked: ${ignoredDataProblem(plan.ignoredData as IgnoredDataInspection)}\nNo resources changed.\n`
-					: `Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n`,
+			{ version: 1, command: "finish", dryRun: true, plan }, json,
+			finishPreviewText(plan, slug, keepBranch),
 		);
 		return;
 	}

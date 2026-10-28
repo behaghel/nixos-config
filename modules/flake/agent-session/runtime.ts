@@ -40,18 +40,38 @@ process.stdin.on('error', () => answer(false));
 }
 
 export function progressReporter(command: string, json: boolean): ProgressReporter {
-	return (phase, status, detail) => {
+	let transient = false, lastMetadataUpdate: number | undefined;
+	const flush = () => {
+		if (transient) process.stderr.write("\r\x1b[2K");
+		transient = false;
+	};
+	const report: ProgressReporter = (phase, status, detail) => {
 		if (json) {
 			process.stderr.write(
 				`${JSON.stringify({ version: 1, type: "progress", command, phase, status, ...(detail ? { detail } : {}) })}\n`,
 			);
 			return;
 		}
+		if (phase.startsWith("inspect-metadata-chunk:") && status === "completed") {
+			const now = Date.now(), terminal = process.stderr.isTTY;
+			if (lastMetadataUpdate !== undefined && now - lastMetadataUpdate < (terminal ? 100 : 1000)) return;
+			lastMetadataUpdate = now;
+			const text = `[agent-session] Scanning ${detail ?? phase}`;
+			if (terminal) {
+				const width = Math.max(1, (process.stderr.columns || 80) - 1);
+				process.stderr.write(`\r\x1b[2K${Array.from(text).slice(0, width).join("")}`);
+				transient = true;
+			} else process.stderr.write(`${text}\n`);
+			return;
+		}
+		flush();
 		const suffix = detail ? `: ${detail}` : "";
 		process.stderr.write(
 			`[agent-session] ${status.toUpperCase()} ${phase}${suffix}\n`,
 		);
 	};
+	report.flush = flush;
+	return report;
 }
 
 export function runPhase<T>(

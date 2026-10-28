@@ -93,11 +93,10 @@ export interface SessionStatus extends SessionMetadata {
 
 export type ProgressStatus = "started" | "completed" | "failed" | "skipped";
 
-export type ProgressReporter = (
-	phase: string,
-	status: ProgressStatus,
-	detail?: string,
-) => void;
+export interface ProgressReporter {
+	(phase: string, status: ProgressStatus, detail?: string): void;
+	flush?: () => void;
+}
 
 export interface ManagedWorktree {
 	slug: string;
