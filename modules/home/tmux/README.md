@@ -19,7 +19,10 @@ to update existing keybindings; activation alone does not update them.
 The saver redirects resurrect's output into a private staging directory without
 changing the running server's `@resurrect-dir`. Before publishing, it checks
 saved panes and windows against the running layout and verifies the compressed
-pane archive. A single symlink switches the layout and archive together.
+pane archive. The default process-command capture selects a single foreground
+child per pane; background helpers such as `caffeinate` are not restored and
+cannot introduce extra layout records. A single symlink switches the layout
+and archive together.
 Failures leave the last good pair available through resurrect's usual `last`
 and `pane_contents.tar.gz` paths. Existing flat backups are preserved during
 the first successful save. The five most recent complete bundles are retained

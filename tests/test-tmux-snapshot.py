@@ -83,6 +83,43 @@ class SnapshotHealthTests(unittest.TestCase):
         script.write_text(body)
         os.environ["TMUX_SNAPSHOT_SAVE_SCRIPT"] = str(script)
 
+    def test_background_children_do_not_corrupt_saved_commands(self):
+        self.tmux("send-keys", "sleep 731 & sleep 732 & wait", "Enter")
+        pid = self.tmux("display-message", "-p", "#{pane_pid}")
+        for _ in range(100):
+            processes = subprocess.check_output(
+                ["ps", "-axo", "ppid=,command="], text=True,
+            )
+            children = [line.split(None, 1)[1]
+                        for line in processes.splitlines()
+                        if line.split() and line.split()[0] == pid]
+            if len(children) >= 2:
+                break
+            time.sleep(0.02)
+        self.assertGreaterEqual(len(children), 2)
+        self.save()
+        records = (self.directory / "last").read_text().splitlines()
+        self.assertEqual(sum(r.startswith("pane\t") for r in records), 1)
+        self.assertTrue(all(r.split("\t")[0] in
+                            {"pane", "window", "state"} for r in records))
+        pane = next(r for r in records if r.startswith("pane\t"))
+        self.assertEqual(pane.split("\t")[10], ":")
+        self.assertFalse(self.alerts.exists())
+
+    def test_foreground_command_is_saved_without_background_helper(self):
+        self.tmux("send-keys", "sleep 731 & sleep 732", "Enter")
+        pid = self.tmux("display-message", "-p", "#{pane_pid}")
+        for _ in range(100):
+            if snapshot.pane_command(pid) == "sleep 732":
+                break
+            time.sleep(0.02)
+        self.assertEqual(snapshot.pane_command(pid), "sleep 732")
+        self.save()
+        records = (self.directory / "last").read_text().splitlines()
+        pane = next(r for r in records if r.startswith("pane\t"))
+        self.assertEqual(pane.split("\t")[10], ":sleep 732")
+        self.assertNotIn("sleep 731", "\n".join(records))
+
     def test_failed_save_preserves_both_files_and_notifies_once(self):
         self.save()
         previous = self.good_files()

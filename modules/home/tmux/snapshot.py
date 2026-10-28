@@ -6,6 +6,7 @@ import gzip
 import os
 from pathlib import Path
 import shutil
+import shlex
 import signal
 import subprocess
 import sys
@@ -132,6 +133,20 @@ def validate(stage, expected, capture):
                 raise ValueError("empty pane archive")
 
 
+def pane_command(pid):
+    """Return one foreground child, never background helper commands."""
+    output = subprocess.run(
+        ["ps", "-axo", "ppid=,pgid=,tpgid=,command="],
+        check=True, capture_output=True, text=True, timeout=10,
+    ).stdout
+    for line in output.splitlines():
+        fields = line.split(None, 3)
+        if (len(fields) == 4 and fields[0] == str(pid)
+                and fields[1] == fields[2]):
+            return fields[3]
+    return ""
+
+
 def run_saver(socket, stage):
     """Redirect only the saver to staging, without changing server options."""
     proxy = stage / "bin"
@@ -156,8 +171,29 @@ def run_saver(socket, stage):
         TMUX=f"{socket},{tmux(socket, 'display-message', '-p', '#{pid}')},0",
     )
     env.pop("TMUX_TMPDIR", None)
+    # The upstream ps strategy emits every child as a separate line, including
+    # background helpers. Use a private copy so its single-command field stays
+    # a single record, without modifying the installed plugin or live options.
+    plugin = stage / "plugin"
+    source = Path(os.environ["TMUX_SNAPSHOT_SAVE_SCRIPT"])
+    saver = source
+    if (source.parent.parent / "save_command_strategies/ps.sh").is_file():
+        shutil.copytree(source.parent.parent, plugin)
+        plugin.chmod(0o700)
+        for directory in plugin.rglob("*"):
+            if directory.is_dir():
+                directory.chmod(0o700)
+        strategy = plugin / "save_command_strategies/ps.sh"
+        strategy.chmod(0o700)
+        strategy.write_text(
+            f"#!{shutil.which('bash')}\n"
+            f"exec {shlex.quote(sys.executable)} "
+            f"{shlex.quote(str(Path(__file__).resolve()))} "
+            '--pane-command "$1"\n'
+        )
+        saver = plugin / "scripts" / source.name
     process = subprocess.Popen(
-        ["bash", os.environ["TMUX_SNAPSHOT_SAVE_SCRIPT"], "quiet"],
+        ["bash", str(saver), "quiet"],
         env=env, start_new_session=True,
     )
     try:
@@ -170,6 +206,8 @@ def run_saver(socket, stage):
         raise
     finally:
         shutil.rmtree(proxy)
+        if plugin.exists():
+            shutil.rmtree(plugin)
 
 
 def publish(directory, stage):
@@ -230,10 +268,14 @@ def save(socket, directory):
 def main(argv=None):
     os.umask(0o077)
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--pane-command", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--socket")
     parser.add_argument("--check", action="store_true",
                         help="check backup health without saving")
     args = parser.parse_args(argv)
+    if args.pane_command is not None:
+        print(pane_command(args.pane_command))
+        return 0
     sockets = [args.socket] if args.socket else [
         str(Path(os.environ["TMUX_SNAPSHOT_ROOT"])
             / f"tmux-{os.getuid()}/default"),
