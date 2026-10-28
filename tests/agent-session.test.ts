@@ -95,6 +95,7 @@ function writeConfig(
 	agent: string,
 	prepareCommand: string[] = [],
 	worktreeRoot = ".worktrees",
+	localLinks: string[] = [],
 ): void {
 	writeFileSync(
 		runtimeConfigPath(checkout),
@@ -103,7 +104,7 @@ function writeConfig(
 			worktree_root: worktreeRoot,
 			agent_command: [agent],
 			prepare_command: prepareCommand,
-			local_links: [],
+			local_links: localLinks,
 		})}\n`,
 	);
 }
@@ -256,6 +257,252 @@ function backdateSession(fixture: ReturnType<typeof createRepositoryFixture>, sl
 	}
 	for (const file of git(worktree, "ls-files").split("\n")) utimesSync(join(worktree, file), old, old);
 }
+
+function createLocalLinkFixture() {
+	const fixture = createRepositoryFixture("agent-local-link-");
+	const links = [".envrc.local", ".workon-assistant", "devenv.local.nix", "devenv.local.yaml"];
+	writeFileSync(join(fixture.seed, ".gitignore"), `.worktrees/\n.cache/\n.nested\n.pre-commit-config.yaml\n${links.join("\n")}\n`);
+	git(fixture.seed, "add", ".gitignore");
+	git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Ignore local settings");
+	git(fixture.seed, "push", "origin", "master");
+	git(fixture.checkout, "pull", "--ff-only");
+	for (const link of links) writeFileSync(join(fixture.checkout, link), `preserve ${link}\n`);
+	const agent = createFakeAgent(fixture.root, join(fixture.root, "agent-log"));
+	writeConfig(fixture.checkout, agent, [], ".worktrees", links);
+	return { ...fixture, links, agent };
+}
+
+describe("verified local-link retirement", () => {
+	it("retires clean linked worktrees through both guarded paths without touching targets", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			for (const slug of ["single", "batched"]) {
+				expect(runCli(fixture.checkout, [slug, "create"]).status).toBe(0);
+				backdateSession(fixture, slug);
+			}
+			const single = runCli(fixture.checkout, ["single", "finish", "--keep-branch", "--dry-run", "--json"]);
+			expect(single.status).toBe(0);
+			const plan = JSON.parse(single.stdout).plan;
+			expect(plan.ignoredData.safe).toBe(true);
+			expect(plan.ignoredData.configuredLinks.length).toBe(4);
+			const batchArgs = ["batch", "finish", "--inactive-for", "7d", "--exclude", "single"];
+			const preview = runCli(fixture.checkout, [...batchArgs, "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const batch = JSON.parse(preview.stdout);
+			expect(batch.resources.find((r: { slug: string }) => r.slug === "batched").reason).toBe("eligible");
+			// Changing primary settings is not changing the workspace link. Targets
+			// are neither followed for the receipt nor removed during retirement.
+			for (const link of fixture.links) writeFileSync(join(fixture.checkout, link), `retain latest ${link}\n`);
+			expect(runCli(fixture.checkout, ["single", "finish", "--keep-branch", "--expected", plan.receipt, "--yes"]).status).toBe(0);
+			expect(runCli(fixture.checkout, [...batchArgs, "--expected", batch.receipt, "--yes", "--json"]).status).toBe(0);
+			for (const slug of ["single", "batched"]) {
+				expect(existsSync(join(fixture.worktrees, slug))).toBe(false);
+				expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			}
+			for (const link of fixture.links) expect(readFileSync(join(fixture.checkout, link), "utf8")).toBe(`retain latest ${link}\n`);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	for (const mode of ["single", "batch"]) {
+		it(`invalidates ${mode} receipts for changed links, including restored destinations`, () => {
+			const fixture = createLocalLinkFixture();
+			try {
+				expect(runCli(fixture.checkout, ["changed", "create"]).status).toBe(0);
+				backdateSession(fixture, "changed");
+				const command = mode === "single" ? ["changed", "finish", "--keep-branch"] : ["batch", "finish", "--inactive-for", "7d"];
+				const preview = JSON.parse(runCli(fixture.checkout, [...command, "--dry-run", "--json"]).stdout);
+				if (mode === "batch") expect(preview.resources[0].reason).toBe("eligible");
+				const receipt = mode === "single" ? preview.plan.receipt : preview.receipt;
+				const apply = () => runCli(fixture.checkout, [...command, "--expected", receipt, "--yes", ...(mode === "batch" ? ["--json"] : [])]);
+				const link = join(fixture.worktrees, "changed", fixture.links[0]!);
+				const expected = readlinkSync(link);
+				const foreign = join(fixture.root, "foreign-settings");
+				writeFileSync(foreign, "do not touch\n");
+				rmSync(link); symlinkSync(foreign, link);
+				expect(apply().status).toBe(1);
+				expect(readlinkSync(link)).toBe(foreign);
+				rmSync(link); symlinkSync(expected, link);
+				expect(apply().status).toBe(1);
+				expect(existsSync(join(fixture.worktrees, "changed"))).toBe(true);
+				expect(readFileSync(foreign, "utf8")).toBe("do not touch\n");
+				for (const name of fixture.links) expect(readFileSync(join(fixture.checkout, name), "utf8")).toBe(`preserve ${name}\n`);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 60000);
+
+		it(`refuses ignored data appearing after a ${mode} preview`, () => {
+			const fixture = createLocalLinkFixture();
+			try {
+				expect(runCli(fixture.checkout, ["new-data", "create"]).status).toBe(0);
+				backdateSession(fixture, "new-data");
+				const command = mode === "single" ? ["new-data", "finish", "--keep-branch"] : ["batch", "finish", "--inactive-for", "7d"];
+				const preview = JSON.parse(runCli(fixture.checkout, [...command, "--dry-run", "--json"]).stdout);
+				if (mode === "batch") expect(preview.resources[0].reason).toBe("eligible");
+				const receipt = mode === "single" ? preview.plan.receipt : preview.receipt;
+				const cache = join(fixture.worktrees, "new-data", ".cache"); mkdirSync(cache);
+				writeFileSync(join(cache, "runtime.sqlite"), "preserve new evidence\n");
+				expect(runCli(fixture.checkout, [...command, "--expected", receipt, "--yes", ...(mode === "batch" ? ["--json"] : [])]).status).toBe(1);
+				expect(readFileSync(join(cache, "runtime.sqlite"), "utf8")).toBe("preserve new evidence\n");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 60000);
+	}
+
+	it("refuses unapproved ignored data in both non-forced paths, including direct single finish", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			expect(runCli(fixture.checkout, ["unknown", "create"]).status).toBe(0);
+			backdateSession(fixture, "unknown");
+			const cache = join(fixture.worktrees, "unknown", ".cache"); mkdirSync(cache);
+			writeFileSync(join(cache, "evidence.sqlite"), "retain runtime evidence\n");
+			const preview = JSON.parse(runCli(fixture.checkout, ["unknown", "finish", "--keep-branch", "--dry-run", "--json"]).stdout);
+			expect(preview.plan.ignoredData.safe).toBe(false);
+			expect(runCli(fixture.checkout, ["unknown", "finish", "--keep-branch", "--yes"]).status).toBe(1);
+			const batch = JSON.parse(runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"]).stdout);
+			expect(batch.resources[0].reason).toBe("ignored-local-data");
+			expect(readFileSync(join(cache, "evidence.sqlite"), "utf8")).toBe("retain runtime evidence\n");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("handles ignored containers of nested known links without following directory targets", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			const target = join(fixture.checkout, ".nested", "settings"); mkdirSync(target, { recursive: true });
+			writeFileSync(join(target, "important"), "primary directory target\n");
+			writeConfig(fixture.checkout, fixture.agent, [], ".worktrees", [...fixture.links, ".nested/settings"]);
+			for (const slug of ["nested-single", "nested-batch"]) {
+				expect(runCli(fixture.checkout, [slug, "create"]).status).toBe(0);
+				backdateSession(fixture, slug);
+			}
+			const plan = JSON.parse(runCli(fixture.checkout, ["nested-single", "finish", "--keep-branch", "--dry-run", "--json"]).stdout).plan;
+			expect(plan.ignoredData.safe).toBe(true);
+			expect(plan.ignoredData.configuredLinks.length).toBe(5);
+			expect(runCli(fixture.checkout, ["nested-single", "finish", "--keep-branch", "--expected", plan.receipt, "--yes"]).status).toBe(0);
+			const common = ["batch", "finish", "--inactive-for", "7d"];
+			const preview = JSON.parse(runCli(fixture.checkout, [...common, "--dry-run", "--json"]).stdout);
+			expect(preview.resources[0].reason).toBe("eligible");
+			expect(runCli(fixture.checkout, [...common, "--expected", preview.receipt, "--yes", "--json"]).status).toBe(0);
+			expect(readFileSync(join(target, "important"), "utf8")).toBe("primary directory target\n");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("refuses ordinary-file replacements and unconfigured symlinks instead of trusting names", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			expect(runCli(fixture.checkout, ["unsafe", "create"]).status).toBe(0);
+			const worktree = join(fixture.worktrees, "unsafe");
+			const path = join(worktree, fixture.links[0]!);
+			rmSync(path); writeFileSync(path, "authored replacement\n");
+			const inspect = () => JSON.parse(runCli(fixture.checkout, ["unsafe", "finish", "--keep-branch", "--dry-run", "--json"]).stdout).plan;
+			expect(inspect().ignoredData.configuredLinks.find((link: { path: string }) => link.path === fixture.links[0]).state).toBe("mismatch");
+			expect(runCli(fixture.checkout, ["unsafe", "finish", "--keep-branch", "--yes"]).status).toBe(1);
+			expect(readFileSync(path, "utf8")).toBe("authored replacement\n");
+			rmSync(path); symlinkSync(join(realpathSync(fixture.checkout), fixture.links[0]!), path);
+			const extra = join(worktree, ".pre-commit-config.yaml"); symlinkSync("/nix/store/unapproved-hook", extra);
+			expect(inspect().ignoredData.unapprovedPaths.includes(".pre-commit-config.yaml")).toBe(true);
+			expect(runCli(fixture.checkout, ["unsafe", "finish", "--keep-branch", "--yes"]).status).toBe(1);
+			expect(readlinkSync(extra)).toBe("/nix/store/unapproved-hook");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps optional missing links non-blocking and binds their later appearance", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			const name = fixture.links[3]!;
+			const primary = join(realpathSync(fixture.checkout), name); rmSync(primary);
+			expect(runCli(fixture.checkout, ["optional", "create"]).status).toBe(0);
+			const args = ["optional", "finish", "--keep-branch"];
+			const inspect = () => JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+			const before = inspect();
+			expect(before.ignoredData.safe).toBe(true);
+			expect(before.ignoredData.configuredLinks.find((link: { path: string }) => link.path === name).state).toBe("missing");
+			symlinkSync(primary, join(fixture.worktrees, "optional", name));
+			expect(runCli(fixture.checkout, [...args, "--expected", before.receipt, "--yes"]).status).toBe(1);
+			const after = inspect();
+			expect(after.ignoredData.safe).toBe(true);
+			expect(after.ignoredData.configuredLinks.find((link: { path: string }) => link.path === name).state).toBe("verified");
+			expect(runCli(fixture.checkout, [...args, "--expected", after.receipt, "--yes"]).status).toBe(0);
+			expect(existsSync(primary)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rechecks local-link evidence after interactive confirmation", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			expect(runCli(fixture.checkout, ["waiting", "create"]).status).toBe(0);
+			const args = ["waiting", "finish", "--keep-branch"];
+			const plan = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+			const link = join(fixture.worktrees, "waiting", fixture.links[0]!);
+			const foreign = join(fixture.root, "foreign"); writeFileSync(foreign, "keep foreign data\n");
+			const driver = `
+import errno, json, os, pty, select, subprocess, sys, time
+master, slave = pty.openpty()
+child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stdout=slave, stderr=slave)
+os.close(slave)
+output = b''
+changed = False
+try:
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+            if b'[y/N]' in output and not changed:
+                os.unlink(sys.argv[2])
+                os.symlink(sys.argv[3], sys.argv[2])
+                os.write(master, b'yes\\n')
+                changed = True
+        elif child.poll() is not None:
+            break
+    else:
+        raise TimeoutError('confirmation did not complete')
+    print(json.dumps({'status': child.wait(timeout=5), 'changed': changed, 'output': output.decode(errors='replace')}))
+finally:
+    if child.poll() is None:
+        child.kill()
+        child.wait()
+    os.close(master)
+`;
+			const result = spawnSync("python3", ["-c", driver, JSON.stringify(["node", cliScript, ...args, "--expected", plan.receipt]), link, foreign], {
+				cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+			});
+			expect(result.status).toBe(0);
+			const terminal = JSON.parse(result.stdout);
+			expect(terminal.changed).toBe(true);
+			expect(terminal.status).toBe(1);
+			expect(readlinkSync(link)).toBe(foreign);
+			expect(readFileSync(foreign, "utf8")).toBe("keep foreign data\n");
+			expect(git(fixture.checkout, "branch", "--list", "agent/waiting")).toContain("agent/waiting");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+
+	it("refuses symlink ancestors of configured paths and leaves external resources untouched", () => {
+		const fixture = createLocalLinkFixture();
+		try {
+			mkdirSync(join(fixture.checkout, ".nested"));
+			writeFileSync(join(fixture.checkout, ".nested", "settings"), "primary nested settings\n");
+			writeConfig(fixture.checkout, fixture.agent, [], ".worktrees", [...fixture.links, ".nested/settings"]);
+			expect(runCli(fixture.checkout, ["ancestor", "create"]).status).toBe(0);
+			backdateSession(fixture, "ancestor");
+			const worktree = join(fixture.worktrees, "ancestor");
+			const external = join(fixture.root, "external"); mkdirSync(external);
+			symlinkSync(join(realpathSync(fixture.checkout), ".nested", "settings"), join(external, "settings"));
+			rmSync(join(worktree, ".nested"), { recursive: true }); symlinkSync(external, join(worktree, ".nested"));
+			const plan = JSON.parse(runCli(fixture.checkout, ["ancestor", "finish", "--keep-branch", "--dry-run", "--json"]).stdout).plan;
+			expect(plan.ignoredData.configuredLinks.find((link: { path: string }) => link.path === ".nested/settings").state).toBe("unsafe");
+			expect(runCli(fixture.checkout, ["ancestor", "finish", "--keep-branch", "--yes"]).status).toBe(1);
+			const batch = JSON.parse(runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"]).stdout);
+			expect(batch.resources[0].reason).toBe("ignored-local-data");
+			expect(lstatSync(join(external, "settings")).isSymbolicLink()).toBe(true);
+			expect(readFileSync(join(fixture.checkout, ".nested", "settings"), "utf8")).toBe("primary nested settings\n");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 60000);
+});
 
 describe("inactive-session batch preview", () => {
 	it("previews eligible, recent, dirty, live and excluded sessions without mutation", () => {

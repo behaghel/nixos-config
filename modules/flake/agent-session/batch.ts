@@ -4,6 +4,7 @@ import { hostname } from "node:os";
 import { join } from "node:path";
 import { assertPrimaryCheckout, commonGitDirectory, ensureClean, git } from "./git.ts";
 import { inspectExactResource } from "./inspection.ts";
+import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	assertConfiguredWorktreePath, discoverManagedWorktrees, loadConfig,
 	metadataPath, metadataSlugs, readMetadata, validateSlug, withOperationLock,
@@ -35,6 +36,7 @@ interface Candidate {
 	reason: string;
 	problem?: string;
 	activity?: { lastWorkAt: string; sources: string[] };
+	ignoredData?: IgnoredDataInspection;
 	snapshot?: Target;
 }
 
@@ -127,10 +129,10 @@ function inspectCandidate(root: string, invocationRoot: string, slug: string, op
 		if (live.length) return { ...target, reason: "live-cwd" };
 		const stat = lstatSync(metadata.worktreePath);
 		if (process.getuid && stat.uid !== process.getuid()) return { ...target, reason: "other-owner" };
-		const ignored = git(metadata.worktreePath, ["ls-files", "--others", "--ignored", "--exclude-standard", "--directory", "-z"]);
-		if (ignored) return { ...target, reason: "ignored-local-data", problem: "Ignored local files require review; age does not authorize discarding them." };
+		const ignoredData = inspectIgnoredData(root, metadata.worktreePath, loadConfig(root).local_links);
+		if (!ignoredData.safe) return { ...target, ignoredData, reason: "ignored-local-data", problem: ignoredDataProblem(ignoredData) };
 		const activity = latestObservedWork(metadata, status.ownedBranches);
-		if (Date.parse(activity.lastWorkAt) > now - options.inactiveMs) return { ...target, reason: "recent-activity", activity };
+		if (Date.parse(activity.lastWorkAt) > now - options.inactiveMs) return { ...target, ignoredData, reason: "recent-activity", activity };
 		const branches = Object.fromEntries([...new Set([...status.ownedBranches, status.currentBranch!])].sort()
 			.map((branch) => [branch, git(root, ["rev-parse", "--verify", `refs/heads/${branch}`])]));
 		const gitDirectory = realpathSync(git(metadata.worktreePath, ["rev-parse", "--absolute-git-dir"]));
@@ -142,9 +144,9 @@ function inspectCandidate(root: string, invocationRoot: string, slug: string, op
 		const snapshot = { ...target, metadataHash: metadataHash(root, slug), branches };
 		const fingerprint = hash(JSON.stringify([
 			snapshot, identity(metadata.worktreePath), gitDirectory, identity(gitDirectory),
-			git(metadata.worktreePath, ["rev-parse", "--verify", "HEAD"]), activity,
+			git(metadata.worktreePath, ["rev-parse", "--verify", "HEAD"]), activity, ignoredData,
 		]));
-		return { ...target, reason: "eligible", activity, snapshot: { ...snapshot, fingerprint } };
+		return { ...target, ignoredData, reason: "eligible", activity, snapshot: { ...snapshot, fingerprint } };
 	} catch (error) {
 		return { ...base, reason: String(error).includes("process cwd evidence") ? "unknown-process-evidence" : "unresolved-evidence", problem: String(error) };
 	}

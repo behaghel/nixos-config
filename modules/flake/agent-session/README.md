@@ -122,6 +122,47 @@ any resource state: consumers must examine `resourceState`, not just exit status
 These observations are not cleanup authorization. Neither command fetches,
 repairs, prunes, removes resources, starts an agent or updates session metadata.
 
+## Known local links and non-forced retirement
+
+Single-session `finish`, legacy bulk finish and inactive-batch finish share the
+same ignored-data guard on their non-forced paths. An unchanged configured
+`agentSession.localLinks` symlink does not count as unknown ignored data when it
+points to its expected path in the primary checkout. Retirement removes only the
+workspace link as part of native worktree removal; it never traverses or deletes
+the link target. Targets may be files, directories or missing: target existence
+and contents are deliberately not inspected. Optional configured links that are
+absent in the workspace do not require repair before cleanup.
+
+Verification uses the configured relative path, actual symlink destination and
+non-symlink parent chain. A regular-file replacement, redirected link, unsafe
+ancestor or unverified inspection blocks removal. A relative link to the same
+expected primary path is recognized, but rewriting/replacing a link after a
+preview still changes its receipt evidence.
+
+Non-forced single previews expose `plan.ignoredData`; batch resources expose
+`ignoredData` once that inspection stage is reached. The evidence contains
+`safe`, `configuredLinks`, `unapprovedPaths` and `blockers`, plus workspace/link
+filesystem identities. Configured-link states are `verified`, `missing`,
+`mismatch` or `unsafe`. Link and ancestor identity/timestamps/destinations—not
+primary target contents—are bound into single-session receipts and batch
+fingerprints. Apply rechecks the evidence; single finish also rechecks after
+interactive confirmation. New ignored data or changed link evidence requires a
+fresh preview, not a force fallback.
+
+This is not a general artifact-disposal policy. Unconfigured symlinks, generated
+hook links such as `.pre-commit-config.yaml`, `.devenv/`, `node_modules/`,
+`coverage/`, databases and other ignored local data still block non-forced
+retirement. There are no implicit exemptions based on familiar names or Nix-store
+targets. In particular, direct single-session `finish --yes` cannot bypass this
+guard; it may now refuse workspaces that older versions removed.
+
+Obtain fresh previews for present worktrees after upgrading: older receipts did
+not bind this evidence and cannot authorize removal under the new guard. Existing
+interrupted-batch reconciliation still requires confirmed native/filesystem
+absence and unchanged residual binding/branch evidence before metadata-only
+completion. Explicit forced-cleanup semantics are unchanged and are not an
+automatic recovery mechanism for an ignored-data refusal.
+
 ## Inactive-session retirement
 
 ```sh
@@ -219,7 +260,7 @@ start an agent. Git status inspection disables optional index writes.
 **Observed inactivity is not proof of disposability.** These checks cannot see
 editors with cwd elsewhere, all other-user/remote processes, restored timestamps,
 or events removed by reflog expiry. Explicitly exclude retained or otherwise active
-work. Dirty resources, ignored local data, foreign-owned directories, the invoking
+work. Dirty resources, unapproved ignored local data, foreign-owned directories, the invoking
 worktree and unresolved resource evidence are refused. Ignored files can contain
 important local work; age alone never authorizes their removal. A clean workspace
 with no such evidence may be a candidate, not permission to finish it.

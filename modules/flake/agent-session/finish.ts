@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
+import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	git,
 	localBranches,
@@ -176,6 +177,7 @@ function finishUnlocked(
 	slug: string,
 	yes: boolean,
 	keepBranch: boolean,
+	expected?: string,
 ): void {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -196,6 +198,8 @@ function finishUnlocked(
 	if (!status.clean) {
 		throw new CliError("Working tree is not clean.");
 	}
+	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links);
+	if (!ignoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(ignoredData)}`);
 	const diffCheck = run("git", ["diff", "--check"], metadata.worktreePath);
 	if (diffCheck.status !== 0) {
 		throw new CliError(diffCheck.stderr || "Git diff verification failed.");
@@ -253,6 +257,15 @@ function finishUnlocked(
 		}
 	}
 
+	// Confirmation can wait while unmanaged work changes. Recheck the shared
+	// ignored/link guard immediately before native removal; never unlink links
+	// separately or follow their targets to make a refusal disappear.
+	const currentIgnoredData = inspectIgnoredData(root, metadata.worktreePath, loadConfig(root).local_links);
+	if (!currentIgnoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(currentIgnoredData)}`);
+	if (JSON.stringify(currentIgnoredData) !== JSON.stringify(ignoredData) ||
+		(expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null).receipt !== expected)) {
+		throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
+	}
 	const removed = run(
 		"git",
 		["worktree", "remove", metadata.worktreePath],
@@ -320,6 +333,7 @@ function previewFinish(
 			state: status.state,
 			clean: status.clean,
 			remoteAssetsModified: false,
+			...(!force ? { ignoredData: inspectIgnoredData(root, metadata.worktreePath, config.local_links) } : {}),
 		};
 		if (force || !keepBranch) return plan;
 		const head = existsSync(metadata.worktreePath)
@@ -363,7 +377,9 @@ export function finish(
 			json,
 			plan.allBranchesPreserved === true
 				? `Would remove unrecorded local worktree ${String(plan.worktreePath)} and preserve all branches. Force discards uncommitted and ignored local files.${plan.detachedHeadMayBecomeUnreachable ? " Detached HEAD commits may become unreachable; create a branch first if needed." : ""}\n`
-				: `Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n`,
+				: (plan.ignoredData as IgnoredDataInspection | undefined)?.safe === false
+					? `Non-forced cleanup blocked: ${ignoredDataProblem(plan.ignoredData as IgnoredDataInspection)}\nNo resources changed.\n`
+					: `Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n`,
 		);
 		return;
 	}
@@ -392,7 +408,7 @@ export function finish(
 				);
 			return force
 				? forceFinishUnlocked(root, invocationRoot, slug, yes, keepBranch)
-				: finishUnlocked(root, invocationRoot, slug, yes, keepBranch);
+				: finishUnlocked(root, invocationRoot, slug, yes, keepBranch, expected);
 		}),
 	);
 }
@@ -462,7 +478,7 @@ export function finishBulk(
 				basedOnLocalRefs: mode === "gone",
 			},
 			json,
-			`Would finish ${plans.length} session(s); skip ${skipped.length}.${skippedText}`,
+			`Previewed cleanup plans for ${plans.length} session(s); skip ${skipped.length}. Apply rechecks all guards; no resources changed.${skippedText}`,
 		);
 		return;
 	}
