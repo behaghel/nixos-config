@@ -109,7 +109,14 @@ cleanliness/refusal reasons and branch-preservation behavior, then obtain approv
 for applying that selection. Always preserve branches unless a separate explicit
 request authorizes their deletion. Never use force as a fallback.
 
-On versions with receipt-guarded single-session finish:
+On versions supporting inline terminal approval, a human operator can run
+`as <task-slug> finish --keep-branch`, review the exact target/artifact/branch
+summary and confirm once. The CLI binds and rechecks that scope internally;
+there is no token to copy. This is not permission for an agent to self-approve
+cleanup or synthesize terminal consent. Automation and `--yes` still require
+explicit artifact receipts and separately authorized scope.
+
+For automation on versions with receipt-guarded single-session finish:
 
 ```sh
 as <task-slug> finish --keep-branch --dry-run --json
@@ -118,7 +125,9 @@ as <task-slug> finish --keep-branch --expected <receipt> --yes
 ```
 
 The receipt is `plan.receipt`; verify `plan.worktreePath`, `plan.currentBranch`,
-`plan.keepBranch` and non-forced behavior. A preview is not cleanup authorization.
+`plan.keepBranch` and non-forced behavior. A branch-preserving text preview also
+prints the receipt and full apply command; JSON remains the machine interface.
+A preview is not cleanup authorization.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 

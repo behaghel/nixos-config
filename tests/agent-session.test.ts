@@ -506,6 +506,199 @@ finally:
 	}, 60000);
 });
 
+function runFixtureOnTerminal(fixture: ReturnType<typeof createRepositoryFixture>, command: string[], answer: string, mutation = "") {
+	const driver = `
+import errno, json, os, pty, select, subprocess, sys, time
+master, slave = pty.openpty()
+child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stdout=slave, stderr=slave)
+os.close(slave)
+output, answered = b'', False
+try:
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if select.select([master], [], [], 0.05)[0]:
+            try:
+                chunk = os.read(master, 65536)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    break
+                raise
+            if not chunk:
+                break
+            output += chunk
+            if b'[y/N]' in output and not answered:
+                worktree, mutation = sys.argv[3], sys.argv[4]
+                if mutation == 'artifact':
+                    with open(os.path.join(worktree, '.cache', 'tasks.sqlite'), 'w') as data:
+                        data.write('new data during confirmation')
+                elif mutation == 'unapproved':
+                    with open(os.path.join(worktree, '.pre-commit-config.yaml'), 'w') as data:
+                        data.write('retain unapproved data')
+                elif mutation == 'head':
+                    with open(os.path.join(worktree, 'README.md'), 'a') as data:
+                        data.write('concurrent work\\n')
+                    subprocess.run(['git', '-C', worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-am', 'Concurrent work'], check=True, stdout=subprocess.DEVNULL)
+                elif mutation == 'policy':
+                    with open(os.environ['AGENT_SESSION_CONFIG']) as data:
+                        record = json.load(data)
+                    record['disposable_paths'].append('.unused')
+                    with open(os.environ['AGENT_SESSION_CONFIG'], 'w') as data:
+                        json.dump(record, data)
+                elif mutation == 'metadata':
+                    with open(sys.argv[5]) as data:
+                        record = json.load(data)
+                    record['lastWorkAt'] = '2026-10-28T00:00:00Z'
+                    with open(sys.argv[5], 'w') as data:
+                        json.dump(record, data)
+                os.write(master, b'\\x04' if sys.argv[2] == 'EOF' else sys.argv[2].encode())
+                answered = True
+        elif child.poll() is not None:
+            break
+    else:
+        raise TimeoutError('finish prompt did not complete')
+    print(json.dumps({'status': child.wait(timeout=5), 'answered': answered, 'output': output.decode(errors='replace')}))
+finally:
+    if child.poll() is None:
+        child.kill()
+        child.wait()
+    os.close(master)
+`;
+	const result = spawnSync("python3", ["-c", driver, JSON.stringify(command), answer,
+		join(fixture.worktrees, "human"), mutation, sessionMetadataPath(fixture.checkout, "human")], {
+		cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+	});
+	if (result.status !== 0) throw new Error(result.stderr);
+	return JSON.parse(result.stdout);
+}
+
+function finishOnTerminal(fixture: ReturnType<typeof createRepositoryFixture>, args: string[], answer: string, mutation = "") {
+	return runFixtureOnTerminal(fixture, ["node", cliScript, ...args], answer, mutation);
+}
+
+function createHumanFinishFixture() {
+	const fixture = createLocalLinkFixture();
+	writeConfig(fixture.checkout, fixture.agent, [], ".worktrees", fixture.links, [".cache"]);
+	if (runCli(fixture.checkout, ["human", "create"]).status !== 0) throw new Error("Could not create human finish fixture");
+	const worktree = join(fixture.worktrees, "human"); mkdirSync(join(worktree, ".cache"));
+	writeFileSync(join(worktree, ".cache", "tasks.sqlite"), "approved whole subtree\n");
+	return { ...fixture, worktree };
+}
+
+describe("human finish workflow", () => {
+	it("prints a text receipt and a complete replay command without changing the JSON receipt", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const args = ["human", "finish", "--keep-branch", "--dry-run"];
+			const plan = JSON.parse(runCli(fixture.checkout, [...args, "--json"]).stdout).plan;
+			const text = runCli(fixture.checkout, args);
+			expect(text.status).toBe(0);
+			expect(text.stdout).toContain(`Receipt: ${plan.receipt}`);
+			expect(text.stdout).toContain(`as human finish --keep-branch --expected ${plan.receipt} --yes`);
+			expect(text.stdout).toContain(".cache");
+			expect(existsSync(fixture.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const blockedBy of ["dirty", "unapproved"]) {
+		it(`does not offer receipt/apply commands for a ${blockedBy} text preview`, () => {
+			const fixture = createHumanFinishFixture();
+			try {
+				writeFileSync(join(fixture.worktree, blockedBy === "dirty" ? "README.md" : ".pre-commit-config.yaml"), "keep local work\n");
+				const preview = runCli(fixture.checkout, ["human", "finish", "--keep-branch", "--dry-run"]);
+				expect(preview.status).toBe(0);
+				expect(preview.stdout).toContain("blocked");
+				expect(preview.stdout.includes("Receipt:")).toBe(false);
+				expect(preview.stdout.includes("Apply:")).toBe(false);
+				expect(existsSync(fixture.worktree)).toBe(true);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	for (const keepBranch of [true, false]) {
+		it(`finishes from one terminal confirmation, keeping branch disposition ${keepBranch ? "preserved" : "deleted"}`, () => {
+			const fixture = createHumanFinishFixture();
+			try {
+				const result = finishOnTerminal(fixture, ["human", "finish", ...(keepBranch ? ["--keep-branch"] : [])], "yes\n");
+				expect(result.answered).toBe(true);
+				if (result.status !== 0) throw new Error(result.output);
+				expect(result.status).toBe(0);
+				expect(result.output).toContain(".cache");
+				expect(result.output).toContain("databases"); // Explain whole-subtree disposal.
+				expect(result.output).toContain(keepBranch ? "preserved" : "delete");
+				expect(result.output.includes("--expected")).toBe(false);
+				expect(existsSync(fixture.worktree)).toBe(false);
+				expect(Boolean(git(fixture.checkout, "branch", "--list", "agent/human"))).toBe(keepBranch);
+				for (const link of fixture.links) expect(readFileSync(join(fixture.checkout, link), "utf8")).toBe(`preserve ${link}\n`);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	for (const answer of ["no\n", "EOF"]) {
+		it(`retains approved artifacts when the terminal answer is ${JSON.stringify(answer)}`, () => {
+			const fixture = createHumanFinishFixture();
+			try {
+				const result = finishOnTerminal(fixture, ["human", "finish", "--keep-branch"], answer);
+				expect(result.answered).toBe(true);
+				expect(result.status).toBe(1);
+				expect(readFileSync(join(fixture.worktree, ".cache", "tasks.sqlite"), "utf8")).toBe("approved whole subtree\n");
+				expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	for (const mutation of ["artifact", "unapproved", "head", "metadata", "policy"]) {
+		it(`refuses ${mutation} changes made while the confirmation waits`, () => {
+			const fixture = createHumanFinishFixture();
+			try {
+				const result = finishOnTerminal(fixture, ["human", "finish"], "yes\n", mutation);
+				expect(result.answered).toBe(true);
+				expect(result.status).toBe(1);
+				expect(existsSync(fixture.worktree)).toBe(true);
+				expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+				if (mutation === "artifact") expect(readFileSync(join(fixture.worktree, ".cache", "tasks.sqlite"), "utf8")).toBe("new data during confirmation");
+				if (mutation === "unapproved") expect(readFileSync(join(fixture.worktree, ".pre-commit-config.yaml"), "utf8")).toBe("retain unapproved data");
+				if (mutation === "head") expect(git(fixture.worktree, "log", "-1", "--format=%s")).toBe("Concurrent work");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("still requires explicit artifact receipts for --yes, even on a terminal", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const result = finishOnTerminal(fixture, ["human", "finish", "--keep-branch", "--yes"], "yes\n");
+			expect(result.answered).toBe(false);
+			expect(result.status).toBe(1);
+			expect(result.output).toContain("receipt");
+			expect(existsSync(fixture.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("coalesces human metadata progress but retains every JSON progress event", () => {
+		const reporter = resolve("modules/flake/agent-session/runtime.ts");
+		const script = `import { progressReporter } from ${tomlString(reporter)};
+const report = progressReporter("finish", process.argv[1] === "json");
+report("inspect-finish", "started");
+for (let i = 1; i <= 100; i++) report("inspect-metadata-chunk:human", "completed", "node_modules: " + (i * 2048) + " metadata entries scanned so far");
+report("inspect-finish", "completed");`;
+		const text = spawnSync("node", ["--input-type=module", "-e", script, "text"], { encoding: "utf8", env: process.env });
+		const json = spawnSync("node", ["--input-type=module", "-e", script, "json"], { encoding: "utf8", env: process.env });
+		expect(text.status).toBe(0);
+		expect(text.stderr.trim().split("\n").length <= 5).toBe(true);
+		expect(text.stderr).toContain("node_modules");
+		expect(json.status).toBe(0);
+		expect(json.stderr.trim().split("\n").length).toBe(102);
+		expect(JSON.parse(json.stderr.trim().split("\n")[100]!).detail).toContain("204800");
+		const fixture = createRepositoryFixture();
+		try {
+			const terminal = runFixtureOnTerminal(fixture, ["node", "--input-type=module", "-e", script, "text"], "");
+			expect(terminal.status).toBe(0);
+			expect(terminal.output).toContain("\r\x1b[2K");
+			expect(terminal.output.split("\n").length <= 5).toBe(true);
+			expect(terminal.output.includes("COMPLETED inspect-metadata-chunk")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("receipt-bound artifact disposal", () => {
 	it("disposes explicitly approved subtrees/files/links through both guarded paths, never targets", () => {
 		const fixture = createLocalLinkFixture();
