@@ -23,7 +23,7 @@ import {
 	validateSlug,
 } from "./sessions.ts";
 import { CliError, run } from "./runtime.ts";
-import type { SessionMetadata, SessionStatus, ManagedWorktree } from "./types.ts";
+import type { AgentSessionConfig, SessionMetadata, SessionStatus, ManagedWorktree } from "./types.ts";
 
 function brokenStatus(slug: string, problem: string): SessionStatus {
 	return {
@@ -307,7 +307,38 @@ function canonicalResourcePath(path: string): string {
 	}
 }
 
-export function inspectExactResource(root: string, path: string) {
+export interface ExactInspectionContext {
+	root: string;
+	config: AgentSessionConfig;
+	configuredRoot: string;
+	commonDirectory: string;
+	registrations: Set<string> | null;
+	recordsBySlug: Map<string, SessionMetadata>;
+	bindingsByPath: Map<string, SessionMetadata[]>;
+	problem?: string;
+}
+
+// A preview may share this read-only namespace snapshot. Standalone inspection
+// and every apply target create a fresh one; never reuse it across effects.
+export function snapshotExactResources(root: string): ExactInspectionContext {
+	const config = loadConfig(root);
+	const context: ExactInspectionContext = {
+		root, config, configuredRoot: canonicalResourcePath(resolveWorktreeRoot(root, config.worktree_root)),
+		commonDirectory: commonGitDirectory(root), registrations: null, recordsBySlug: new Map(), bindingsByPath: new Map(),
+	};
+	try {
+		context.registrations = new Set(git(root, ["worktree", "list", "--porcelain", "-z"])
+			.split("\0").filter((field) => field.startsWith("worktree ")).map((field) => resolve(field.slice("worktree ".length))));
+		for (const record of readMetadataInventory(root)) {
+			context.recordsBySlug.set(record.slug, record);
+			const path = canonicalResourcePath(record.worktreePath);
+			context.bindingsByPath.set(path, [...(context.bindingsByPath.get(path) ?? []), record]);
+		}
+	} catch (error) { context.problem = String(error); }
+	return context;
+}
+
+export function inspectExactResource(root: string, path: string, sharedContext?: ExactInspectionContext) {
 	let worktreePath = resolve(path);
 	let resourceState: "present" | "absent" | "inconsistent" | "unknown" = "unknown";
 	const evidence: { filesystem: string; metadata: string; registered: boolean | null } = {
@@ -318,8 +349,9 @@ export function inspectExactResource(root: string, path: string) {
 	let problem: string | undefined;
 	try {
 		worktreePath = canonicalResourcePath(path);
-		const config = loadConfig(root);
-		const configuredRoot = canonicalResourcePath(resolveWorktreeRoot(root, config.worktree_root));
+		const context = sharedContext ?? snapshotExactResources(root);
+		if (context.root !== root) throw new CliError("Inspection snapshot belongs to another repository.");
+		const { config, configuredRoot } = context;
 		const slug = basename(worktreePath);
 		validateSlug(slug);
 		if (worktreePath !== join(configuredRoot, slug)) throw new CliError("Target is outside the configured managed-worktree slots.");
@@ -330,16 +362,13 @@ export function inspectExactResource(root: string, path: string) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			evidence.filesystem = "absent";
 		}
-		const registrations = git(root, ["worktree", "list", "--porcelain", "-z"])
-			.split("\0").filter((field) => field.startsWith("worktree "))
-			.map((field) => resolve(field.slice("worktree ".length)));
-		evidence.registered = registrations.includes(worktreePath);
+		evidence.registered = context.registrations?.has(worktreePath) ?? null;
+		if (context.problem) throw new CliError(context.problem);
 		// A directory name supplies a slot, not ownership or absence proof.
 		// Read binding metadata, never unrelated checkout Git state. Ambiguous,
 		// moved or unreadable records must not manufacture an absent resource.
-		const records = readMetadataInventory(root);
-		const ownRecord = records.find((record) => record.slug === slug);
-		const bindings = records.filter((record) => canonicalResourcePath(record.worktreePath) === worktreePath);
+		const ownRecord = context.recordsBySlug.get(slug);
+		const bindings = context.bindingsByPath.get(worktreePath) ?? [];
 		bindingSlugs = bindings.map((binding) => binding.slug);
 		const recorded = ownRecord !== undefined;
 		evidence.metadata = recorded || bindings.length ? "recorded" : "absent";
@@ -349,9 +378,9 @@ export function inspectExactResource(root: string, path: string) {
 		} else if (!recorded && !evidence.registered && evidence.filesystem === "absent") {
 			resourceState = "absent";
 		} else if (recorded && evidence.registered && evidence.filesystem === "present") {
-			const metadata = readMetadata(root, slug);
+			const metadata = ownRecord!;
 			assertConfiguredWorktreePath(root, config, metadata);
-			if (canonicalResourcePath(metadata.worktreePath) !== worktreePath || commonGitDirectory(worktreePath) !== commonGitDirectory(root)) {
+			if (canonicalResourcePath(metadata.worktreePath) !== worktreePath || commonGitDirectory(worktreePath) !== context.commonDirectory) {
 				throw new CliError("Managed metadata and native checkout identity do not agree.");
 			}
 			const status = inspectSession(metadata);
