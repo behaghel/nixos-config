@@ -8,6 +8,7 @@ let
     agent_command = cfg.agentCommand;
     prepare_command = cfg.prepareCommand;
     local_links = cfg.localLinks;
+    disposable_paths = cfg.disposablePaths;
   });
   agentSessionCommand = pkgs.writeShellApplication {
     name = "agent-session";
@@ -84,6 +85,12 @@ in
       type = lib.types.listOf lib.types.str;
       default = [ ];
       description = "Optional executable and arguments run once before recording a new session.";
+    };
+
+    disposablePaths = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [ ];
+      description = "Exact ignored paths eligible for receipt-approved disposal; directories authorize their entire subtree, including logs/databases. Empty by default; symlink targets are never followed.";
     };
 
     localLinks = lib.mkOption {

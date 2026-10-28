@@ -22,6 +22,9 @@ pkgs.runCommand "agent-session-tests"
 {
   nativeBuildInputs = cfg.packages ++ [ pkgs.bun pkgs.nodejs_24 pkgs.git pkgs.bash pkgs.zsh pkgs.fish pkgs.nix pkgs.python3 pkgs.lsof ];
   inherit (cfg.env) AGENT_SESSION_CONFIG AGENT_SESSION_COMPLETION_ROOT AGENT_SESSION_SHELL_ROOT;
+  ARTIFACT_POLICY_CONFIG = (evaluated.extendModules {
+    modules = [{ agentSession.disposablePaths = [ ".cache" ]; }];
+  }).config.env.AGENT_SESSION_CONFIG;
 }
   ''
     export HOME=$(mktemp -d)
@@ -35,6 +38,13 @@ pkgs.runCommand "agent-session-tests"
     cp ${../devenv.nix} devenv.nix
     cp ${../AGENTS.md} AGENTS.md
     cp ${../.gitignore} .gitignore
+    node --input-type=module - <<'JS'
+    import { readFileSync } from "node:fs";
+    for (const [variable, expected] of [["AGENT_SESSION_CONFIG", []], ["ARTIFACT_POLICY_CONFIG", [".cache"]]]) {
+      const config = JSON.parse(readFileSync(process.env[variable], "utf8"));
+      if (JSON.stringify(config.disposable_paths) !== JSON.stringify(expected)) throw new Error("Artifact policy module wiring failed: " + variable);
+    }
+    JS
     bun test ./tests/agent-session.test.ts ./tests/agent-session-templates.test.ts --timeout 30000
     touch "$out"
   ''

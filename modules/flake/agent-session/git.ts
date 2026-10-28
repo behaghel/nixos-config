@@ -1,4 +1,5 @@
 import { realpathSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { isAbsolute, resolve } from "node:path";
 import { CliError, run } from "./runtime.ts";
 import type { ReflogEntry } from "./types.ts";
@@ -8,6 +9,13 @@ export function git(cwd: string, args: string[]): string {
 	if (result.status !== 0) {
 		throw new CliError(result.stderr || `git ${args.join(" ")} failed`);
 	}
+	return result.stdout;
+}
+
+// NUL-framed paths and porcelain status prefixes must not be trimmed.
+export function gitRaw(cwd: string, args: string[]): string {
+	const result = spawnSync("git", args, { cwd, encoding: "utf8", env: process.env });
+	if (result.status !== 0) throw new CliError(result.stderr?.trim() || result.error?.message || `git ${args.join(" ")} failed`);
 	return result.stdout;
 }
 

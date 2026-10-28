@@ -122,6 +122,111 @@ any resource state: consumers must examine `resourceState`, not just exit status
 These observations are not cleanup authorization. Neither command fetches,
 repairs, prunes, removes resources, starts an agent or updates session metadata.
 
+## Known local links and non-forced retirement
+
+Single-session `finish`, legacy bulk finish and inactive-batch finish share the
+same ignored-data guard on their non-forced paths. An unchanged configured
+`agentSession.localLinks` symlink does not count as unknown ignored data when it
+points to its expected path in the primary checkout. Retirement removes only the
+workspace link as part of native worktree removal; it never traverses or deletes
+the link target. Targets may be files, directories or missing: target existence
+and contents are deliberately not inspected. Optional configured links that are
+absent in the workspace do not require repair before cleanup.
+
+Verification uses the configured relative path, actual symlink destination and
+same-filesystem, non-symlink parent chain. A regular-file replacement, redirected
+link, unsafe ancestor or unverified inspection blocks removal. A relative link to the same
+expected primary path is recognized, but rewriting/replacing a link after a
+preview still changes its receipt evidence.
+
+Non-forced single previews expose `plan.ignoredData`; batch resources expose
+`ignoredData` whenever a batch resource has verified physical checkout identity,
+even if other guards fail. The evidence contains `safe`, `complete`,
+`configuredLinks`, `ignoredPaths`, `unapprovedPaths` and `blockers`, plus
+workspace/link filesystem identities. Configured-link states are `verified`, `missing`,
+`mismatch` or `unsafe`. Link and ancestor identity/timestamps/destinations—not
+primary target contents—are bound into single-session receipts and batch
+fingerprints. Apply rechecks the evidence; single finish also rechecks after
+interactive confirmation. New ignored data or changed link evidence requires a
+fresh preview, not a force fallback.
+
+There are no implicit artifact exemptions based on familiar names or Nix-store
+targets. Unconfigured symlinks, generated hook links, `.devenv/`, `node_modules/`,
+`coverage/`, databases and other ignored local data block non-forced retirement
+unless explicitly covered by the project policy below. Direct single-session
+`finish --yes` cannot bypass either the data guard or artifact receipt approval;
+it may refuse workspaces that older versions removed.
+
+Obtain fresh previews for present worktrees after upgrading: older receipts did
+not bind this evidence and cannot authorize removal under the new guard. Existing
+interrupted-batch reconciliation still requires confirmed native/filesystem
+absence and unchanged residual binding/branch evidence before metadata-only
+completion. Explicit forced-cleanup semantics are unchanged and are not an
+automatic recovery mechanism for an ignored-data refusal.
+
+## Explicit artifact-disposal policy
+
+`agentSession.disposablePaths` defaults to `[]`. Projects may opt into exact
+workspace-relative ignored paths, for example:
+
+```nix
+agentSession.disposablePaths = [ "node_modules" "coverage" ".pre-commit-config.yaml" ];
+```
+
+This is a declaration of disposal authority, not a generated-file detector.
+Paths are literal: no globs, absolute paths, empty/dot/traversing components or
+`.git` components. A file authorizes that entry; a symlink authorizes only the
+link, never its target. A directory authorizes its **entire subtree**, including
+logs, databases, local patches and other potentially valuable data. In particular,
+listing `.devenv` would authorize its diagnostic logs and task databases too.
+Retain/move needed evidence before approving such a policy, or choose narrower
+exact paths. This provider does not populate a project's policy automatically.
+
+Policy does not waive cleanliness, identity, activity, ownership or native-lock
+checks, nor configured-link replacement protection. Nested policy paths require
+safe non-symlink, same-filesystem ancestors. Structural parents do not authorize
+siblings: `.cache/generated` is not permission to discard `.cache/other-data`.
+Missing optional policy roots are recorded, not repaired or created.
+
+Non-forced previews expose `ignoredData.policy`, `policyRoots` and
+`approvedArtifacts`, alongside the existing blockers and ignored-path evidence.
+Each present policy root has a complete metadata-tree `fingerprint`. The digest
+binds relative entry paths, device/inode identity, type/mode, uid/gid, link count,
+size, nanosecond modification/change times, allocation metadata and symlink
+destination text. Directory traversal is sorted; neither file contents nor
+symlink-target contents are read. Missing/unsafe roots are explicit. Unreadable,
+changing, cross-filesystem or incomplete trees cannot authorize retirement.
+
+Artifact disposal requires **both policy and a matching preview receipt**.
+For one session, use the existing branch-preserving receipt workflow:
+
+```sh
+as task finish --keep-branch --dry-run --json
+as task finish --keep-branch --expected <receipt> --yes
+```
+
+The first response provides `plan.receipt` and
+`plan.artifactDisposalRequiresReceipt`. Direct `finish --yes`, even with
+`--keep-branch`, refuses approved artifacts without that receipt. Legacy bulk
+finish has no receipt contract and skips/refuses artifact disposal; use single
+receipts or inactive-batch preview/apply instead. Inactive batch already requires
+its selection receipt and explicit `--yes`.
+
+Both guarded paths bind policy, root states and recursive metadata fingerprints
+into their receipts and freshly validate them before native removal. A changed
+policy, deep entry, restored content/mtime with changed ctime, renamed/replaced
+entry or newly observed unapproved data requires fresh inspection/approval.
+Single finish also rechecks after interactive confirmation, without repeating
+full-tree walks merely to calculate a receipt. Artifacts are never pre-deleted
+to make Git accept removal; all guards precede non-forced native worktree removal.
+All artifact receipt workflows preserve branches and never modify remote assets.
+
+Metadata fingerprints are change detection, not cryptographic content-integrity
+proof or a filesystem reservation. They do not hash dependency contents, freeze
+unmanaged writers or guarantee reclaimed space. Explicit ownership exclusions
+and a quiet target remain necessary. Forced-cleanup semantics are unchanged;
+there is no automatic force fallback.
+
 ## Inactive-session retirement
 
 ```sh
@@ -136,8 +241,9 @@ not persisted ownership declarations. Branch preservation is unconditional;
 
 JSON `resources` reports each recorded/discovered session's exact slug, path when
 established, and eligibility/refusal `reason`. Excluded names remain visible even
-when no record exists. Eligible entries expose `activity.lastWorkAt` and evidence
-sources. `observedAt` and `cutoff` define the explicit observation window.
+when no record exists. Verified worktrees expose activity and inspection evidence
+even when blocked; `reason` is the primary refusal while `blockers` lists all
+observable refusals. `observedAt` and `cutoff` define the explicit observation window.
 Preview also returns an opaque `receipt` freezing only the eligible selection.
 Apply requires that receipt, the same duration and exclusions, and explicit
 `--yes`; no newly eligible resource is added during apply:
@@ -172,6 +278,65 @@ resource is finished/absent; `partial` identifies mixed success and refusal or
 uncertainty. Exit status is 0 for full success (including an empty selection),
 1 for refusal/uncertainty, and 64 for invalid/mismatched receipt arguments before
 any cleanup. Apply does not abort reporting after one target fails.
+
+### Inspection evidence, size accounting and progress
+
+Batch inspection does not stop at the first dirty, ignored, active or recent
+condition. Resources with verified physical checkout identity include:
+- `resource`: native/filesystem/binding evidence and logical identity state.
+- `git`: actual cleanliness, porcelain changes, current branch and owned branches.
+  A detached/identity-conflicting checkout may also be dirty; both are reported.
+- `activity`: `lastWorkAt`, `limitingEvidence`, latest timestamp observations for
+  creation, managed work, each inspected reflog and the most recent non-ignored
+  file, plus `filesChecked`, `problems`, `complete` and `inactive`.
+- `ignoredData`: configured-link evidence, ignored path types/classifications,
+  local symlink destinations and size observations, with all data-inspection
+  blockers. Paths remain `unapproved` unless verified configured links, structural
+  parents or explicitly policy-covered `approved-artifact` entries.
+- `processEvidence`: the process observation time/source, matching cwd PIDs and
+  every managed operation's observed state, including interrupted/foreign owners.
+- `blockers` and `inspectionComplete`: all observable safety refusals and whether
+  the applicable evidence could be established, rather than just the first one.
+
+Explicitly excluded resources are not deeply inspected. Invalid or ambiguous
+bindings/native topology are not permission to traverse an unverified checkout;
+those resources report incomplete inspection rather than fabricated evidence.
+If activity evidence is partial, its timestamp is only the latest *observed*
+value, `complete` is false and `inactive` is null. An old partial timestamp is
+not proof of inactivity. Unknown process evidence also blocks eligibility while
+other available worktree evidence remains visible. Apply refusals include the
+fresh candidate view under `inspection` when available.
+
+`ignoredPaths[].size` reports decimal-string `apparentBytes` and `allocatedBytes`
+(the latter may be null), entry/unique-inode counts, completeness and problems.
+The scope is `tree-no-follow` for ordinary directories and `entry` for symlinks,
+files and structural parent-directory entries whose children are reported
+separately. Directory accounting walks metadata, not file contents; it does not
+follow symlink targets or descend across filesystem-device boundaries. Errors,
+disappearing paths or detected changes yield explicit incomplete evidence and
+block eligibility. Partial byte values are only observed lower bounds.
+
+Allocation counts unique device/inode pairs within each reported path, not across
+separate worktrees or roots. It is a footprint observation, **not guaranteed
+reclaimed space**: hardlinks outside the path, shared extents, open files and
+filesystem snapshots can change what retirement would actually free. Neither
+size nor directory location is disposal authority. Large trees can still take
+time to inspect; no fixed wall-clock completion guarantee is made.
+
+Preview snapshots the binding catalogue/native namespace and same-user process
+cwd list once, rather than repeating shared scans per candidate. The top-level
+`processSnapshot` reports process-probe completeness and its observation time.
+Standalone exact inspection and each selected apply target use fresh namespace
+information; apply captures fresh process evidence after the target's metadata
+inspection, before removal. A preview snapshot is not a reservation against
+unmanaged activity.
+
+Progress is emitted on stderr: per-resource inspection/apply/recheck events and
+metadata-scan chunk counts for long traversals. With `--json` these are versioned
+progress records; stdout remains one result document. Progress completion means
+a scan/chunk completed, not that a workspace was removed—only the final explicit
+outcome confirms that. Observation remains read-only and does not advance managed
+activity clocks, repair metadata, prune registrations or create an intent journal.
 
 ### Interrupted apply and reconciliation
 
@@ -219,7 +384,7 @@ start an agent. Git status inspection disables optional index writes.
 **Observed inactivity is not proof of disposability.** These checks cannot see
 editors with cwd elsewhere, all other-user/remote processes, restored timestamps,
 or events removed by reflog expiry. Explicitly exclude retained or otherwise active
-work. Dirty resources, ignored local data, foreign-owned directories, the invoking
+work. Dirty resources, unapproved ignored local data, foreign-owned directories, the invoking
 worktree and unresolved resource evidence are refused. Ignored files can contain
 important local work; age alone never authorizes their removal. A clean workspace
 with no such evidence may be a candidate, not permission to finish it.
