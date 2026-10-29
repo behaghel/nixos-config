@@ -173,7 +173,7 @@ function forceFinishUnlocked(
 
 function artifactSummary(evidence: IgnoredDataInspection | undefined): string {
 	if (!evidence?.approvedArtifacts.length) return "";
-	const artifacts = evidence.approvedArtifacts.map((path) => ({ path, tree: evidence.policyRoots.find((root) => root.path === path)?.tree }));
+	const artifacts = evidence.approvedArtifacts.map((path) => ({ path, tree: evidence.policyRoots.find((root) => root.path === path)?.tree ?? evidence.ignoredPaths.find((entry) => entry.path === path) }));
 	const entries = artifacts.map(({ path, tree }) => {
 		return `  artifact: ${path} (${tree?.type ?? "entry"}${tree?.type === "directory" ? `, entire subtree, ${tree.size.entries} entries` : tree?.type === "symlink" ? ", link only; target preserved" : ""})`;
 	});
@@ -222,7 +222,7 @@ function finishUnlocked(
 		throw new CliError("Working tree is not clean.");
 	}
 	const metadataProgress = (path: string, entries: number) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`);
-	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths, metadataProgress);
+	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths, metadataProgress, config.generated_links);
 	if (!ignoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(ignoredData)}`);
 	const interactive = !yes && Boolean(process.stdin.isTTY);
 	if (ignoredData.approvedArtifacts.length && !expected && !interactive) throw new CliError("Artifact disposal requires terminal confirmation or a matching preview receipt: use finish --keep-branch --dry-run, then --expected <receipt>.");
@@ -290,7 +290,7 @@ function finishUnlocked(
 	// ignored/link guard immediately before native removal; never unlink links
 	// separately or follow their targets to make a refusal disappear.
 	const currentConfig = loadConfig(root);
-	const currentIgnoredData = inspectIgnoredData(root, metadata.worktreePath, currentConfig.local_links, currentConfig.disposable_paths, metadataProgress);
+	const currentIgnoredData = inspectIgnoredData(root, metadata.worktreePath, currentConfig.local_links, currentConfig.disposable_paths, metadataProgress, currentConfig.generated_links);
 	if (!currentIgnoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(currentIgnoredData)}`);
 	if (JSON.stringify(currentIgnoredData) !== JSON.stringify(ignoredData) ||
 		(expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null, currentIgnoredData).receipt !== expected)) {
@@ -359,7 +359,7 @@ function previewFinish(
 		assertNotInvokingWorktree(metadata, invocationRoot);
 		const status = inspectSession(metadata);
 		const ignoredData = force ? undefined : observedIgnoredData ?? inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
-			(path, entries) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`));
+			(path, entries) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`), config.generated_links);
 		const plan = {
 			slug,
 			branch: status.currentBranch ?? metadata.branch,

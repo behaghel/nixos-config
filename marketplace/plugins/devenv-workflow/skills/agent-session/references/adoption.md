@@ -50,6 +50,15 @@ root/ignore rule. Local settings links must be explicit and ignored. Never link 
 copy credential stores, Pi authentication, histories, `.pi/npm/` or runtime state.
 Do not add client-configuration generators or resource symlinks through devenv.
 
+The integration defaults authorize approved retirement of `.devenv` workspace
+scratch state, including logs/databases, and recognize the generated hook-config
+symlink only against this project's exact `git-hooks.configFile` target. They do
+not approve a real cleanup or arbitrary Nix-store links. Retain needed evidence
+before finishing, or replace `agentSession.disposablePaths` (use `[]` to retain
+all ordinary ignored data). Set `agentSession.recognizeGeneratedHookConfig = false`
+to disable generated-hook recognition; explicit disposal paths still apply.
+Do not add `.pi/npm` or other project-specific state without separate approval.
+
 After every `devenv.nix` edit, validate syntax immediately with `devenv_validate`
 or `nix-instantiate --parse devenv.nix` from the selected checkout. Then evaluate
 with `devenv -q shell -- true` under its normal trust/secret policy. Review lockfile

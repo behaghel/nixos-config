@@ -2,6 +2,10 @@
 
 let
   cfg = config.agentSession;
+  generatedHookConfig = lib.attrByPath [ "git-hooks" "configFile" ] null config;
+  generatedLinks = lib.optionalAttrs
+    (cfg.recognizeGeneratedHookConfig && lib.attrByPath [ "git-hooks" "enable" ] false config && generatedHookConfig != null)
+    { ".pre-commit-config.yaml" = toString generatedHookConfig; };
   runtimeConfig = pkgs.writeText "agent-session-config.json" (builtins.toJSON {
     version = 1;
     worktree_root = cfg.worktreeRoot;
@@ -9,6 +13,7 @@ let
     prepare_command = cfg.prepareCommand;
     local_links = cfg.localLinks;
     disposable_paths = cfg.disposablePaths;
+    generated_links = generatedLinks;
   });
   agentSessionCommand = pkgs.writeShellApplication {
     name = "agent-session";
@@ -89,8 +94,14 @@ in
 
     disposablePaths = lib.mkOption {
       type = lib.types.listOf lib.types.str;
-      default = [ ];
-      description = "Exact ignored paths eligible for receipt-approved disposal; directories authorize their entire subtree, including logs/databases. Empty by default; symlink targets are never followed.";
+      default = [ ".devenv" ];
+      description = "Exact ignored paths eligible for approved disposal; directories authorize their entire subtree, including logs/databases. Defaults to devenv scratch state. Set an explicit list (including an empty one) to replace this policy; symlink targets are never followed.";
+    };
+
+    recognizeGeneratedHookConfig = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = "Recognize the ignored hook-config symlink only when it points to this project's git-hooks.configFile. Disabled when git-hooks is disabled or unavailable; set false to require explicit disposal policy instead. Regular files and redirected links are not recognized.";
     };
 
     localLinks = lib.mkOption {

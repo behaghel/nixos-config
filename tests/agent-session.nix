@@ -15,14 +15,31 @@ let
       }
     ];
   };
-  cfg = evaluated.config;
+  hookConfig = pkgs.writeText "agent-session-test-hook-config.json" "{}";
+  withHooks = evaluated.extendModules {
+    modules = [{
+      options.git-hooks = {
+        enable = lib.mkOption { type = lib.types.bool; default = true; };
+        configFile = lib.mkOption { type = lib.types.package; default = hookConfig; };
+      };
+    }];
+  };
+  cfg = withHooks.config;
 in
 assert builtins.all (item: item.assertion) cfg.assertions;
 pkgs.runCommand "agent-session-tests"
 {
   nativeBuildInputs = cfg.packages ++ [ pkgs.bun pkgs.nodejs_24 pkgs.git pkgs.bash pkgs.zsh pkgs.fish pkgs.nix pkgs.python3 pkgs.lsof ];
   inherit (cfg.env) AGENT_SESSION_CONFIG AGENT_SESSION_COMPLETION_ROOT AGENT_SESSION_SHELL_ROOT;
-  ARTIFACT_POLICY_CONFIG = (evaluated.extendModules {
+  GENERATED_HOOK_TEST_TARGET = hookConfig;
+  NO_HOOKS_CONFIG = evaluated.config.env.AGENT_SESSION_CONFIG;
+  DISABLED_HOOKS_CONFIG = (withHooks.extendModules {
+    modules = [{ git-hooks.enable = false; }];
+  }).config.env.AGENT_SESSION_CONFIG;
+  RETAIN_DEFAULTS_CONFIG = (withHooks.extendModules {
+    modules = [{ agentSession = { disposablePaths = [ ]; recognizeGeneratedHookConfig = false; }; }];
+  }).config.env.AGENT_SESSION_CONFIG;
+  ARTIFACT_POLICY_CONFIG = (withHooks.extendModules {
     modules = [{ agentSession.disposablePaths = [ ".cache" ]; }];
   }).config.env.AGENT_SESSION_CONFIG;
 }
@@ -40,9 +57,17 @@ pkgs.runCommand "agent-session-tests"
     cp ${../.gitignore} .gitignore
     node --input-type=module - <<'JS'
     import { readFileSync } from "node:fs";
-    for (const [variable, expected] of [["AGENT_SESSION_CONFIG", []], ["ARTIFACT_POLICY_CONFIG", [".cache"]]]) {
+    for (const [variable, expected, hook] of [
+      ["AGENT_SESSION_CONFIG", [".devenv"], true],
+      ["ARTIFACT_POLICY_CONFIG", [".cache"], true],
+      ["RETAIN_DEFAULTS_CONFIG", [], false],
+      ["NO_HOOKS_CONFIG", [".devenv"], false],
+      ["DISABLED_HOOKS_CONFIG", [".devenv"], false]
+    ]) {
       const config = JSON.parse(readFileSync(process.env[variable], "utf8"));
-      if (JSON.stringify(config.disposable_paths) !== JSON.stringify(expected)) throw new Error("Artifact policy module wiring failed: " + variable);
+      const expectedLinks = hook ? { ".pre-commit-config.yaml": process.env.GENERATED_HOOK_TEST_TARGET } : {};
+      if (JSON.stringify(config.disposable_paths) !== JSON.stringify(expected) ||
+          JSON.stringify(config.generated_links) !== JSON.stringify(expectedLinks)) throw new Error("Artifact defaults module wiring failed: " + variable);
     }
     JS
     bun test ./tests/agent-session.test.ts ./tests/agent-session-templates.test.ts --timeout 30000

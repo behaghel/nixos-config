@@ -109,6 +109,14 @@ cleanliness/refusal reasons and branch-preservation behavior, then obtain approv
 for applying that selection. Always preserve branches unless a separate explicit
 request authorizes their deletion. Never use force as a fallback.
 
+Current devenv integration defaults cover the `.devenv` scratch subtree (including
+logs/task databases) and the hook-config symlink only when it matches the exact
+project-generated target. Inspect the installed policy: explicit path lists can
+replace the scratch default, and generated-hook recognition can be disabled.
+A handwritten or redirected hook config is not automatically approved. `.pi/npm`,
+other client state and unrelated ignored files remain project-specific; do not
+expand policy or infer authority from ignored status merely to clear a refusal.
+
 On versions supporting inline terminal approval, a human operator can run
 `as <task-slug> finish --keep-branch`, review the exact target/artifact/branch
 summary and confirm once. The CLI binds and rechecks that scope internally;
@@ -135,8 +143,8 @@ On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.
 Batch receipts are top-level `receipt`, not `plan.receipt`. Apply with the same
 window/exclusions, `--expected <receipt> --yes --json`, only after approval.
-Age alone is not disposability; preserve live, dirty, ignored-data and unresolved
-resources. Do not infer eligibility from a case/PR label or update consumer history.
+Age alone is not disposability; preserve live, dirty, unapproved ignored-data and
+unresolved resources. Do not infer eligibility from a case/PR label or update consumer history.
 
 Report each outcome honestly, including partial success and uncertainty. Reconcile
 an interrupted operation through supported read-only evidence/provider replay;

@@ -5,6 +5,7 @@ export interface AgentSessionConfig {
 	prepare_command: string[];
 	local_links: string[];
 	disposable_paths: string[];
+	generated_links: Record<string, string>;
 }
 
 export type PullRequestMode = "review" | "independent";

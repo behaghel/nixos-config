@@ -25,7 +25,7 @@ export interface ConfiguredLinkEvidence {
 export interface IgnoredPathEvidence {
 	path: string;
 	type: "directory" | "symlink" | "file" | "other";
-	classification: "configured-link" | "structural-parent" | "approved-artifact" | "unapproved";
+	classification: "configured-link" | "generated-link" | "structural-parent" | "approved-artifact" | "unapproved";
 	policyPath?: string;
 	fingerprint?: string;
 	target?: string;
@@ -59,6 +59,7 @@ export interface IgnoredDataInspection {
 	ignoredPaths: IgnoredPathEvidence[];
 	worktreeIdentity?: Identity;
 	configuredLinks: ConfiguredLinkEvidence[];
+	generatedLinks: ConfiguredLinkEvidence[];
 	unapprovedPaths: string[];
 	blockers: { path: string; reason: string }[];
 }
@@ -84,10 +85,14 @@ export function validDisposablePath(path: string): boolean {
 	return relativeSetting(path) && !/[*?[\]{}]/.test(path) && !path.split("/").includes(".git");
 }
 
+export function validGeneratedLink(path: string, target: string): boolean {
+	return validDisposablePath(path) && isAbsolute(target) && resolve(target) === target && !/[\x00-\x1f\x7f]/.test(target);
+}
+
 // Neither target existence nor target contents is relevant to unlinking a
 // workspace symlink. Inspect only the link and its non-symlink parent chain.
-function inspectLink(root: string, worktree: string, path: string, device: bigint): ConfiguredLinkEvidence {
-	const base = { path, expectedTarget: join(root, path) };
+function inspectLink(root: string, worktree: string, path: string, device: bigint, expectedTarget = join(root, path)): ConfiguredLinkEvidence {
+	const base = { path, expectedTarget };
 	if (!relativeSetting(path)) return { ...base, state: "unsafe", problem: "Invalid configured local-link path." };
 	const ancestors: { path: string; identity: Identity }[] = [];
 	try {
@@ -107,7 +112,7 @@ function inspectLink(root: string, worktree: string, path: string, device: bigin
 		if (JSON.stringify(identity(statEntry(fullPath))) !== JSON.stringify(entryIdentity)) return { ...base, ancestors, target, state: "unsafe", problem: "Link changed during inspection." };
 		return resolve(dirname(fullPath), target) === base.expectedTarget
 			? { ...base, ancestors, target, identity: entryIdentity, state: "verified" }
-			: { ...base, ancestors, target, identity: entryIdentity, state: "mismatch", problem: "Configured link does not point to its expected primary-checkout path." };
+			: { ...base, ancestors, target, identity: entryIdentity, state: "mismatch", problem: "Link does not point to its declared target." };
 	} catch (error) {
 		return (error as NodeJS.ErrnoException).code === "ENOENT"
 			? { ...base, ancestors, state: "missing" }
@@ -185,16 +190,19 @@ function inspectPolicyRoot(worktree: string, path: string, device: bigint, onPro
 	}
 }
 
-// Shared by all non-forced paths. Policy is explicit, exact and empty by
-// default; safe evidence alone is not approval to dispose approvedArtifacts.
-export function inspectIgnoredData(root: string, worktree: string, localLinks: string[], disposablePaths: string[] = [], onProgress?: (path: string, entries: number) => void): IgnoredDataInspection {
-	const result: IgnoredDataInspection = { policy: { disposablePaths: [...new Set(disposablePaths)].sort() }, policyRoots: [], approvedArtifacts: [], safe: false, complete: false, configuredLinks: [], ignoredPaths: [], unapprovedPaths: [], blockers: [] };
+// Shared by all non-forced paths. The integration declares its defaults;
+// safe evidence alone is not approval to dispose approvedArtifacts.
+export function inspectIgnoredData(root: string, worktree: string, localLinks: string[], disposablePaths: string[] = [], onProgress?: (path: string, entries: number) => void, generatedLinks: Record<string, string> = {}): IgnoredDataInspection {
+	const result: IgnoredDataInspection = { policy: { disposablePaths: [...new Set(disposablePaths)].sort() }, policyRoots: [], approvedArtifacts: [], safe: false, complete: false, configuredLinks: [], generatedLinks: [], ignoredPaths: [], unapprovedPaths: [], blockers: [] };
 	try {
 		const rootStat = statEntry(worktree);
 		if (!rootStat.isDirectory() || rootStat.isSymbolicLink()) throw new Error("Worktree is not a non-symlink directory.");
 		result.worktreeIdentity = identity(rootStat);
 		result.configuredLinks = [...new Set(localLinks)].sort().map((path) => inspectLink(root, worktree, path, rootStat.dev));
-		for (const link of result.configuredLinks) {
+		result.generatedLinks = Object.entries(generatedLinks).sort(([a], [b]) => a.localeCompare(b)).map(([path, target]): ConfiguredLinkEvidence =>
+			validGeneratedLink(path, target) ? inspectLink(root, worktree, path, rootStat.dev, target)
+				: { path, expectedTarget: target, state: "unsafe", problem: "Invalid generated-link declaration." });
+		for (const link of [...result.configuredLinks, ...result.generatedLinks]) {
 			if (link.state === "mismatch" || link.state === "unsafe") result.blockers.push({ path: link.path, reason: link.problem! });
 		}
 		result.policyRoots = result.policy.disposablePaths.map((path) => inspectPolicyRoot(worktree, path, rootStat.dev, onProgress));
@@ -202,7 +210,8 @@ export function inspectIgnoredData(root: string, worktree: string, localLinks: s
 			if (policy.state === "unsafe") result.blockers.push({ path: policy.path, reason: policy.problem! });
 		}
 		const verified = new Set(result.configuredLinks.filter((link) => link.state === "verified").map((link) => link.path));
-		const structuralPaths = [...verified, ...result.policyRoots.filter((policy) => policy.state === "present").map((policy) => policy.path)];
+		const verifiedGenerated = new Set(result.generatedLinks.filter((link) => link.state === "verified").map((link) => link.path));
+		const structuralPaths = [...verified, ...verifiedGenerated, ...result.policyRoots.filter((policy) => policy.state === "present").map((policy) => policy.path)];
 		const structuralParent = (path: string) => structuralPaths.some((entry) => entry.startsWith(`${path}/`));
 		const inspectIgnoredEntry = (path: string): void => {
 			const policy = result.policyRoots.find((policy) => policy.state === "present" && (policy.path === path || (policy.tree?.type === "directory" && path.startsWith(`${policy.path}/`))));
@@ -211,6 +220,9 @@ export function inspectIgnoredData(root: string, worktree: string, localLinks: s
 			result.ignoredPaths.push(evidence);
 			for (const problem of evidence.size.problems) result.blockers.push({ path: problem.path, reason: `Incomplete ignored-data inspection: ${problem.problem}` });
 			if (verified.has(path)) { evidence.classification = "configured-link"; return; }
+			if (verifiedGenerated.has(path)) {
+				evidence.classification = "generated-link"; result.approvedArtifacts.push(path); return;
+			}
 			if (policy) {
 				evidence.classification = "approved-artifact"; evidence.policyPath = policy.path;
 				result.approvedArtifacts.push(policy.path); return;
@@ -245,7 +257,7 @@ export function inspectIgnoredData(root: string, worktree: string, localLinks: s
 		result.unapprovedPaths = [...new Set(result.unapprovedPaths)].sort();
 		for (const path of result.unapprovedPaths) result.blockers.push({ path, reason: "Unapproved ignored local data." });
 		if (JSON.stringify(identity(statEntry(worktree))) !== JSON.stringify(result.worktreeIdentity)) throw new Error("Worktree changed during ignored-data inspection.");
-		result.complete = entriesComplete && result.policyRoots.every((policy) => policy.state !== "unsafe") && result.configuredLinks.every((link) => link.state !== "unsafe") && result.ignoredPaths.every((entry) => entry.size.complete);
+		result.complete = entriesComplete && result.policyRoots.every((policy) => policy.state !== "unsafe") && [...result.configuredLinks, ...result.generatedLinks].every((link) => link.state !== "unsafe") && result.ignoredPaths.every((entry) => entry.size.complete);
 		result.safe = result.complete && result.blockers.length === 0;
 	} catch (error) {
 		result.blockers.push({ path: ".", reason: `Cannot establish ignored-data safety: ${String(error)}` });
