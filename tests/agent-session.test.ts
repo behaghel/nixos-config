@@ -97,6 +97,7 @@ function writeConfig(
 	worktreeRoot = ".worktrees",
 	localLinks: string[] = [],
 	disposablePaths: string[] = [],
+	generatedLinks: Record<string, string> = {},
 ): void {
 	writeFileSync(
 		runtimeConfigPath(checkout),
@@ -107,6 +108,7 @@ function writeConfig(
 			prepare_command: prepareCommand,
 			local_links: localLinks,
 			disposable_paths: disposablePaths,
+			generated_links: generatedLinks,
 		})}\n`,
 	);
 }
@@ -273,6 +275,162 @@ function createLocalLinkFixture() {
 	writeConfig(fixture.checkout, agent, [], ".worktrees", links);
 	return { ...fixture, links, agent };
 }
+
+function createDevenvDefaultsFixture() {
+	const fixture = createLocalLinkFixture();
+	const defaults = JSON.parse(readFileSync(process.env.AGENT_SESSION_CONFIG!, "utf8"));
+	const hookTarget = defaults.generated_links?.[".pre-commit-config.yaml"] ?? process.env.GENERATED_HOOK_TEST_TARGET ?? readlinkSync(resolve(".pre-commit-config.yaml"));
+	writeFileSync(join(fixture.seed, ".gitignore"), readFileSync(join(fixture.seed, ".gitignore"), "utf8") + "\n.devenv/\n.pi/npm/\n");
+	git(fixture.seed, "add", ".gitignore");
+	git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Ignore generated integration state");
+	git(fixture.seed, "push", "origin", "master"); git(fixture.checkout, "pull", "--ff-only");
+	writeConfig(fixture.checkout, fixture.agent, [], ".worktrees", fixture.links, defaults.disposable_paths, defaults.generated_links);
+	return { ...fixture, defaults, hookTarget };
+}
+
+function prepareDefaultArtifacts(fixture: ReturnType<typeof createDevenvDefaultsFixture>, slug: string) {
+	const created = runCli(fixture.checkout, [slug, "create"]);
+	if (created.status !== 0) throw new Error(created.stderr);
+	backdateSession(fixture, slug);
+	const worktree = join(fixture.worktrees, slug);
+	mkdirSync(join(worktree, ".devenv"));
+	writeFileSync(join(worktree, ".devenv", "tasks.sqlite"), "task database approved as scratch state\n");
+	writeFileSync(join(worktree, ".devenv", "diagnostics.log"), "default whole-subtree authority\n");
+	symlinkSync(fixture.hookTarget, join(worktree, ".pre-commit-config.yaml"));
+	return worktree;
+}
+
+describe("devenv retirement defaults", () => {
+	it("retires default scratch state and the verified generated hook through both guarded paths", () => {
+		const fixture = createDevenvDefaultsFixture();
+		try {
+			expect(fixture.defaults.disposable_paths.includes(".devenv")).toBe(true);
+			expect(fixture.defaults.generated_links[".pre-commit-config.yaml"]).toBe(fixture.hookTarget);
+			const targetBefore = lstatSync(fixture.hookTarget).ino;
+			for (const slug of ["default-single", "default-batch"]) prepareDefaultArtifacts(fixture, slug);
+			const single = JSON.parse(runCli(fixture.checkout, ["default-single", "finish", "--keep-branch", "--dry-run", "--json"]).stdout).plan;
+			expect(single.ignoredData.safe).toBe(true);
+			expect(single.ignoredData.generatedLinks[0].state).toBe("verified");
+			expect(single.ignoredData.approvedArtifacts.includes(".devenv")).toBe(true);
+			expect(single.ignoredData.ignoredPaths.find((entry: { path: string }) => entry.path === ".pre-commit-config.yaml").classification).toBe("generated-link");
+			const args = ["batch", "finish", "--inactive-for", "7d", "--exclude", "default-single"];
+			const batch = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout);
+			expect(batch.resources.find((resource: { slug: string }) => resource.slug === "default-batch").reason).toBe("eligible");
+			expect(runCli(fixture.checkout, ["default-single", "finish", "--keep-branch", "--expected", single.receipt, "--yes"]).status).toBe(0);
+			expect(runCli(fixture.checkout, [...args, "--expected", batch.receipt, "--yes", "--json"]).status).toBe(0);
+			for (const slug of ["default-single", "default-batch"]) {
+				expect(existsSync(join(fixture.worktrees, slug))).toBe(false);
+				expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			}
+			expect(lstatSync(fixture.hookTarget).ino).toBe(targetBefore);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 120000);
+
+	for (const replacement of ["regular-file", "unrelated-store-link"]) {
+		it(`refuses a ${replacement} hook replacement even in a fresh preview`, () => {
+			const fixture = createDevenvDefaultsFixture();
+			try {
+				const worktree = prepareDefaultArtifacts(fixture, "replacement");
+				const args = ["replacement", "finish", "--keep-branch"];
+				const inspect = () => JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+				const initial = inspect(); expect(initial.ignoredData.safe).toBe(true);
+				const hook = join(worktree, ".pre-commit-config.yaml"); rmSync(hook);
+				if (replacement === "regular-file") writeFileSync(hook, "retain handwritten hook configuration\n");
+				else symlinkSync("/nix/store/00000000000000000000000000000000-unrelated-config", hook);
+				const changed = inspect();
+				expect(changed.ignoredData.safe).toBe(false);
+				expect(changed.ignoredData.generatedLinks[0].state).toBe("mismatch");
+				expect(runCli(fixture.checkout, [...args, "--expected", initial.receipt, "--yes"]).status).toBe(1);
+				const batch = JSON.parse(runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"]).stdout);
+				expect(batch.resources[0].reason).toBe("ignored-local-data");
+				if (replacement === "regular-file") expect(readFileSync(hook, "utf8")).toBe("retain handwritten hook configuration\n");
+				else expect(readlinkSync(hook)).toContain("unrelated-config");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 60000);
+	}
+
+	it("leaves Pi installation state outside the defaults", () => {
+		const fixture = createDevenvDefaultsFixture();
+		try {
+			const worktree = prepareDefaultArtifacts(fixture, "pi-retained");
+			const args = ["pi-retained", "finish", "--keep-branch"];
+			const initial = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+			expect(initial.ignoredData.safe).toBe(true);
+			mkdirSync(join(worktree, ".pi", "npm"), { recursive: true });
+			const data = join(worktree, ".pi", "npm", "package.json"); writeFileSync(data, "retain project-specific packages\n");
+			const changed = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+			expect(changed.ignoredData.safe).toBe(false);
+			expect(changed.ignoredData.unapprovedPaths.some((path: string) => path === ".pi" || path.startsWith(".pi/"))).toBe(true);
+			expect(runCli(fixture.checkout, [...args, "--expected", initial.receipt, "--yes"]).status).toBe(1);
+			expect(readFileSync(data, "utf8")).toBe("retain project-specific packages\n");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("honours explicit retention of both default scopes", () => {
+		const fixture = createDevenvDefaultsFixture();
+		try {
+			const worktree = prepareDefaultArtifacts(fixture, "retain-defaults");
+			const args = ["retain-defaults", "finish", "--keep-branch"];
+			const initial = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+			expect(initial.ignoredData.safe).toBe(true);
+			writeConfig(fixture.checkout, fixture.agent, [], ".worktrees", fixture.links, [], {});
+			const retained = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout).plan;
+			expect(retained.ignoredData.safe).toBe(false);
+			expect(retained.ignoredData.unapprovedPaths.includes(".devenv")).toBe(true);
+			expect(retained.ignoredData.unapprovedPaths.includes(".pre-commit-config.yaml")).toBe(true);
+			expect(runCli(fixture.checkout, [...args, "--expected", initial.receipt, "--yes"]).status).toBe(1);
+			expect(existsSync(join(worktree, ".devenv", "diagnostics.log"))).toBe(true);
+			expect(readlinkSync(join(worktree, ".pre-commit-config.yaml"))).toBe(fixture.hookTarget);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rejects malformed generated-link declarations before creating resources", () => {
+		const fixture = createDevenvDefaultsFixture();
+		try {
+			const path = runtimeConfigPath(fixture.checkout), original = JSON.parse(readFileSync(path, "utf8"));
+			for (const generated of [null, [], "not-a-map", { ".git": fixture.hookTarget }, { ".pre-commit-config.yaml": "relative-target" }, { "../escape": fixture.hookTarget }]) {
+				writeFileSync(path, JSON.stringify({ ...original, generated_links: generated }));
+				expect(runCli(fixture.checkout, ["invalid-generated", "create"]).status === 0).toBe(false);
+			}
+			expect(existsSync(join(fixture.worktrees, "invalid-generated"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const mode of ["single", "batch"]) {
+		it(`binds the generated hook target into ${mode} approval`, () => {
+			const fixture = createDevenvDefaultsFixture();
+			try {
+				const worktree = prepareDefaultArtifacts(fixture, "new-generator");
+				const args = mode === "single" ? ["new-generator", "finish", "--keep-branch"] : ["batch", "finish", "--inactive-for", "7d"];
+				const inspect = () => JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout);
+				const before = inspect(), receipt = mode === "single" ? before.plan.receipt : before.receipt;
+				expect((mode === "single" ? before.plan : before.resources[0]).ignoredData.safe).toBe(true);
+				const target = "/nix/store/00000000000000000000000000000000-new-project-hook-config";
+				writeConfig(fixture.checkout, fixture.agent, [], ".worktrees", fixture.links, fixture.defaults.disposable_paths, { ".pre-commit-config.yaml": target });
+				const hook = join(worktree, ".pre-commit-config.yaml"); rmSync(hook); symlinkSync(target, hook);
+				const after = inspect(); expect((mode === "single" ? after.plan : after.resources[0]).ignoredData.safe).toBe(true);
+				expect(runCli(fixture.checkout, [...args, "--expected", receipt, "--yes", ...(mode === "batch" ? ["--json"] : [])]).status === 0).toBe(false);
+				expect(readlinkSync(hook)).toBe(target);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 60000);
+
+		it(`invalidates ${mode} approval when default scratch metadata changes`, () => {
+			const fixture = createDevenvDefaultsFixture();
+			try {
+				const worktree = prepareDefaultArtifacts(fixture, "changed-default");
+				const args = mode === "single" ? ["changed-default", "finish", "--keep-branch"] : ["batch", "finish", "--inactive-for", "7d"];
+				const result = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"]).stdout);
+				const inspection = mode === "single" ? result.plan.ignoredData : result.resources[0].ignoredData;
+				expect(inspection.safe).toBe(true);
+				const receipt = mode === "single" ? result.plan.receipt : result.receipt;
+				const database = join(worktree, ".devenv", "tasks.sqlite"), before = lstatSync(database).mtime;
+				writeFileSync(database, "changed while retaining the old mtime\n"); utimesSync(database, before, before);
+				expect(runCli(fixture.checkout, [...args, "--expected", receipt, "--yes", ...(mode === "batch" ? ["--json"] : [])]).status).toBe(1);
+				expect(readFileSync(database, "utf8")).toBe("changed while retaining the old mtime\n");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 60000);
+	}
+});
 
 describe("verified local-link retirement", () => {
 	it("retires clean linked worktrees through both guarded paths without touching targets", () => {

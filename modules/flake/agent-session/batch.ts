@@ -238,7 +238,7 @@ function inspectCandidate(root: string, invocationRoot: string, slug: string, op
 		if (!candidate.activity.complete) { candidate.inspectionComplete = false; block("unknown-activity", candidate.activity.problems.join("; ")); }
 		else if (!candidate.activity.inactive) block("recent-activity");
 		candidate.ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
-			(path, entries) => report?.(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`));
+			(path, entries) => report?.(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`), config.generated_links);
 		if (!candidate.ignoredData.complete) candidate.inspectionComplete = false;
 		if (!candidate.ignoredData.safe) block("ignored-local-data", ignoredDataProblem(candidate.ignoredData));
 		const stat = lstatSync(metadata.worktreePath);

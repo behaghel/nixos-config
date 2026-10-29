@@ -19,7 +19,7 @@ import {
 	repositoryRoot,
 	worktreeIsRegistered,
 } from "./git.ts";
-import { validDisposablePath } from "./artifacts.ts";
+import { validDisposablePath, validGeneratedLink } from "./artifacts.ts";
 import { CliError, run } from "./runtime.ts";
 import { validPullRequest } from "./github.ts";
 import type {
@@ -60,8 +60,14 @@ export function loadConfig(_root: string): AgentSessionConfig {
 	}
 	const disposablePaths = raw.disposable_paths === undefined ? [] : stringArray(raw.disposable_paths, "disposable_paths");
 	if (disposablePaths.some((path) => !validDisposablePath(path))) throw new CliError("Invalid disposable_paths: use exact non-traversing relative paths, without globs or .git components.");
+	const generatedLinks = raw.generated_links === undefined ? {} : raw.generated_links;
+	if (!generatedLinks || typeof generatedLinks !== "object" || Array.isArray(generatedLinks) ||
+		Object.entries(generatedLinks).some(([path, target]) => typeof target !== "string" || !validGeneratedLink(path, target))) {
+		throw new CliError("Invalid generated_links: expected exact relative paths mapped to canonical absolute targets.");
+	}
 	return {
 		version: 1,
+		generated_links: Object.fromEntries(Object.entries(generatedLinks).sort(([a], [b]) => a.localeCompare(b))) as Record<string, string>,
 		disposable_paths: [...new Set(disposablePaths)].sort(),
 		worktree_root: raw.worktree_root,
 		agent_command: stringArray(raw.agent_command, "agent_command"),

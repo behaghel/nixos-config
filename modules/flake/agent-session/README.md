@@ -142,7 +142,7 @@ preview still changes its receipt evidence.
 Non-forced single previews expose `plan.ignoredData`; batch resources expose
 `ignoredData` whenever a batch resource has verified physical checkout identity,
 even if other guards fail. The evidence contains `safe`, `complete`,
-`configuredLinks`, `ignoredPaths`, `unapprovedPaths` and `blockers`, plus
+`configuredLinks`, `generatedLinks`, `ignoredPaths`, `unapprovedPaths` and `blockers`, plus
 workspace/link filesystem identities. Configured-link states are `verified`, `missing`,
 `mismatch` or `unsafe`. Link and ancestor identity/timestamps/destinations—not
 primary target contents—are bound into single-session receipts and batch
@@ -150,10 +150,10 @@ fingerprints. Apply rechecks the evidence; single finish also rechecks after
 interactive confirmation. New ignored data or changed link evidence requires a
 fresh preview, not a force fallback.
 
-There are no implicit artifact exemptions based on familiar names or Nix-store
-targets. Unconfigured symlinks, generated hook links, `.devenv/`, `node_modules/`,
-`coverage/`, databases and other ignored local data block non-forced retirement
-unless explicitly covered by the project policy below. Direct single-session
+Devenv-owned defaults are declared by the integration below, not inferred from
+familiar names or arbitrary Nix-store targets. Other unconfigured symlinks,
+`node_modules/`, `coverage/`, `.pi/npm/`, databases and ignored local data block
+non-forced retirement unless explicitly covered by project policy. Direct single-session
 `finish --yes` cannot bypass either the data guard or artifact receipt approval;
 it may refuse workspaces that older versions removed.
 
@@ -166,21 +166,46 @@ automatic recovery mechanism for an ignored-data refusal.
 
 ## Explicit artifact-disposal policy
 
-`agentSession.disposablePaths` defaults to `[]`. Projects may opt into exact
-workspace-relative ignored paths, for example:
+The devenv integration provides two practical defaults:
+
+| Scope | Default authority |
+| --- | --- |
+| `.devenv` | Whole workspace scratch subtree, including task databases and diagnostic logs. |
+| `.pre-commit-config.yaml` | Symlink only, matching the exact current project `git-hooks.configFile` target when git-hooks is enabled. |
+
+`agentSession.disposablePaths` defaults to `[ ".devenv" ]`. An explicit list
+replaces that policy; include `.devenv` if retaining the default while adding
+other exact workspace-relative paths:
 
 ```nix
-agentSession.disposablePaths = [ "node_modules" "coverage" ".pre-commit-config.yaml" ];
+agentSession.disposablePaths = [ ".devenv" "node_modules" "coverage" ];
 ```
+
+Generated hook recognition is separate from ordinary path disposal. It compares
+the actual link destination with the project's declared generated target; neither
+the filename nor an arbitrary `/nix/store/…` target is sufficient. Missing links
+are allowed. A regular-file replacement, redirected link or unsafe ancestor
+blocks cleanup, even if a broader disposal path covers it. Neither the generated
+target's existence nor its contents are inspected or changed. A changed/stale
+hook target requires review, not a prefix-based exemption.
+
+When git-hooks is absent or disabled, no generated-hook authority is declared.
+Set `agentSession.recognizeGeneratedHookConfig = false` to disable automatic
+recognition. To retain both scopes, set it false and
+`agentSession.disposablePaths = []`; explicit disposal paths remain authoritative.
+Intentional hand-written hook workflows must disable generated-link recognition
+before separately authorizing that ignored entry. No `.pi` path is a default:
+`.pi/npm` and other project-specific installations require their own policy.
 
 This is a declaration of disposal authority, not a generated-file detector.
 Paths are literal: no globs, absolute paths, empty/dot/traversing components or
 `.git` components. A file authorizes that entry; a symlink authorizes only the
 link, never its target. A directory authorizes its **entire subtree**, including
 logs, databases, local patches and other potentially valuable data. In particular,
-listing `.devenv` would authorize its diagnostic logs and task databases too.
-Retain/move needed evidence before approving such a policy, or choose narrower
-exact paths. This provider does not populate a project's policy automatically.
+the default `.devenv` scope authorizes its diagnostic logs and task databases too.
+Retain/move needed evidence before finishing, or replace the default with narrower
+exact paths. Declaring defaults does not approve an actual retirement: terminal
+confirmation or a matching automation receipt is still required.
 
 Policy does not waive cleanliness, identity, activity, ownership or native-lock
 checks, nor configured-link replacement protection. Nested policy paths require
@@ -190,6 +215,10 @@ Missing optional policy roots are recorded, not repaired or created.
 
 Non-forced previews expose `ignoredData.policy`, `policyRoots` and
 `approvedArtifacts`, alongside the existing blockers and ignored-path evidence.
+`generatedLinks` reports `verified`, `missing`, `mismatch` or `unsafe` against each
+declared generated target. Verified ignored generated links are classified as
+`generated-link` and included in the approved artifact summary; their destination,
+identity and ancestor evidence are receipt-bound just like other guarded scopes.
 Each present policy root has a complete metadata-tree `fingerprint`. The digest
 binds relative entry paths, device/inode identity, type/mode, uid/gid, link count,
 size, nanosecond modification/change times, allocation metadata and symlink
@@ -313,7 +342,7 @@ condition. Resources with verified physical checkout identity include:
 - `ignoredData`: configured-link evidence, ignored path types/classifications,
   local symlink destinations and size observations, with all data-inspection
   blockers. Paths remain `unapproved` unless verified configured links, structural
-  parents or explicitly policy-covered `approved-artifact` entries.
+  parents, verified `generated-link` entries or policy-covered `approved-artifact` entries.
 - `processEvidence`: the process observation time/source, matching cwd PIDs and
   every managed operation's observed state, including interrupted/foreign owners.
 - `blockers` and `inspectionComplete`: all observable safety refusals and whether
