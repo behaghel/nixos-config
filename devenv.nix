@@ -42,6 +42,8 @@ in
   agentSession = {
     enable = true;
     agentCommand = [ "pi" ];
+    # Worktree package installations are disposable; other Pi state is not.
+    disposablePaths = [ ".devenv" ".pi/npm" ];
     # Keep local settings explicit; do not link credential stores or Pi state.
     localLinks = [
       ".envrc.local"
@@ -55,7 +57,9 @@ in
   profiles.agent-sandbox.module = import ./modules/flake/agent-session/sandbox.nix;
 
   # Bun is only needed for the migrated regression suite, not everyday shells.
-  profiles.agent-session-tests.module = { pkgs, lib, ... }: {
+  profiles.agent-session-tests.module = { pkgs, lib, options, ... }: {
+    # Provider regressions exercise its defaults, not this repo's Pi opt-in.
+    agentSession.disposablePaths = lib.mkForce options.agentSession.disposablePaths.default;
     packages = [ pkgs.bun pkgs.nodejs_24 pkgs.zsh pkgs.fish pkgs.python3 pkgs.lsof ];
     outputs.agent-session-tests = import ./tests/agent-session.nix { inherit pkgs lib; };
   };
