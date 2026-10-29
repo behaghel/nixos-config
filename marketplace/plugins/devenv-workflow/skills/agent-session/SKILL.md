@@ -39,15 +39,45 @@ to repair, replace or retire a resource. Leave workspaces available at handoff.
    the shell, bootstrap from that repository with
    `devenv -q shell -- agent-session ...`. Once available, use the launcher directly.
    A missing host command is not proof that the project needs installation.
-4. Work with the **installed version**, not this skill's source revision. Read its
-   module README/usage and advertised completions before relying on capabilities.
-   A verified `agent-session` invocation with no arguments prints usage (normally
-   exit 64); do not invent an `as --version` interface. Adapt to supported commands.
-   An unsupported feature is a reason to explain the limitation and, only if
-   needed, request an upgrade—not to weaken a safety check.
+4. Work with the **installed version**, not this skill's source revision. Run the
+   capability gate below for setup changes and before relying on an unfamiliar
+   operation. A verified `agent-session` invocation with no arguments prints usage
+   (normally exit 64); do not invent an `as --version` interface. Supported commands
+   may be used as-is; missing required features must be reported, not silently
+   accepted or worked around by weakening a safety check.
 
 If the project is not configured, offer adoption only when explicitly requested.
 If a required launcher/binding cannot be verified, stop and explain the blocker.
+
+## Setup capability gate
+
+For installation, migration, and upgrades, identify the user's requested
+operations and flags before deciding whether the installed tool is sufficient.
+Launcher presence or skill discovery alone cannot complete setup.
+
+Before declaring setup complete, verify skill discovery, the resolved launcher,
+and support in both CLI usage and shell completions for the requested operations.
+Report capability gaps explicitly. A newer skill does not upgrade a pinned CLI.
+
+Compare the actual CLI's usage and completion candidates with each requested
+operation. Verify completion registration for the project's chosen shell and
+both command names, not just that a completion file exists. Follow the read-only
+[capability acceptance procedure](references/adoption.md#capability-acceptance)
+for probes and evidence to record; never invoke retirement to test installation.
+
+Report unsupported or unverified capabilities alongside the installed source
+revision and resolved executable path. Trace the provider's input/lock revision
+or local source checkout; distinguish the project pin from an installed build
+whose provenance cannot be verified. Do not substitute the skill package version
+or a newer checkout's HEAD for installed source revision evidence.
+
+A stale host launcher or loaded completion script may only need the existing
+project environment reloaded. Recheck there first. If a required feature remains
+missing, propose the smallest targeted pin update to a reviewed revision that
+provides it and obtain explicit approval before changing configuration/locks.
+Preserve unrelated pins, rerun the capability gate after an approved change, and
+leave setup incomplete while required usage/completion support is missing or
+unverified. This is capability-based acceptance, not an automatic chase for latest.
 
 ## Select one workspace, then work there
 

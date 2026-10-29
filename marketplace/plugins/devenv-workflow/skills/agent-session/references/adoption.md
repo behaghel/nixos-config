@@ -64,8 +64,9 @@ or `nix-instantiate --parse devenv.nix` from the selected checkout. Then evaluat
 with `devenv -q shell -- true` under its normal trust/secret policy. Review lockfile
 changes and preserve existing input pins. Do not activate system configuration,
 run `sudo`, launch an agent or create/retire a real workspace just to test setup.
-A read-only launcher/doctor check can establish availability; report any creation
-prerequisites still pending until the setup change is reviewed and integrated.
+A read-only launcher/doctor check establishes availability, not capability
+acceptance. Complete the gate below and report any creation prerequisites still
+pending until the setup change is reviewed and integrated.
 
 ## Offer native Pi resource selection, not devenv-generated settings
 
@@ -96,6 +97,80 @@ rather than adding a second declaration. Offer native resource filtering when
 only the skill is desired. Local sources follow their checkout; a devenv input
 pin does not pin a personal Pi package. Use `/reload` in the existing Pi session
 or let the human start a new one, then verify discovery of `agent-session`.
+
+## Capability acceptance
+
+This gate is mandatory for installation, migration, and upgrades. List the user's
+requested operations and required flags first; do not assume every discovered
+launcher supports them, or that every project needs the newest tool release.
+
+Before declaring setup complete, verify skill discovery, the resolved launcher,
+and support in both CLI usage and shell completions for the requested operations.
+Report capability gaps explicitly. A newer skill does not upgrade a pinned CLI.
+
+1. Verify native skill discovery, any bundled pointer, and the resolved launcher
+   in the selected project's environment, not just the host PATH. If a host command
+   or loaded completion is stale, reload the existing approved environment and
+   repeat the checks before proposing a pin change.
+2. Record the installed source revision alongside the executable path. Trace the
+   provider import to its locked input revision; for local imports record the
+   source checkout revision and dirty state. A project pin or checkout HEAD alone
+   does not prove that a cached launcher was built from it. If the installed build
+   cannot be correlated confidently, report its revision as unverified, with the
+   expected project pin/source revision separately. Never report the skill's
+   version as the tool's version, or an unknown revision as "latest".
+3. Read usage from that verified executable. A no-argument call normally prints
+   usage and exits 64; capture that expected status rather than skipping the rest
+   of acceptance. Compare complete command/flag combinations with requested work.
+4. Check completion candidates from the same executable and verify registration
+   for both `as` and `agent-session` in the chosen shell (Bash, Zsh or Fish). A
+   generated file on disk or a successful skill reload is not completion proof.
+   In Bash, `complete -p as agent-session` inspects registration; test freshly
+   loaded project-supplied completion in a subshell if the current shell is stale.
+   Use equivalent registration/candidate checks for the project's other shells.
+
+On versions advertising the completion query interface, these are read-only:
+
+```sh
+agent-session __complete commands
+agent-session __complete targets
+agent-session __complete options:create
+agent-session __complete options:finish
+agent-session __complete options:global-status
+agent-session __complete options:global-batch
+agent-session completion bash
+```
+
+Select the generated completion shell to match the project. Compare usage and
+candidates for the actual operations, for example:
+
+| Requested operation | Required usage/completion evidence |
+|---|---|
+| Prepare and run work | Session commands `create`/`run`; creation `--json` when requested. |
+| Exact path inspection | Global `status` with `--worktree` in usage and `options:global-status`. |
+| Guarded branch-preserving finish | `finish` with `--keep-branch`, `--dry-run` and `--expected` in usage and session completion options. |
+| Inactive batch retirement | Global `batch finish` plus requested window/exclusion/receipt/apply flags, including `--inactive-for`, `--expected` and `--yes`, in usage and `options:global-batch`. |
+
+An old version without these query scopes needs inspection of its own advertised
+completion interface/resources; absent evidence is unverified support, not a
+reason to invent commands. Report each requested capability as supported,
+unsupported or unverified, with separate usage and completion evidence and the
+installed source revision. A mismatch is a setup gap even if the command happens
+to be available in one of the two surfaces.
+
+If a required feature is missing, propose the **smallest targeted pin update** to
+a reviewed provider revision supplying it. Show the current and proposed source
+revisions, affected input/lock entries and the capability it adds. Obtain explicit
+approval before changing the pin; never silently upgrade or refresh unrelated
+inputs. If approval is declined, report the gap and incomplete requested setup.
+After approval, evaluate the updated project environment and repeat launcher,
+source-revision, usage and shell-completion acceptance checks.
+
+Do not invoke retirement (`finish` or `batch finish`), even with `--dry-run`, to
+test installation or migration. Do not create/repair/prune workspaces, launch an
+agent or activate configuration for capability acceptance. These checks establish
+advertised support, not behavioral proof of a destructive operation; a real
+retirement still needs its own request, preview and approval.
 
 ## Leave a policy pointer, not another manual
 

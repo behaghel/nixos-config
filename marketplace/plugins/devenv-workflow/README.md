@@ -50,6 +50,9 @@ policy in `AGENTS.md`; do not copy the operating manual into every project.
 Installation, upgrades, repairs and retirement require explicit approval.
 Loading the skill neither changes CLI behavior nor authorizes cleanup at handoff.
 The installed CLI version remains authoritative for supported capabilities.
+Installation, migration and upgrades must verify requested operations in both
+usage and shell completions, and report capability gaps with source-revision
+evidence. A discovered launcher alone is not setup acceptance.
 
 ## Workflow
 

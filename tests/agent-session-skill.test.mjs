@@ -52,6 +52,18 @@ assert.match(adoption, /agentSession\.enable = true;/);
 assert.match(adoption, /flake: false/);
 assert.match(adoption, /pi install -l/);
 
+const setupGate = "Before declaring setup complete, verify skill discovery, the resolved launcher, and support in both CLI usage and shell completions for the requested operations. Report capability gaps explicitly. A newer skill does not upgrade a pinned CLI.";
+for (const [name, document] of [["skill", skill], ["adoption", adoption]]) {
+  assert(document.replace(/\s+/g, " ").includes(setupGate), `${name}: mandatory capability completion gate`);
+  assert.match(document, /installation, migration, and upgrades/i, `${name}: gate applies to all setup paths`);
+  assert.match(document, /installed source revision/i, `${name}: report provenance alongside capability gaps`);
+}
+assert.match(adoption, /__complete targets/);
+assert.match(adoption, /__complete options:global-status/);
+assert.match(adoption, /__complete options:global-batch/);
+assert.match(adoption, /smallest targeted pin update/i);
+assert.match(adoption, /Do not invoke retirement/i);
+
 const agents = readFileSync(join(root, "AGENTS.md"), "utf8");
 const policy = agents.match(/## Coding-agent sessions[^\n]*\n([\s\S]*?)(?=\n## )/)?.[1];
 assert(policy, "repository retains a session policy");
@@ -65,4 +77,4 @@ assert(delivery, "repository retains its own delivery policy");
 assert.match(delivery, /signing intact/);
 assert.match(delivery, /Push the task branch/);
 assert.match(delivery, /never merge/i);
-console.log("agent-session skill contracts passed: discovery, permissions, portable references, adoption and repository policy");
+console.log("agent-session skill contracts passed: discovery, permissions, capability acceptance, portable references, adoption and repository policy");
