@@ -1,6 +1,6 @@
 # Domain Tree Conventions
 
-Rules for maintaining the 1:1 mirror between colocated domain specs and code namespaces, informed by Domain-Driven Design.
+Rules for maintaining the 1:1 mirror between colocated domain specs and code namespaces, informed by Domain-Driven Design. These structural rules complement [domain modelling and encapsulation](modeling.md); they do not validate model quality.
 
 ## The colocation principle
 
@@ -34,6 +34,7 @@ Each domain has its own vocabulary. The same word can mean different things in d
 - Code names (types, functions, variables) MUST use the domain's vocabulary
 - Spec text MUST use the domain's vocabulary
 - When two domains need to communicate, the context map defines how terms translate
+- The wiki currently requires unique canonical labels; qualify labels when contexts use the same word differently rather than forcing a universal business meaning
 
 Example: "Credential" means an SD-JWT VC in the issuance domain, but a displayable card in the wallet domain. The ACL between them handles the translation.
 
@@ -49,7 +50,7 @@ The competitive advantage. Invest the most here.
 - **TDD rigor:** Thorough iteration plans, small slices, careful red-green-refactor.
 - **Review:** Specs need human approval before implementation.
 - **Spec-on-touch:** Hard requirement — no code changes without a spec.
-- **Modeling:** Rich domain models with explicit aggregates, value objects, domain events.
+- **Modeling:** Encapsulate domain behaviour, policy and invariants. Use aggregates, value objects and domain events where they express real identity, consistency or lifecycle requirements, not as a mandatory pattern inventory.
 
 ### Supporting domains (`type: supporting`)
 
@@ -59,7 +60,7 @@ Necessary, custom-built, not differentiating.
 - **TDD rigor:** Standard TDD. Larger slices acceptable.
 - **Review:** Self-approval OK for straightforward specs.
 - **Spec-on-touch:** Warning when missing, not blocking.
-- **Modeling:** Simpler models. CRUD-like patterns are fine.
+- **Modeling:** Prefer small, cohesive models. CRUD-like patterns are sufficient when there is no domain behaviour to encapsulate; supporting classification is not a reason to push source selection or business policy into consumers.
 
 ### Generic domains (`type: generic`)
 
@@ -194,7 +195,7 @@ Do NOT create a new domain when:
 ## When to split a domain into subdomains
 
 Split when:
-- The domain has more than 5 spec files
+- Distinct models, language or consistency responsibilities justify separate boundaries; document count alone does not
 - Two parts of the domain can change independently
 - Different people/teams own different parts
 - The code already has natural package boundaries
@@ -205,8 +206,8 @@ Split when:
 The shared kernel is the most constrained domain:
 
 1. **Minimize the surface.** The less you share, the less coupling.
-2. **Prefer value objects.** Immutable, identity-less types are safe to share. Entities with lifecycles are not.
-3. **No business logic.** The kernel is types and contracts, not behavior.
+2. **Prefer value objects where they fit.** Sharing entities or lifecycles requires genuinely shared identity, ownership and consistency semantics; neither sharing them nor banning them is a default modelling rule.
+3. **Share meaning deliberately.** The kernel may contain shared behaviour and invariants as well as types and contracts. Keep that shared model small; do not use DTO-only rules to move its policy into every consumer.
 4. **Explicit consumers.** The context map must list every domain that depends on the kernel.
 5. **Joint approval.** No unilateral changes — all consumers must agree.
 6. **Contract tests.** Every consumer maintains tests that verify the kernel's contracts.
