@@ -1,10 +1,10 @@
 # domain-tree
 
-Domain-driven codebase structure — enforce 1:1 mirroring between colocated domain specs and code namespaces, with DDD-informed subdomain classification, context mapping, and shared kernel management.
+Domain-driven codebase structure and modelling guidance — maintain the mirror between colocated specifications and code namespaces, and help consumers speak domain language without reconstructing provider or storage machinery.
 
 ## Philosophy
 
-The domain tree is a structural contract informed by Domain-Driven Design. It encodes three things:
+The domain tree is a structural contract informed by Domain-Driven Design. Its manifest encodes three things:
 
 1. **Where things live** — the 1:1 namespace mirror between domain specs and code
 2. **How much rigor each domain deserves** — core vs supporting vs generic classification
@@ -14,16 +14,18 @@ The domain tree is a structural contract informed by Domain-Driven Design. It en
 
 Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructure are domains too — anything with behavior worth specifying. A technical domain like security can be `core` if it's central to the product's value.
 
+Domain Navigator also guides [domain modelling and encapsulation](skills/domain-navigator/references/modeling.md): start from a consumer's intention, encapsulate meaning and resolution policy, resolve components on demand, and keep source and surface concerns at their boundaries. A valid tree or green check establishes structural integrity, not a good domain model. Semantic design remains the implementing actor's responsibility; there is no automated architecture score or additional approval stage.
+
 ## DDD concepts used
 
 | Concept | How we use it |
 |---------|--------------|
 | **Structural group** | `kind: group` provides namespace and navigation without pretending to be a bounded context |
 | **Subdomain classification** | `type: core/supporting/generic` on each domain — drives spec rigor and review requirements |
-| **Bounded context** | Each domain IS a bounded context with its own ubiquitous language |
+| **Bounded context** | Domains declare intended semantic boundaries; review the model and its language rather than inferring a coherent context from directory ownership |
 | **Context map** | `context-map:` section declaring cross-domain relationships and integration patterns |
-| **Shared kernel** | `type: shared-kernel` for jointly-owned types — strictest change rules |
-| **Anti-corruption layer** | Declared in context map — enforced by boundary-enforcer agent |
+| **Shared kernel** | `type: shared-kernel` for a small jointly-owned model, including shared behaviour and invariants where appropriate — strictest change rules |
+| **Anti-corruption layer** | Declared in the context map; Domain Navigator reviews translation and leakage at the boundary |
 | **Ubiquitous language** | `language:` field in domains, with optional `<domain code path>/README.md` support — terms that code and specs must use consistently |
 
 Ubiquitous language should be enriched on demand. Add new terms only when the domain needs sharper language, and get explicit developer approval before extending the glossary so the language stays intentional rather than drifting.
@@ -44,12 +46,12 @@ Install any combination. They complement each other but don't depend on each oth
 
 | Component | Type | Description |
 |-----------|------|-------------|
-| Domain Navigator | Skill | Auto-resolves domains, enforces placement, classification-aware spec-on-touch |
+| Domain Navigator | Skill | Resolves ownership, guides encapsulation and lazy domain resolution, classification-aware spec-on-touch |
 | `/domain-tree:init` | Command | Bootstrap tree with classification and context map from existing codebase |
 | `/domain-tree:map` | Command | Coverage dashboard with domain types, wiki terms, and context map visualization |
 | `/domain-tree:check` | Command | Structural, normative-wiki, context-map, and classification validation |
 | `domain_tree_resolve_term` | Tool | Exact canonical-term and alias lookup with domain ownership |
-| `boundary-enforcer` | Agent | Context-map-aware guard for cross-domain changes, ACL bypass, shared kernel |
+| Boundary review | Skill guidance | Reviews semantic coupling, consumer knowledge, declared context contracts and shared meaning |
 
 ## Pi package
 
@@ -118,7 +120,7 @@ context-map:
 
 Supported patterns: `shared-kernel`, `customer-supplier`, `conformist`, `anti-corruption-layer`, `open-host-service`, `published-language`, `partnership`, `separate-ways`.
 
-The boundary-enforcer uses the context map to guide cross-domain changes. Context entries are reserved for semantic contracts, not ordinary imports; the provider owns the canonical contract and consumers follow the declared pattern.
+Domain Navigator uses the context map to guide cross-domain changes. Context entries are reserved for semantic contracts, not ordinary imports; the provider owns the canonical contract and consumers follow the declared pattern. The source repository also retains an `agents/boundary-enforcer.md` review template; the Pi package does not register or ship a separate agent.
 
 ## Quick start
 
@@ -132,9 +134,9 @@ Scans your codebase, proposes domains with classifications, detects semantic cro
 
 ### Day-to-day
 
-- **Before coding:** Domain Navigator resolves which domain you're in, checks classification-appropriate spec requirements, and keeps normal work inside one domain at a time.
-- **During coding:** Boundary enforcer consults the context map for cross-domain changes, guards shared kernel, prevents ACL bypass, and helps break cross-domain work into a sequence of intra-domain tasks.
-- **When work must cross domains:** Favor domain-focused subagents and finish the domain-local tasks first. The last step should be the explicit cross-domain integration and end-to-end testing pass.
+- **Before coding:** Domain Navigator resolves ownership and governing requirements. For design changes, start with the consumer's domain intention and identify which meaning, policy and invariants the model should encapsulate.
+- **During coding:** Keep provider translation, surface concerns and application coordination at their boundaries. Consult the context map for semantic cross-domain contracts and keep shared model changes compatible with their consumers.
+- **When work must cross domains:** Deliver a small end-to-end slice across the necessary boundaries. Do not default to separate domain handoffs or leave integration until the end; keep genuinely unrelated work out of the slice.
 - **For complex multi-domain work:** Start with a plan that the developer can challenge and approve before implementation begins.
 - **Periodic health check:** `/domain-tree:check` validates structure, context map, and classification gaps. `/domain-tree:map` shows coverage weighted by domain importance.
 

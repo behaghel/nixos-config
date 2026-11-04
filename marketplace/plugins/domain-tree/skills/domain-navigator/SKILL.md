@@ -1,18 +1,20 @@
 ---
 name: domain-navigator
 description: |
-  Navigate and enforce domain-driven codebase structure. Use when the user references a domain, asks where code or specs live, wants to understand project structure, asks about domain boundaries, or when you need to locate the right spec or code for a given feature area. Also use when creating new files to ensure they land in the correct domain namespace.
+  Navigate domain ownership and guide domain-driven modelling. Use when designing or reviewing domain behaviour, encapsulation, abstractions, lazy source resolution, or cross-domain boundaries; when the user asks where code or specs live; and when locating or creating files for a feature. Review what knowledge consumers must retain, not only where files belong.
 ---
 
 # Domain Navigator
 
-Provides domain-aware navigation and enforcement for codebases structured around `domains.yaml`.
+Provides domain-aware navigation and modelling guidance for codebases structured around `domains.yaml`. Structural validation is not a verdict on domain design.
 
 Load `references/manifest-schema.md` when working with `domains.yaml`.
 Load `references/conventions.md` when making decisions about file placement or domain boundaries.
+Load `references/modeling.md` when designing or reviewing behaviour, encapsulation, abstractions, lazy resolution or semantic boundaries. Use it before treating an observation view, source wrapper or domain-named module as a sufficient model.
 
 ## When to activate
 
+- User designs or reviews domain behaviour, a model, an abstraction or on-demand source resolution
 - User references a domain or feature area ("the issuance flow", "wallet onboarding")
 - User creates a new file and you need to decide where it belongs
 - User asks "where does X live?" or "what domain owns Y?"
@@ -24,10 +26,21 @@ Load `references/conventions.md` when making decisions about file placement or d
 ### 1. Load the domain tree
 
 1. Read `domains.yaml` at the project root.
-2. If it doesn't exist, tell the user: "No domain tree found. Run `/domain-tree:init` to create one."
+2. If it does not exist, make the structural coverage gap explicit. Modelling review can still proceed; suggest `/domain-tree:init` when the user wants structural ownership, not as a prerequisite for design judgment.
 3. Parse explicit `kind: group` entries as structural namespaces, then build a model of bounded-context domains, subdomains, code paths, and spec paths. Groups are not domains and own no code or specifications.
 
-### 2. Resolve domain from context
+### 2. Understand the model from its use
+
+For design and behaviour changes, apply `references/modeling.md` alongside ownership resolution:
+
+1. Start with a representative consumer's intention in domain language, not a provider response or table shape.
+2. Identify the meaning, policy and invariants the domain should encapsulate. Ordinary consumers should ask a meaningful question rather than choose sources or combine raw fields. A lazy observation view alone is insufficient when selection policy still belongs to its callers.
+3. Place source translation, surface formatting and use-case coordination at their appropriate boundaries. Keep ordinary defaults useful while preserving genuinely different domain questions, uncertainty and authorised access to supporting evidence.
+4. Compare a small before/after use against relevant counterexamples. Explain what knowledge the consumer no longer needs and who owns it now. Recommend the smallest coherent improvement, not a new class hierarchy or whole-repository refactor.
+
+These are judgment prompts, not an extra approval gate, classifier or required architecture score. A green tree check establishes structural integrity only. Modelling guidance remains useful without a manifest; do not require tree adoption before reviewing a model.
+
+### 3. Resolve domain from context
 
 When the user describes work or you're about to modify code:
 
@@ -39,7 +52,7 @@ When the user describes work or you're about to modify code:
 If a file doesn't match any domain:
 - Flag it: "This file isn't covered by any domain in `domains.yaml`. Should we add it to an existing domain or create a new one?"
 
-### 3. Enforce placement on new files
+### 4. Enforce placement on new files
 
 When creating new files:
 
@@ -48,7 +61,7 @@ When creating new files:
 3. If it isn't, suggest the correct location: "This looks like it belongs in **[domain]**. The convention is `[correct path]`."
 4. If a new subdomain is needed, propose updating `domains.yaml` first.
 
-### 4. Spec-on-touch (classification-aware)
+### 5. Spec-on-touch (classification-aware)
 
 Default to a domain specification containing durable, present-tense domain truth. Define each concept, invariant, or contract once at its narrowest owner and link to it elsewhere. Use standard relative Markdown links and resolve canonical terms or aliases with `domain_tree_resolve_term`; link meaningful first occurrences to the one repository-wide owner. Use a declared system spec only for a stable RFC 2119 requirement that cannot belong to one domain. Keep temporary scope, acceptance criteria, sequencing, rollout, migration, progress, and verification plans in non-normative iteration artifacts outside both corpora.
 
@@ -66,7 +79,7 @@ When editing production code:
    - `approved` — proceed normally.
    - `stale` — "This spec may be outdated. Review it before implementation."
 
-### 5. Cross-domain awareness (context-map-driven)
+### 6. Cross-domain awareness (context-map-driven)
 
 When work spans multiple domains:
 
@@ -83,7 +96,7 @@ When work spans multiple domains:
    - Flag it: "This crosses **[domain A]** and **[domain B]** but no relationship is declared in the context map. Add one before proceeding."
 5. Note which specs need updating in each affected domain.
 
-### 6. Shared kernel awareness
+### 7. Shared kernel awareness
 
 When editing code in a `shared-kernel` domain:
 
@@ -94,6 +107,8 @@ When editing code in a `shared-kernel` domain:
 
 ## Guardrails
 
+- Do NOT mistake correct placement, matching type names or green structural checks for good encapsulation.
+- Do NOT use DDD to mandate classes, patterns, a fluent DSL or another workflow stage. Keep boundaries and the consumer's domain meaning clear.
 - Do NOT create files outside the domain tree without flagging it.
 - Do NOT let domain boundaries drift silently — every new code path should map to a domain.
 - Allow parent/child overlap under subsidiarity; reject unrelated domains claiming the same path.
