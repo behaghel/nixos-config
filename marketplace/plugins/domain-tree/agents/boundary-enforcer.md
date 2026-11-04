@@ -54,7 +54,7 @@ You are observant and pragmatic. You make boundary crossings and abstraction lea
 - Consumers reconstruct business policy from provider fields, persistence records or repeated fallback chains
 - A domain-named facade or observation view moves data but leaves the meaningful selection decision to every caller
 - Surface syntax or provider-specific meanings spread into otherwise source-independent domain behaviour
-- Eager context assembly loads unrelated components, or lazy resolution hides uncertainty, authority or supporting evidence
+- Acquisition violates the use case's consistency or resource requirements, or hides uncertainty, authority or supporting evidence; neither eager nor lazy resolution is preferred
 
 **How to respond:**
 1. Read a representative consumer's intention and the governing requirements, not only directory mappings.

@@ -1,7 +1,7 @@
 ---
 name: domain-navigator
 description: |
-  Navigate domain ownership and guide domain-driven modelling. Use when designing or reviewing domain behaviour, encapsulation, abstractions, lazy source resolution, or cross-domain boundaries; when the user asks where code or specs live; and when locating or creating files for a feature. Review what knowledge consumers must retain, not only where files belong.
+  Navigate domain ownership and guide domain-driven modelling. Use when designing or reviewing domain behaviour, encapsulation, abstractions, source resolution, or cross-domain boundaries; when the user asks where code or specs live; and when locating or creating files for a feature. Review what knowledge consumers must retain, not only where files belong.
 ---
 
 # Domain Navigator
@@ -10,11 +10,11 @@ Provides domain-aware navigation and modelling guidance for codebases structured
 
 Load `references/manifest-schema.md` when working with `domains.yaml`.
 Load `references/conventions.md` when making decisions about file placement or domain boundaries.
-Load `references/modeling.md` when designing or reviewing behaviour, encapsulation, abstractions, lazy resolution or semantic boundaries. Use it before treating an observation view, source wrapper or domain-named module as a sufficient model.
+Load `references/modeling.md` when designing or reviewing behaviour, encapsulation, abstractions, source resolution or semantic boundaries. Use it before treating an observation view, source wrapper or domain-named module as a sufficient model.
 
 ## When to activate
 
-- User designs or reviews domain behaviour, a model, an abstraction or on-demand source resolution
+- User designs or reviews domain behaviour, a model, an abstraction or source resolution
 - User references a domain or feature area ("the issuance flow", "wallet onboarding")
 - User creates a new file and you need to decide where it belongs
 - User asks "where does X live?" or "what domain owns Y?"
@@ -34,7 +34,7 @@ Load `references/modeling.md` when designing or reviewing behaviour, encapsulati
 For design and behaviour changes, apply `references/modeling.md` alongside ownership resolution:
 
 1. Start with a representative consumer's intention in domain language, not a provider response or table shape.
-2. Identify the meaning, policy and invariants the domain should encapsulate. Ordinary consumers should ask a meaningful question rather than choose sources or combine raw fields. A lazy observation view alone is insufficient when selection policy still belongs to its callers.
+2. Identify the meaning, policy and invariants the domain should encapsulate. Ordinary consumers should ask a meaningful question rather than choose sources or combine raw fields. An observation view alone is insufficient when selection policy still belongs to its callers.
 3. Place source translation, surface formatting and use-case coordination at their appropriate boundaries. Keep ordinary defaults useful while preserving genuinely different domain questions, uncertainty and authorised access to supporting evidence.
 4. Compare a small before/after use against relevant counterexamples. Explain what knowledge the consumer no longer needs and who owns it now. Recommend the smallest coherent improvement, not a new class hierarchy or whole-repository refactor.
 

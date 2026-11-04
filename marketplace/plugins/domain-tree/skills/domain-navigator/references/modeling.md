@@ -30,7 +30,7 @@ Transport DTOs, query projections and read-only observation views are legitimate
 
 ## Encapsulate the ordinary question
 
-For example, a consumer needing the best available timezone for a person should ask that meaningful domain question, rather than choosing among Slack profile fields, directory locations and working-timezone records itself. A schematic call such as `await person.timezone()` illustrates the intent; the semantic owner might be a Person, a domain service or a context-specific query model. This is not a prescribed API, class hierarchy or universal Person spanning all bounded contexts.
+For example, a consumer needing the best available timezone for a person should ask that meaningful domain question, rather than choosing among Slack profile fields, directory locations and working-timezone records itself. An expression such as `person.timezone` illustrates the intent; the semantic owner might be a Person, a domain service or a context-specific query model. This is not a prescribed API, class hierarchy or universal Person spanning all bounded contexts.
 
 The model owns what its ordinary answer means and how relevant available observations support it. An observation aggregator that leaves every caller to select the answer has not encapsulated that policy. Nor has a resolved view whose policy is still independently reconstructed by each surface.
 
@@ -38,15 +38,15 @@ There need not be one universally correct answer for every purpose. A person's c
 
 Distinguish real requirements from inherited implementation choices. A currently exposed `workingTimeZone` field, a source-only fallback rule or a passing test does not by itself establish the intended business meaning. Check the governing requirements and their rationale; resolve material contradictions before changing an important guarantee. Do not silently turn a display setting into a working-location fact, or an inference into a confirmed observation.
 
-## Resolve lazily without hiding the contract
+## Keep acquisition separate from domain meaning
 
-On-demand resolution is a project design preference, not a requirement of DDD or the definition of a rich domain model. A domain-facing view can resolve components when the use case needs them: requesting identity need not fetch timezone, employment, calendar and messaging profiles. The caller asks for domain meaning, not a sequence of source reads.
+Eager and lazy resolution are implementation choices, not measures of domain-model quality. Choose according to the use case's correctness, consistency, performance and resource requirements; this guide prefers neither. The caller asks for domain meaning, not a sequence of source reads.
 
-Do not infer that entities should perform arbitrary I/O, that every property needs lazy loading, or that a navigable object graph should become one aggregate. Keep acquisition and persistence mechanics outside domain rules. Application or infrastructure collaborators can obtain the needed observations through ports and repositories where appropriate, then supply them to domain behaviour or policy. A lazy facade may expose that answer without making the underlying entity own clients or storage. Lazy proxies are another implementation option, not a universal recommendation.
+Keep acquisition and persistence mechanics outside domain rules. Application or infrastructure collaborators can obtain the needed observations through ports and repositories where appropriate, then supply them to domain behaviour or policy. A facade can expose that answer without making the underlying entity own clients or storage. Neither an access strategy nor a navigable object graph defines an aggregate boundary.
 
-Make acquisition and command effects distinguishable from calculations over supplied domain values. Immutable value operations should be side-effect-free; a seemingly simple read must not hide a business mutation. Keep simple models simple: eagerly supplying a small, already-available value may be clearer than adding a resolver.
+Make acquisition and command effects distinguishable from calculations over supplied domain values. Immutable value operations should be side-effect-free; a seemingly simple read must not hide a business mutation. Keep simple models simple rather than adding a resolver by default.
 
-Lazy resolution still has a contract:
+Whichever access strategy is chosen:
 
 - Respect existing read authority and resource bounds; property access is not permission for command effects or contact with another person.
 - Define freshness and consistency where they affect correctness. Reuse observations within an appropriate request or snapshot when needed, rather than accidentally mixing incompatible moments. Do not introduce a global cache by default.
@@ -74,7 +74,7 @@ Compare the consuming code before and after. Ask:
 - What knowledge or decision has disappeared from the caller, and who now owns it?
 - Can a source be replaced or added without teaching ordinary consumers its representation or repeating the policy?
 - Does the code express the domain's intention, not just shorten a provider lookup?
-- Are source reads deferred until useful while uncertainty and authorised inspection remain available?
+- Does acquisition satisfy the use case's consistency and resource requirements while uncertainty and authorised inspection remain available?
 - Is this smaller than the alternatives, or did we merely add objects, layers and indirection?
 
 Recommend the smallest end-to-end improvement supported by those cases. Explain material trade-offs and distinguish observed code facts from proposed design. Use functions, value objects, entities, aggregates or domain events where they clarify actual behaviour and invariants—not to satisfy a prescribed pattern count. Keep delivery plans and acceptance results in the conversation or PR, not normative domain specifications.
@@ -86,4 +86,4 @@ Recommend the smallest end-to-end improvement supported by those cases. Explain 
 - Vaughn Vernon, [Effective Aggregate Design, Part II (2011)](https://www.dddcommunity.org/wp-content/uploads/files/pdf_articles/Vernon_2011_2.pdf), especially Model Navigation: object navigation does not define aggregate boundaries; resolving dependencies before aggregate behaviour is an alternative to repository lookups inside it. His rules of thumb include justified exceptions, not blanket distribution mandates.
 - Martin Fowler, [CQRS](https://martinfowler.com/bliki/CQRS.html): query and update models can differ where useful, but that separation adds costs and is not a default architecture for every context.
 
-This guide applies those foundations to agent-assisted development. On-demand views and preserving actor-owned open-ended judgment are explicit design choices, not additional definitions of DDD. The timezone example illustrates a modelling question; it does not establish a universal source ranking or require every system to implement Person accessors.
+This guide applies those foundations to agent-assisted development. Preserving actor-owned open-ended judgment is a project choice, not an additional definition of DDD. No preference for eager or lazy resolution is implied. The timezone example illustrates a modelling question; it does not establish a universal source ranking or require every system to implement Person accessors.

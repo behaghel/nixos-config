@@ -14,7 +14,7 @@ The domain tree is a structural contract informed by Domain-Driven Design. Its m
 
 Domains aren't limited to business logic. Security, UX, CI/CD, and infrastructure are domains too — anything with behavior worth specifying. A technical domain like security can be `core` if it's central to the product's value.
 
-Domain Navigator also guides [domain modelling and encapsulation](skills/domain-navigator/references/modeling.md): start from a consumer's intention, encapsulate meaning and resolution policy, resolve components on demand, and keep source and surface concerns at their boundaries. A valid tree or green check establishes structural integrity, not a good domain model. Semantic design remains the implementing actor's responsibility; there is no automated architecture score or additional approval stage.
+Domain Navigator also guides [domain modelling and encapsulation](skills/domain-navigator/references/modeling.md): start from a consumer's intention, encapsulate meaning and resolution policy, and keep source and surface concerns at their boundaries. Eager and lazy resolution are implementation choices; neither is preferred. A valid tree or green check establishes structural integrity, not a good domain model. Semantic design remains the implementing actor's responsibility; there is no automated architecture score or additional approval stage.
 
 ## DDD concepts used
 
@@ -46,7 +46,7 @@ Install any combination. They complement each other but don't depend on each oth
 
 | Component | Type | Description |
 |-----------|------|-------------|
-| Domain Navigator | Skill | Resolves ownership, guides encapsulation and lazy domain resolution, classification-aware spec-on-touch |
+| Domain Navigator | Skill | Resolves ownership, guides encapsulation and domain resolution, classification-aware spec-on-touch |
 | `/domain-tree:init` | Command | Bootstrap tree with classification and context map from existing codebase |
 | `/domain-tree:map` | Command | Coverage dashboard with domain types, wiki terms, and context map visualization |
 | `/domain-tree:check` | Command | Structural, normative-wiki, context-map, and classification validation |
