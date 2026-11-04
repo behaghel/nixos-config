@@ -104,6 +104,34 @@ glue only. In particular:
 Run `nix flake check` to validate Pi manifests/resources, extension syntax,
 behavioral tests and template ownership boundaries.
 
+## Publish to npm
+
+From the checkout containing the intended, committed package/version changes:
+
+```sh
+cd ~/nixos-config
+devenv -q shell -- pi:domain-tree:publish
+```
+
+The `pi:<plugin-directory>:publish` command is available for each non-private Pi
+package in `marketplace/plugins/`, including `devenv-workflow`, `spec-driven`,
+`spec-tdd` and `ux-stories`. The selected package must be tracked and clean;
+unrelated work elsewhere does not block publication.
+
+The interactive command installs locked dependencies with `npm ci
+--ignore-scripts`, runs the declared test script (explicitly skips absent locks
+or tests), and creates a real tarball with `npm pack`. Normal package packing
+lifecycle hooks apply. Review the listed files, integrity, revision, registry,
+public access and target tag (default `latest`). It checks your npm account and
+offers `npm login` if needed. Type the exact `package@version` to publish that
+reviewed tarball; anything else cancels. npm handles browser login and 2FA.
+
+Success requires the registry's exact version and tarball integrity to match.
+If publication fails, is interrupted or cannot be verified, inspect that exact
+version before retrying: the registry may already have accepted it. The command
+never bumps versions, merges, activates configuration or updates installed Pi
+packages. Existing npm versions remain immutable.
+
 ## Existing consumers
 
 The previous Nix exporter API and generated-client integrations are removed.

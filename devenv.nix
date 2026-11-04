@@ -38,6 +38,7 @@ in
   imports = [
     ./modules/flake/agent-session/devenv.nix
     ./modules/openwrt/devenv.nix
+    ./modules/flake/pi-publish/devenv.nix
   ];
   agentSession = {
     enable = true;
