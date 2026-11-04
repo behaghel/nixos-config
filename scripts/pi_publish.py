@@ -10,6 +10,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -86,6 +87,77 @@ def registry_for(manifest, package):
 def integrity_of(path):
     digest = hashlib.sha512(path.read_bytes()).digest()
     return "sha512-" + base64.b64encode(digest).decode()
+
+
+def registry_diagnostics(result):
+    if result is None:
+        return
+    for text in (result.stdout, result.stderr):
+        if text:
+            if isinstance(text, bytes):
+                text = text.decode("utf-8", errors="backslashreplace")
+            print(text, file=sys.stderr, end="" if text.endswith("\n") else "\n")
+
+
+def verify_registry(spec, version, integrity, registry, package,
+                    wait_seconds=180, poll_seconds=5):
+    deadline = time.monotonic() + wait_seconds
+    result = None
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        try:
+            result = subprocess.run(
+                ["npm", "view", spec, "--json", "--registry", registry],
+                cwd=package, text=True, stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE, timeout=min(30, remaining),
+            )
+        except subprocess.TimeoutExpired as error:
+            registry_diagnostics(error)
+            raise PublishError(
+                "Publication reported success, but registry verification "
+                "timed out. Do not republish; inspect the exact version later."
+            ) from error
+        try:
+            registered = json.loads(result.stdout)
+        except ValueError as error:
+            registry_diagnostics(result)
+            raise PublishError(
+                "Publication reported success, but registry verification "
+                "returned invalid JSON. Do not republish."
+            ) from error
+        if (result.returncode and isinstance(registered, dict)
+                and isinstance(registered.get("error"), dict)
+                and registered["error"].get("code") == "E404"):
+            remaining = deadline - time.monotonic()
+            if remaining > 0:
+                print("Waiting for registry visibility "
+                      f"({remaining:.0f}s remaining)...", flush=True)
+                time.sleep(min(poll_seconds, remaining))
+                continue
+            break
+        if result.returncode:
+            registry_diagnostics(result)
+            raise PublishError(
+                "Publication reported success, but registry verification "
+                "is incomplete. Do not republish; inspect the exact version.")
+        if (not isinstance(registered, dict)
+                or registered.get("version") != version
+                or not isinstance(registered.get("dist"), dict)
+                or registered["dist"].get("integrity") != integrity):
+            registry_diagnostics(result)
+            raise PublishError(
+                "Registry verification does not match the reviewed tarball. "
+                "Do not republish; inspect the exact version.")
+        if result.stderr:
+            print(result.stderr, file=sys.stderr, end="")
+        return
+    registry_diagnostics(result)
+    raise PublishError(
+        "Publication reported success, but the version is not visible "
+        f"after {wait_seconds}s of registry verification. "
+        "Do not republish; inspect the exact version later.")
 
 
 def publish(extension, root=ROOT):
@@ -171,20 +243,7 @@ def publish(extension, root=ROOT):
                 "it; inspect the exact version before retrying.")
         print("npm reported publication success; checking the registry.",
               flush=True)
-        try:
-            registered = json_output([
-                "npm", "view", spec, "--json", "--registry", registry,
-            ], package)
-        except (subprocess.CalledProcessError, ValueError) as error:
-            raise PublishError(
-                "Publication reported success, but registry verification "
-                "is incomplete. Do not republish; inspect the exact version."
-            ) from error
-        if (registered.get("version") != version
-                or registered.get("dist", {}).get("integrity") != integrity):
-            raise PublishError(
-                "Registry verification does not match the reviewed tarball. "
-                "Do not republish; inspect the exact version.")
+        verify_registry(spec, version, integrity, registry, package)
         print(f"Verified {spec} on {registry} against the reviewed tarball.")
     return 0
 
