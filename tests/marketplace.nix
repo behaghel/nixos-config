@@ -121,6 +121,14 @@ let
     echo ok > "$out"
   '';
 
+  piPublishCheck = pkgs.runCommand "pi-publish-tests"
+    { nativeBuildInputs = [ pkgs.python3 pkgs.git pkgs.ruff ]; } ''
+    ruff check --isolated --no-cache ${../scripts/pi_publish.py} ${./test-pi-publish.py}
+    export PI_PUBLISH_TEST_SCRIPT=${../scripts/pi_publish.py}
+    python3 ${./test-pi-publish.py}
+    echo ok > "$out"
+  '';
+
   domainTreeBehaviorCheck = pkgs.buildNpmPackage {
     pname = "domain-tree-behavior-check";
     version = "0.4.0";
@@ -163,6 +171,7 @@ pkgs.runCommand "marketplace-tests" { } ''
   RESULTS
   test -f ${piSyntaxCheck}
   test -f ${domainTreeBehaviorCheck}
+  test -f ${piPublishCheck}
   echo "All Pi marketplace checks passed."
   echo ok > "$out"
 ''
