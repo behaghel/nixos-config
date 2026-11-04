@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Exercise the interactive publisher with Git and an isolated npm transport."""
 
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
 import pty
+import runpy
 import select
 import shutil
 import subprocess
@@ -12,6 +15,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 SCRIPT = Path(os.environ.get(
     "PI_PUBLISH_TEST_SCRIPT",
@@ -57,6 +61,11 @@ elif args[0] == 'publish':
         sys.exit(57)
     (root / 'published').touch()
 elif args[0] == 'view':
+    if mode == 'delayed-visibility' and not (root / 'viewed').exists():
+        (root / 'viewed').touch()
+        print('original pending-registry E404', file=sys.stderr)
+        print(json.dumps(dict(error=dict(code='E404'))))
+        sys.exit(1)
     if mode == 'malformed-registry':
         print('original malformed registry output')
         sys.exit(0)
@@ -134,7 +143,7 @@ class PublisherTests(unittest.TestCase):
         os.close(slave)
         output = ""
         pending = list(answers)
-        deadline = time.monotonic() + 15
+        deadline = time.monotonic() + 30
         try:
             while time.monotonic() < deadline:
                 if select.select([master], [], [], 0.1)[0]:
@@ -176,6 +185,55 @@ class PublisherTests(unittest.TestCase):
         self.assertTrue(published[1].endswith(".tgz"))
         self.assertLess([c[0] for c in commands].index("test"),
                         [c[0] for c in commands].index("publish"))
+
+    def test_waits_for_registry_visibility_without_republishing(self):
+        code, output = self.interact([
+            ("Type @fixture/domain-tree@1.2.3", "@fixture/domain-tree@1.2.3"),
+        ], "delayed-visibility")
+        self.assertEqual(code, 0, output)
+        self.assertIn("Waiting for registry visibility", output)
+        self.assertIn("Verified", output)
+        self.assertNotIn("npm error", output)
+        self.assertEqual([c[0] for c in self.calls()].count("publish"), 1)
+        self.assertEqual([c[0] for c in self.calls()].count("view"), 2)
+
+    def test_registry_wait_expires_with_original_diagnostics(self):
+        scope = runpy.run_path(str(SCRIPT))
+        result = subprocess.CompletedProcess(
+            ["npm", "view"], 1, '{"error":{"code":"E404"}}',
+            "original registry E404 diagnostic",
+        )
+        stream = io.StringIO()
+        with mock.patch.object(scope["subprocess"], "run", return_value=result) \
+                as request, mock.patch.object(
+                    scope["time"], "monotonic", side_effect=[0, 0, 1]
+                ), contextlib.redirect_stderr(stream):
+            with self.assertRaisesRegex(scope["PublishError"], "not visible"):
+                scope["verify_registry"](
+                    "@fixture/domain-tree@1.2.3", "1.2.3", "sha512-fixture",
+                    "https://registry.npmjs.org/", self.package,
+                    wait_seconds=1,
+                )
+        request.assert_called_once()
+        self.assertIn("original registry E404 diagnostic", stream.getvalue())
+        self.assertIn('"code":"E404"', stream.getvalue())
+
+    def test_registry_request_timeout_preserves_publication_success(self):
+        scope = runpy.run_path(str(SCRIPT))
+        error = subprocess.TimeoutExpired(
+            ["npm", "view"], 1, output="original timed-out registry output",
+            stderr="original timed-out registry diagnostic",
+        )
+        stream = io.StringIO()
+        with mock.patch.object(scope["subprocess"], "run", side_effect=error), \
+                contextlib.redirect_stderr(stream):
+            with self.assertRaisesRegex(scope["PublishError"], "verification"):
+                scope["verify_registry"](
+                    "@fixture/domain-tree@1.2.3", "1.2.3", "sha512-fixture",
+                    "https://registry.npmjs.org/", self.package,
+                )
+        self.assertIn("original timed-out registry output", stream.getvalue())
+        self.assertIn("original timed-out registry diagnostic", stream.getvalue())
 
     def test_cancellation_never_publishes(self):
         code, output = self.interact([("Type @fixture/domain-tree@1.2.3", "no")])

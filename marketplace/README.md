@@ -127,6 +127,11 @@ offers `npm login` if needed. Type the exact `package@version` to publish that
 reviewed tarball; anything else cancels. npm handles browser login and 2FA.
 
 Success requires the registry's exact version and tarball integrity to match.
+After npm accepts publication, an unavailable version (`E404`) is polled every
+five seconds for up to three minutes while npm finishes processing. Only the
+read is retried, never publication. Other errors or an integrity mismatch stop
+verification immediately; individual registry reads have a 30-second timeout,
+bounded by the remaining verification window.
 If publication fails, is interrupted or cannot be verified, inspect that exact
 version before retrying: the registry may already have accepted it. The command
 never bumps versions, merges, activates configuration or updates installed Pi
