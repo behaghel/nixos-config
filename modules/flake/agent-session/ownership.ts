@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { git, assertPrimaryCheckout } from "./git.ts";
 import { rootKey } from "./batch.ts";
-import { inspectExactResource, snapshotExactResources } from "./inspection.ts";
+import { inspectExactResource, snapshotExactResources, sharedBranchClaims } from "./inspection.ts";
 import { branchCreationMessage, metadataPath, withOperationLock, writeMetadata } from "./sessions.ts";
 import { CliError, writeCommandResult } from "./runtime.ts";
 import type { BranchOwnership, OwnershipOptions } from "./types.ts";
@@ -33,6 +33,8 @@ function inspectMapping(root: string, options: OwnershipOptions, seed?: MappingP
 	if (!metadata) throw new CliError(`No managed session: ${options.slug}`);
 	if (metadata.version === 3) throw new CliError("Session is already mapped; ownership mapping is not a transfer command.");
 	if (metadata.activeOperations?.length) throw new CliError("Managed activity is recorded; stop or review it before mapping ownership.");
+	const shared = sharedBranchClaims([...context.recordsBySlug.values()]).filter((branch) => branch.claims.some((claim) => claim.slug === metadata.slug));
+	if (shared.length) throw new CliError(`Shared branch claims: ${shared.map((branch) => `${branch.name} (${branch.claims.map((claim) => claim.slug).join(", ")})`).join("; ")}; no ownership mapping performed.`);
 	const exact = inspectExactResource(root, metadata.worktreePath, context);
 	if (exact.resourceState !== "present") throw new CliError(exact.problem ?? "Legacy checkout identity is unresolved; no mapping performed.");
 	const status = exact.sessions[0]!;

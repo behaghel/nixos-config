@@ -85,6 +85,22 @@ export function statusCannotOperate(status: SessionStatus): boolean {
 	);
 }
 
+// Declared claims are not proof of ownership. Conflicting claims require
+// review even when one claimant's creation evidence is missing or stale.
+export function sharedBranchClaims(records: SessionMetadata[]) {
+	const byBranch = new Map<string, { slug: string; sessionId: string | null; worktreePath: string }[]>();
+	for (const record of records) {
+		const names = record.branches ? record.branches.map((branch) => branch.name)
+			: record.initialBranchOwned === false ? [] : [record.branch];
+		for (const name of new Set(names)) {
+			byBranch.set(name, [...(byBranch.get(name) ?? []), { slug: record.slug,
+				sessionId: record.sessionId ?? null, worktreePath: record.worktreePath }]);
+		}
+	}
+	return [...byBranch].filter(([, claims]) => claims.length > 1)
+		.map(([name, claims]) => ({ name, claims })).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export function sessionBranchSets(metadata: SessionMetadata, cwd = metadata.worktreePath): { owned: string[]; allowed: string[]; unresolved: string[] } {
 	const local = localBranches(cwd);
 	const owned = new Set<string>();

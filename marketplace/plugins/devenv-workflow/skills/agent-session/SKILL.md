@@ -185,6 +185,10 @@ Preview from another worktree, inspect the exact paths, actual branches,
 cleanliness/refusal reasons and branch-preservation behavior, then obtain approval
 for applying that selection. Always preserve branches unless a separate explicit
 request authorizes their deletion. Never use force as a fallback.
+Shared branch claims or conflicting worktree bindings require review; preserve
+the resources and every claiming record. Do not delete another record or invent
+a transfer to make cleanup eligible. After an ownership change, obtain a fresh
+preview; an old receipt cannot authorize the changed or replacement session.
 
 Current devenv integration defaults cover the `.devenv` scratch subtree (including
 logs/task databases) and the hook-config symlink only when it matches the exact

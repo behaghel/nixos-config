@@ -25,6 +25,14 @@ const commandOptions: Record<string, string[]> = {
 };
 
 export function completionCandidates(scope: string): string[] {
+	if (scope.endsWith(":zsh") || scope.endsWith(":fish")) {
+		const format = scope.endsWith(":zsh") ? "zsh" : "fish";
+		const plain = scope.slice(0, -(format.length + 1));
+		const description = plain === "options:finish" ? "Recorded descendants of selected session"
+			: plain === "options:global-finish" ? "Repository-wide sessions" : undefined;
+		return completionCandidates(plain).map((candidate) => candidate === "--all" && description
+			? `${candidate}${format === "zsh" ? ":" : "\t"}${description}` : candidate);
+	}
 	if (scope === "commands") return sessionCommandNames;
 	if (scope === "current-commands") {
 		try {
@@ -68,6 +76,9 @@ export function completionCandidates(scope: string): string[] {
 export function completionScript(shell: string): string {
 	if (shell === "bash") {
 		return `# bash completion for agent-session
+# Recorded descendants: as <session> finish --all
+# Repository-wide sessions: as finish --all
+# Bash inserts plain flags; CLI help explains both scopes.
 _agent_session() {
   local current action subject=1 action_index=2 scope candidates candidate
   current="\${COMP_WORDS[COMP_CWORD]}"
@@ -152,6 +163,7 @@ else
   scope="options:$action"
   if [[ $action == ownership && $words[$(( CURRENT - 1 ))] == --parent ]]; then scope=ownership-parents; fi
 fi
+if [[ $scope == options:finish || $scope == options:global-finish ]]; then scope="$scope"':zsh'; fi
 candidates=(\${(f)"$(agent-session __complete "$scope" 2>/dev/null)"})
 _describe 'option' candidates
 `;
@@ -199,8 +211,12 @@ function __agent_session_candidates
       set scope ownership-parents
     end
   end
+  if contains -- "$scope" options:finish options:global-finish
+    set scope "$scope":fish
+  end
   agent-session __complete "$scope" 2>/dev/null
 end
+complete -c agent-session -e
 complete -c agent-session -f -a '(__agent_session_candidates)'
 `;
 	}

@@ -116,6 +116,14 @@ execution receipt is issued. Preview without `--keep-branch` remains available
 for inspection, but recursive branch deletion and `--force` are not supported.
 Single-session and inactive-batch receipts cannot authorize a recursive finish.
 
+Conflicting branch claims appear in `sharedBranches` with every claiming session
+and are excluded from the plan's exclusively owned branches. They withhold an
+execution receipt, even if a claimant has stale or missing creation evidence.
+Apply checks the current catalogue again: a shared claim added after preview
+also refuses removal. Duplicate worktree bindings remain blocked by native/physical
+identity checks. Claims are not proof of ownership, and neither a shared resource
+nor another record is silently deleted to resolve ambiguity.
+
 Apply rechecks the complete selected tree before any native removal and freshly
 rechecks each target before its turn. Changed ownership, descendants, commits,
 configuration, artifact metadata, dirtiness, native locks, uncertain/live managed
@@ -132,7 +140,10 @@ Replaying the same approved receipt may reconcile uniquely unchanged residual
 metadata only after filesystem and native-registration absence are confirmed;
 it does not repeat a confirmed native removal or broaden the selection. Changed
 or ambiguous evidence requires a fresh review, not force or registration pruning.
-A preview does not authorize deletion.
+A preview does not authorize deletion. Ownership changes during a partial run
+report the approved and current parent, leaving the affected resource and later
+ancestors intact. A completed receipt cannot apply to a replacement session
+created under the same slug.
 
 Older records without identity/parentage remain usable through existing commands,
 but their ancestry is reported as unknown and they are excluded from recursive
@@ -162,8 +173,8 @@ identity, metadata, current saved initial branch, HEAD/reflog evidence,
 configuration and declared parent ancestry. Apply rechecks the same declaration
 under the repository operation lock. The reviewed stable ID is retained, including
 an existing recorded ID; known ancestry cannot be changed into a transfer.
-Duplicate IDs, cycles, unresolved parents, conflicting saved branches and recorded
-managed activity refuse mapping. Already mapped v3 sessions cannot be remapped.
+Duplicate IDs, cycles, unresolved parents, shared branch claims, conflicting saved
+branches and recorded managed activity refuse mapping. Already mapped v3 sessions cannot be remapped.
 
 Apply upgrades the one legacy record to schema v3 and records only its saved
 initial branch's existing ownership disposition. An owned initial branch receives
@@ -210,6 +221,15 @@ manual renames and expired or missing creation evidence are not adopted. Such
 resources remain unclaimed or unresolved and are preserved; an unclaimed current
 branch blocks guarded retirement. This applies to individual cleanup as well as
 recursive previews. The branch command rejects reuse of an earlier recorded name.
+
+## Completion scope guidance
+
+`as <session> finish --all` selects recorded descendants of that session;
+`as finish --all` selects repository-wide sessions. Zsh and Fish completion
+menus describe the different `--all` scopes. Bash retains plain flag insertion;
+its generated completion source and CLI help explain the distinction without
+inserting description text into commands. Fish registration replaces stale
+assembler completions for the installed `as` alias.
 
 ## Recorded-binding inventory
 

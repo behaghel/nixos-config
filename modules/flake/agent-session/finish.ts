@@ -32,6 +32,7 @@ import {
 	sessionBranchSets,
 	snapshotExactResources,
 	inspectExactResource,
+	sharedBranchClaims,
 } from "./inspection.ts";
 import {
 	CliError,
@@ -506,21 +507,28 @@ function selectSessionTree(root: string, slug: string) {
 		selected.push(record);
 	};
 	visit(target);
-	return { target, selected, records, skipped };
+	const selectedSlugs = new Set(selected.map((record) => record.slug));
+	const sharedBranches = sharedBranchClaims(records).filter((branch) => branch.claims.some((claim) => selectedSlugs.has(claim.slug)));
+	return { target, selected, records, skipped, sharedBranches };
 }
 
 export function finishSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, expected?: string): number {
 	if (!dryRun) return applySessionTree(root, invocationRoot, slug, expected!, json);
-	const { target, selected, skipped } = selectSessionTree(root, slug);
+	const { target, selected, skipped, sharedBranches } = selectSessionTree(root, slug);
 	const plans: Record<string, unknown>[] = [];
 	const report = progressReporter("finish", json);
 	for (const record of selected) {
 		try {
 			const plan = previewFinish(root, invocationRoot, record.slug, false, keepBranch, report);
-			const { owned: ownedBranches, unresolved: unresolvedBranches } = sessionBranchSets(record);
+			const branchSets = sessionBranchSets(record);
+			const shared = sharedBranches.filter((branch) => branch.claims.some((claim) => claim.slug === record.slug));
+			const sharedNames = new Set(shared.map((branch) => branch.name));
+			const ownedBranches = branchSets.owned.filter((name) => !sharedNames.has(name));
+			const unresolvedBranches = [...new Set([...branchSets.unresolved, ...sharedNames])].sort();
 			const { receipt: _receipt, ...inspection } = plan;
 			plans.push({ ...inspection, sessionId: record.sessionId, parentSessionId: record.parentSessionId,
-				ownedBranches, unresolvedBranches, branchOwnership: record.branches ? "recorded" : "legacy-initial-only" });
+				ownedBranches, unresolvedBranches, branchOwnership: record.branches ? "recorded" : "legacy-initial-only",
+				sharedBranches: shared });
 		} catch (error) {
 			skipped.push(`${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`);
 		}
@@ -528,7 +536,9 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 	const resourceText = plans.map((plan) => {
 		const branches = (plan.ownedBranches as string[]).join(", ") || "none";
 		const unresolvedBranches = plan.unresolvedBranches as string[];
-		return `  ${plan.slug}: ${plan.worktreePath}\n    recorded owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
+		const shared = plan.sharedBranches as typeof sharedBranches;
+		const sharedText = shared.map((branch) => `    shared branch claim (preserve): ${branch.name}; claimants: ${branch.claims.map((claim) => claim.slug).join(", ")}\n`).join("");
+		return `  ${plan.slug}: ${plan.worktreePath}\n    recorded owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${sharedText}${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
 	}).join("");
 	const observedAt = new Date().toISOString();
 	const context = keepBranch ? snapshotExactResources(root) : undefined;
@@ -542,16 +552,24 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 			candidate.blockers.push({ reason: candidate.reason, problem: candidate.problem });
 			delete candidate.snapshot;
 		}
+		const shared = sharedBranches.filter((branch) => branch.claims.some((claim) => claim.slug === record.slug));
+		if (shared.length) {
+			const problem = `Shared branch claims: ${shared.map((branch) => `${branch.name} (${branch.claims.map((claim) => claim.slug).join(", ")})`).join("; ")}; preserved pending review.`;
+			candidate.blockers.push({ reason: "shared-branch-claims", problem });
+			if (candidate.reason === "eligible") candidate.reason = "shared-branch-claims";
+			candidate.problem = [candidate.problem, problem].filter(Boolean).join("; ");
+			delete candidate.snapshot;
+		}
 		return candidate;
 	}) : [];
-	const executable = keepBranch && selected.length > 0 && selected.every((record) => record.version === 3) &&
+	const executable = keepBranch && !sharedBranches.length && selected.length > 0 && selected.every((record) => record.version === 3) &&
 		plans.length === selected.length && candidates.every((candidate) => candidate.snapshot);
 	const token = executable ? encodeTreeReceipt({ version: 1, slug, sessionId: target.sessionId!, rootKey: rootKey(root),
 		observedAt, keepBranch: true, targets: candidates.map((candidate, index) => ({ ...candidate.snapshot!,
 			sessionId: selected[index]!.sessionId!, parentSessionId: selected[index]!.parentSessionId! })) }) : undefined;
 	const resources = candidates.map(({ snapshot, ...candidate }) => ({ ...candidate, ...(snapshot ? { fingerprint: snapshot.fingerprint } : {}) }));
 	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: true,
-		slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources,
+		slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources, sharedBranches,
 		...(token ? { receipt: token } : {}), keepBranch, remoteAssetsModified: false }, json,
 		`Recursive preview only for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}No resources changed.${token ? `\nReceipt: ${token}\nApply: ${sessionCommand(slug, "finish")} --all --keep-branch --expected ${token} --yes` : "\nNo execution receipt: use --keep-branch with a fully resolved, safe tree."}${resources.filter((resource) => resource.reason !== "eligible").map((resource) => `\n  ${resource.slug}: ${resource.problem ?? resource.reason}`).join("")}${skipped.length ? `\nPreserved/unresolved:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}` : ""}\n`);
 	return 0;
@@ -610,11 +628,14 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 			const scope = () => {
 				if (receipt.rootKey !== rootKey(root)) throw new CliError("Tree configuration changed; obtain a fresh preview.");
 				const context = snapshotExactResources(root);
+				const approvedSlugs = new Set(receipt.targets.map((target) => target.slug));
+				const shared = sharedBranchClaims([...context.recordsBySlug.values()]).filter((branch) => branch.claims.some((claim) => approvedSlugs.has(claim.slug)));
+				if (shared.length) throw new CliError(`Shared branch claims changed or remain unresolved: ${shared.map((branch) => `${branch.name} (${branch.claims.map((claim) => claim.slug).join(", ")})`).join("; ")}; resources preserved.`);
 				const states = receipt.targets.map((target) => {
 					const exact = inspectExactResource(root, target.worktreePath, context);
 					if (exact.resourceState === "absent" && journal.started(target)) return { target, kind: "absent" as const };
 					const record = context.recordsBySlug.get(target.slug);
-					if (!record || record.sessionId !== target.sessionId || record.parentSessionId !== target.parentSessionId || record.version !== 3) throw new CliError(`Tree ownership changed: ${target.slug}.`);
+					if (!record || record.sessionId !== target.sessionId || record.parentSessionId !== target.parentSessionId || record.version !== 3) throw new CliError(`Tree ownership changed: ${target.slug}; approved parent ${target.parentSessionId ?? "root"}, current parent ${record ? record.parentSessionId ?? "root" : "unknown"}. Resource preserved.`);
 					if (journal.started(target) && residualRecord(root, target, exact)) {
 						for (const [branch, revision] of Object.entries(target.branches)) {
 							if (git(root, ["rev-parse", "--verify", `refs/heads/${branch}`]) !== revision) throw new CliError(`Branch evidence changed: ${branch}.`);
