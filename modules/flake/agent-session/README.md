@@ -37,6 +37,7 @@ as my-task launch                   # launch in an existing worktree
 as my-task resume                   # launch with --continue
 as my-task cd                       # change the current shell's directory
 as my-task run bun test             # run devenv -q shell -- bun test there
+as my-task branch create feat/work  # create and record ownership; no checkout
 as my-task finish --dry-run         # preview local cleanup
 as my-task finish                   # guarded local cleanup, with confirmation
 ```
@@ -46,6 +47,8 @@ as my-task finish                   # guarded local cleanup, with confirmation
 Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
 Repository-wide commands remain command-first: `as list`, `as status`, `as doctor`,
 `as finish --all|--gone`, and `as completion bash|zsh|fish`.
+`as <slug> finish --all --dry-run` previews only that recorded session tree;
+`as finish --all --dry-run` retains repository-wide scope.
 
 Command words are reserved in the first position so old command-first calls cannot
 be mistaken for an action on a differently named session. To address an existing
@@ -70,6 +73,163 @@ Interactive cleanup uses Node-compatible confirmation for normal, forced and bul
 finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a failed
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
+
+## Session-tree ownership and guarded finish
+
+```sh
+as parent create
+# From parent's managed worktree:
+as child create
+# From child's managed worktree:
+as grandchild create
+# From another checkout, outside the selected tree:
+as parent finish --all --dry-run --json
+```
+
+New session records have a unique `sessionId` and a `parentSessionId`: `null`
+means creation from the primary checkout; creation from a verified managed
+worktree records that session's ID automatically. Creation and `start` use the
+same ownership recording. Reusing a slug creates a new ID and never adopts the
+previous session's surviving descendants. Reusing an existing PR session retains
+its identity and parent. Directory nesting and names do not determine ownership.
+
+A recursive preview emits resources in descendants-first order, excludes
+unrelated sessions and modifies no assets. JSON uses `mode: "session-all"`,
+`sessionId`, ordered `plans`, `skipped` reasons and `resources` with execution
+guards. Each plan includes the worktree path, parent ID, recorded owned branches
+and artifact-disposal evidence. Lost branch evidence and an unclaimed current
+branch appear as `unresolvedBranches`, never as cleanup authority.
+
+Branch-preserving recursive execution requires a matching tree receipt and
+explicit approval:
+
+```sh
+as parent finish --all --keep-branch --dry-run --json
+# Review the selected worktrees, branches, artifact scopes and blockers.
+# Only after separately approving this exact selection:
+as parent finish --all --keep-branch --expected <receipt> --yes --json
+```
+
+A fully resolved metadata-v3 tree with no blockers receives a top-level
+`receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no
+execution receipt is issued. Preview without `--keep-branch` remains available
+for inspection, but recursive branch deletion and `--force` are not supported.
+Single-session and inactive-batch receipts cannot authorize a recursive finish.
+
+Conflicting branch claims appear in `sharedBranches` with every claiming session
+and are excluded from the plan's exclusively owned branches. They withhold an
+execution receipt, even if a claimant has stale or missing creation evidence.
+Apply checks the current catalogue again: a shared claim added after preview
+also refuses removal. Duplicate worktree bindings remain blocked by native/physical
+identity checks. Claims are not proof of ownership, and neither a shared resource
+nor another record is silently deleted to resolve ambiguity.
+
+Apply rechecks the complete selected tree before any native removal and freshly
+rechecks each target before its turn. Changed ownership, descendants, commits,
+configuration, artifact metadata, dirtiness, native locks, uncertain/live managed
+operations and unavailable or live same-user cwd evidence refuse cleanup.
+Explicitly selecting a tree does not impose an inactivity cutoff; it does not
+waive activity guards. Process observation has the same limits as inactive-batch
+finish: it cannot detect editors with cwd elsewhere, other users or remote use.
+All local and remote branches are preserved; native worktree removal is non-forced.
+
+Execution stops on the first refused or uncertain target, preserving all later
+targets including its ancestors. Results distinguish `success`, `partial` and
+per-resource outcomes. A durable journal binds started removals to the receipt.
+Replaying the same approved receipt may reconcile uniquely unchanged residual
+metadata only after filesystem and native-registration absence are confirmed;
+it does not repeat a confirmed native removal or broaden the selection. Changed
+or ambiguous evidence requires a fresh review, not force or registration pruning.
+A preview does not authorize deletion. Ownership changes during a partial run
+report the approved and current parent, leaving the affected resource and later
+ancestors intact. A completed receipt cannot apply to a replacement session
+created under the same slug.
+
+Older records without identity/parentage remain usable through existing commands,
+but their ancestry is reported as unknown and they are excluded from recursive
+selection. Creation from a legacy parent is refused rather than inventing its
+identity or ancestry. An explicitly reviewed [legacy mapping](#reviewed-legacy-mappings)
+is required; there is no automatic migration. Missing ancestors are reported and preserved;
+duplicate identities, incomplete identity fields and ownership cycles fail closed.
+Remote branches remain untouched.
+
+## Reviewed legacy mappings
+
+The human explicitly declares each legacy record to be a root or the child of
+an already mapped parent. The tool never reconstructs ancestry from names,
+checkout history or directory nesting. Map parents first:
+
+```sh
+as old-root ownership --root --dry-run --json
+# After reviewing and approving that exact mapping:
+as old-root ownership --root --expected <ownership-receipt> --yes --json
+as old-child ownership --parent old-root --dry-run --json
+# After separate review and approval:
+as old-child ownership --parent old-root --expected <ownership-receipt> --yes --json
+```
+
+The top-level `ownership-v1.` receipt binds the worktree's physical/native
+identity, metadata, current saved initial branch, HEAD/reflog evidence,
+configuration and declared parent ancestry. Apply rechecks the same declaration
+under the repository operation lock. The reviewed stable ID is retained, including
+an existing recorded ID; known ancestry cannot be changed into a transfer.
+Duplicate IDs, cycles, unresolved parents, shared branch claims, conflicting saved
+branches and recorded managed activity refuse mapping. Already mapped v3 sessions cannot be remapped.
+
+Apply upgrades the one legacy record to schema v3 and records only its saved
+initial branch's existing ownership disposition. An owned initial branch receives
+a unique reviewed-incarnation marker via `git reflog write`; its ref never moves.
+Borrowed branches receive no ownership record or marker. Other plain-Git branches
+are not adopted. Dirty files, commits, branch refs, worktrees and remote resources
+remain unchanged. Git without `reflog write` support cannot map an owned initial
+branch; metadata remains unchanged if that command fails. If metadata persistence
+cannot be confirmed after a marker was appended, inspect status and obtain fresh
+review; the marker alone is not a completed mapping.
+
+Preview is read-only. Mapping approval is not retirement approval, does not
+approve artifact disposal and cannot substitute for a single-session, tree or
+batch retirement receipt. This command does not repair missing/ambiguous bindings,
+transfer ownership, import renamed branches or silently upgrade an installed CLI.
+
+## Explicit branch ownership
+
+```sh
+as . branch create feat/work       # create at this session's HEAD; no checkout
+# Switch separately if needed:
+git switch feat/work
+```
+
+Use `as <slug> branch create <name> [--json]` for a named session. The command
+creates a new local branch and records its ownership under the session's stable
+ID. New sessions use metadata schema version 3, which older CLI builds reject
+rather than interpreting with their earlier ownership inference. Legacy version
+1/2 records remain readable; there is no automatic migration.
+Existing local branches are refused, not adopted. It does not switch branches,
+copy dirty files, configure upstreams or touch remote branches. Session creation
+records its newly created initial branch too; a borrowed PR branch is excluded.
+
+Plain Git branch creation, checkout and rename do **not** establish ownership.
+Status and cleanup no longer infer additional owned branches from names,
+timestamps or checkout/rename history, including on legacy sessions. Legacy
+records retain only their explicitly saved initial branch disposition; the new
+branch command requires identity and branch records and refuses silent migration.
+
+A recorded branch also needs its unique creation marker in its own Git reflog.
+The marker verifies an already-recorded creation; it never discovers ownership
+from Git activity. Later commits do not invalidate it. Deleted/recreated names,
+manual renames and expired or missing creation evidence are not adopted. Such
+resources remain unclaimed or unresolved and are preserved; an unclaimed current
+branch blocks guarded retirement. This applies to individual cleanup as well as
+recursive previews. The branch command rejects reuse of an earlier recorded name.
+
+## Completion scope guidance
+
+`as <session> finish --all` selects recorded descendants of that session;
+`as finish --all` selects repository-wide sessions. Zsh and Fish completion
+menus describe the different `--all` scopes. Bash retains plain flag insertion;
+its generated completion source and CLI help explain the distinction without
+inserting description text into commands. Fish registration replaces stale
+assembler completions for the installed `as` alias.
 
 ## Recorded-binding inventory
 
@@ -871,6 +1031,7 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
 | `github.ts` | GitHub PR resolution, source-head verification, and review push safeguards |
 | `inspection.ts` | Local session state, branch ownership, and status reporting |
+| `ownership.ts` | Explicitly reviewed legacy identity and ancestry mapping |
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
 | `finish.ts` | Cleanup previews, receipts, confirmations, and guarded removal |

@@ -1,11 +1,13 @@
 import { CliError } from "./runtime.ts";
 import { validateSlug } from "./sessions.ts";
 import { parsePullRequestSelection } from "./github.ts";
-import type { BatchFinishOptions, PullRequestSelection } from "./types.ts";
+import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions } from "./types.ts";
 
 export const commandNames = [
 	"cd",
 	"run",
+	"branch",
+	"ownership",
 	"create",
 	"launch",
 	"start",
@@ -110,6 +112,40 @@ function unknownOption(
 	);
 }
 
+export function parseOwnershipArguments(args: string[]): OwnershipOptions {
+	const [slug, ...tail] = args;
+	let parent: string | null | undefined, expected: string | undefined;
+	let dryRun = false, json = false, yes = false;
+	for (let index = 0; index < tail.length; index++) {
+		const option = tail[index];
+		if (option === "--root" || option === "--parent") {
+			if (parent !== undefined) throw argumentError("Declare exactly one ownership root or parent.");
+			parent = option === "--root" ? null : tail[++index];
+			if (parent === undefined) throw argumentError("--parent requires a mapped session slug.");
+			if (parent !== null) validateSlug(parent);
+		} else if (option === "--expected") {
+			const token = tail[++index] ?? "";
+			if (expected || !/^ownership-v1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$/.test(token)) throw argumentError("--expected requires one ownership preview receipt.");
+			expected = token;
+		} else if (option === "--dry-run") dryRun = true;
+		else if (option === "--json") json = true;
+		else if (option === "--yes") yes = true;
+		else throw argumentError(`Unknown ownership option: ${option}`);
+	}
+	if (!slug || parent === undefined) throw argumentError("Use: agent-session <slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json].");
+	if (dryRun && (expected || yes)) throw argumentError("Ownership preview does not accept approval flags.");
+	if (!dryRun && (!expected || !yes)) throw argumentError("Ownership mapping requires a reviewed --expected receipt and --yes.");
+	return { slug, parent, dryRun, json, yes, expected };
+}
+
+export function parseBranchArguments(args: string[]): { slug: string; name: string; json: boolean } {
+	const [slug, action, name, ...options] = args;
+	if (!slug || action !== "create" || !name || options.some((option) => option !== "--json") || options.length > 1) {
+		throw argumentError("Use: agent-session <task-slug> branch create <name> [--json]. Creates without switching; plain Git branches are not adopted.");
+	}
+	return { slug, name, json: options.includes("--json") };
+}
+
 export function parseCreateArguments(args: string[]): {
 	slug: string;
 	dryRun: boolean;
@@ -208,7 +244,7 @@ export function parseFinishArguments(args: string[]): {
 		const argument = args[index] ?? "";
 		if (argument === "--expected") {
 			const value = args[++index];
-			if (expected || !value || !/^[a-f0-9]{64}$/.test(value))
+			if (expected || !value || !/^(?:[a-f0-9]{64}|tree-v1\.[A-Za-z0-9_-]+\.[a-f0-9]{64})$/.test(value))
 				throw argumentError("finish --expected requires one preview receipt.");
 			expected = value;
 		} else if (argument === "--yes") yes = true;
@@ -234,12 +270,17 @@ export function parseFinishArguments(args: string[]): {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
-	if ([Boolean(slug), all, gone].filter(Boolean).length !== 1) {
+	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
-			"Choose exactly one finish selector: <task-slug>, --all, or --gone.",
+			"Choose a finish selector: <task-slug> [--all], --all, or --gone.",
 		);
 	}
-	if (json && !dryRun) {
+	if (slug && all && force) throw argumentError("Session-scoped --all does not accept --force.");
+	if (slug && all && !dryRun && (!keepBranch || !expected || !yes)) {
+		throw argumentError("Recursive finish requires --keep-branch, --expected <tree-receipt> and --yes.");
+	}
+	if (expected && (all ? !expected.startsWith("tree-v1.") : expected.startsWith("tree-v1."))) throw argumentError("Receipt does not match the finish selector.");
+	if (json && !dryRun && !(slug && all)) {
 		throw new CliError("finish --json requires --dry-run.", 64);
 	}
 	if (expected && (!slug || force || !keepBranch))
@@ -351,6 +392,8 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
+		"  agent-session <task-slug> branch create <name> [--json] (create and record ownership without switching)",
+		"  agent-session <task-slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json] (explicitly reviewed legacy mapping)",
 		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
@@ -358,7 +401,9 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
-		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
+		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
+		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
+		"  agent-session . <cd|run|branch|ownership|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",

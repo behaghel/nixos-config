@@ -12,7 +12,7 @@ import {
 import { CliError, progressReporter, run, writeCommandResult } from "./runtime.ts";
 import type { BatchFinishOptions, ProgressReporter, SessionMetadata } from "./types.ts";
 
-interface Target {
+export interface Target {
 	slug: string;
 	worktreePath: string;
 	metadataHash: string;
@@ -62,7 +62,7 @@ interface Candidate {
 	snapshot?: Target;
 }
 
-interface Outcome {
+export interface Outcome {
 	slug: string;
 	worktreePath: string;
 	outcome: "finished" | "absent" | "refused" | "uncertain";
@@ -150,7 +150,7 @@ function latestObservedWork(metadata: SessionMetadata, branches: string[], now: 
 	return evidence;
 }
 
-function captureProcesses(): ProcessSnapshot {
+export function captureProcesses(): ProcessSnapshot {
 	const observedAt = new Date().toISOString();
 	try { return { observedAt, entries: processDirectories() }; }
 	catch (error) { return { observedAt, entries: [], problem: String(error) }; }
@@ -184,7 +184,7 @@ function identity(path: string): string[] {
 	return [stat.dev.toString(), stat.ino.toString()];
 }
 
-function rootKey(root: string): string {
+export function rootKey(root: string): string {
 	const common = commonGitDirectory(root);
 	return hash(JSON.stringify([root, identity(root), common, identity(common), loadConfig(root)]));
 }
@@ -194,8 +194,8 @@ function metadataHash(root: string, slug: string, commonDirectory?: string): str
 	return hash(readFileSync(path, "utf8"));
 }
 
-function inspectCandidate(root: string, invocationRoot: string, slug: string, options: BatchFinishOptions,
-	now = Date.now(), processes?: ProcessSnapshot, report?: ProgressReporter, sharedContext?: ExactInspectionContext): Candidate {
+export function inspectCandidate(root: string, invocationRoot: string, slug: string, options: BatchFinishOptions,
+	now = Date.now(), processes?: ProcessSnapshot, report?: ProgressReporter, sharedContext?: ExactInspectionContext, requireInactivity = true): Candidate {
 	const candidate: Candidate = { slug, reason: "eligible", blockers: [], inspectionComplete: true };
 	const block = (reason: string, problem?: string) => candidate.blockers.push({ reason, ...(problem ? { problem } : {}) });
 	const finish = () => {
@@ -236,7 +236,7 @@ function inspectCandidate(root: string, invocationRoot: string, slug: string, op
 		});
 		candidate.activity = latestObservedWork(metadata, status.ownedBranches, now, options.inactiveMs);
 		if (!candidate.activity.complete) { candidate.inspectionComplete = false; block("unknown-activity", candidate.activity.problems.join("; ")); }
-		else if (!candidate.activity.inactive) block("recent-activity");
+		else if (requireInactivity && !candidate.activity.inactive) block("recent-activity");
 		candidate.ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
 			(path, entries) => report?.(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`), config.generated_links);
 		if (!candidate.ignoredData.complete) candidate.inspectionComplete = false;
@@ -303,7 +303,7 @@ interface Journal {
 	started: Record<string, string>;
 }
 
-function journalStore(root: string, receipt: Receipt, token: string) {
+export function journalStore(root: string, receipt: Pick<Receipt, "targets">, token: string) {
 	const directory = join(commonGitDirectory(root), "agent-session", "retirements");
 	const receiptHash = hash(token);
 	const path = join(directory, `${receiptHash}.json`);
@@ -344,13 +344,13 @@ function journalStore(root: string, receipt: Receipt, token: string) {
 	};
 }
 
-function residualRecord(root: string, target: Target, exact: ReturnType<typeof inspectExactResource>): boolean {
+export function residualRecord(root: string, target: Target, exact: ReturnType<typeof inspectExactResource>): boolean {
 	return exact.resourceState === "inconsistent" && exact.evidence.filesystem === "absent" && exact.evidence.registered === false &&
 		exact.bindingSlugs.length === 1 && exact.bindingSlugs[0] === target.slug && metadataHash(root, target.slug) === target.metadataHash &&
 		readMetadata(root, target.slug).worktreePath === target.worktreePath;
 }
 
-function completeRemoval(root: string, target: Target, reconciled: boolean): Outcome {
+export function completeRemoval(root: string, target: Target, reconciled: boolean): Outcome {
 	const base = { slug: target.slug, worktreePath: target.worktreePath };
 	const exact = inspectExactResource(root, target.worktreePath);
 	if (!residualRecord(root, target, exact)) return { ...base, outcome: "uncertain", reason: "residual-evidence-changed", problem: exact.problem ?? "Expected unique unchanged metadata and confirmed native/filesystem absence." };

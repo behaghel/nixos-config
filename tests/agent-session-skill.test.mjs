@@ -34,6 +34,16 @@ assert.match(skill, /as <task-slug> run/);
 assert.match(skill, /system assembler/i);
 assert.match(skill, /installed version/i);
 assert.match(skill, /repository.*delivery policy/i);
+assert.match(skill, /as \. branch create <name>/, "explicit branch creation workflow");
+assert.match(skill, /plain Git.*does not establish ownership/is, "checkout is not ownership authority");
+assert.match(skill, /borrowed or unclaimed branches.*preserv/is, "unclaimed branches stay protected");
+assert.match(skill, /never infer ownership from names, timing or checkout history/i);
+assert.match(skill, /finish --all --keep-branch --dry-run --json/, "recursive preview command");
+assert.match(skill, /tree-v1/, "tree-specific receipt boundary");
+assert.match(skill, /ownership --root --dry-run --json/, "reviewed root declaration");
+assert.match(skill, /ownership --parent <parent-slug> --dry-run --json/, "reviewed parent declaration");
+assert.match(skill, /ownership-v1/, "mapping-specific receipt boundary");
+assert.match(skill, /recursive.*does not authorize/is, "recursive preview is not consent");
 
 // Bundled references must survive installing this plugin without the full repo.
 for (const document of [skillPath, join(dirname(skillPath), "references/adoption.md")]) {

@@ -1,5 +1,5 @@
 import { primaryRoot, repositoryRoot } from "./git.ts";
-import { loadConfig, metadataSlugs, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
+import { loadConfig, metadataSlugs, readMetadataInventory, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
 import {
 	commandNames,
 	sessionCommandNames,
@@ -10,12 +10,14 @@ import {
 
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
 const commandOptions: Record<string, string[]> = {
+	branch: ["create", "--json"],
+	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
 	create: ["--dry-run", "--json", ...prOptions],
 	start: ["--no-agent", ...prOptions],
 	status: ["--json", "--refresh"],
 	doctor: ["--json"],
 	"global-doctor": ["--json"],
-	finish: ["--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
+	finish: ["--all", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
 	"global-status": ["--json", "--refresh", "--worktree"],
 	"global-list": ["--json"],
 	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json"],
@@ -23,6 +25,14 @@ const commandOptions: Record<string, string[]> = {
 };
 
 export function completionCandidates(scope: string): string[] {
+	if (scope.endsWith(":zsh") || scope.endsWith(":fish")) {
+		const format = scope.endsWith(":zsh") ? "zsh" : "fish";
+		const plain = scope.slice(0, -(format.length + 1));
+		const description = plain === "options:finish" ? "Recorded descendants of selected session"
+			: plain === "options:global-finish" ? "Repository-wide sessions" : undefined;
+		return completionCandidates(plain).map((candidate) => candidate === "--all" && description
+			? `${candidate}${format === "zsh" ? ":" : "\t"}${description}` : candidate);
+	}
 	if (scope === "commands") return sessionCommandNames;
 	if (scope === "current-commands") {
 		try {
@@ -38,6 +48,7 @@ export function completionCandidates(scope: string): string[] {
 	try {
 		const root = primaryRoot(repositoryRoot());
 		const recorded = metadataSlugs(root);
+		if (scope === "ownership-parents") return readMetadataInventory(root).filter((record) => record.version === 3).map((record) => record.slug);
 		if (scope === "repair") {
 			return [...discoverManagedWorktrees(root, loadConfig(root)).keys()]
 				.filter((slug) => !recorded.includes(slug))
@@ -65,6 +76,9 @@ export function completionCandidates(scope: string): string[] {
 export function completionScript(shell: string): string {
 	if (shell === "bash") {
 		return `# bash completion for agent-session
+# Recorded descendants: as <session> finish --all
+# Repository-wide sessions: as finish --all
+# Bash inserts plain flags; CLI help explains both scopes.
 _agent_session() {
   local current action subject=1 action_index=2 scope candidates candidate
   current="\${COMP_WORDS[COMP_CWORD]}"
@@ -97,6 +111,7 @@ _agent_session() {
       COMPREPLY=(); return
     fi
     scope="options:$action"
+    if [[ $action == ownership && \${COMP_WORDS[COMP_CWORD-1]-} == --parent ]]; then scope=ownership-parents; fi
   fi
   candidates="$(agent-session __complete "$scope" 2>/dev/null)"
   COMPREPLY=( $(compgen -W "$candidates" -- "$current") )
@@ -146,7 +161,9 @@ else
     return
   fi
   scope="options:$action"
+  if [[ $action == ownership && $words[$(( CURRENT - 1 ))] == --parent ]]; then scope=ownership-parents; fi
 fi
+if [[ $scope == options:finish || $scope == options:global-finish ]]; then scope="$scope"':zsh'; fi
 candidates=(\${(f)"$(agent-session __complete "$scope" 2>/dev/null)"})
 _describe 'option' candidates
 `;
@@ -190,9 +207,16 @@ function __agent_session_candidates
       return
     end
     set scope "options:$words[$action_index]"
+    if test "$words[$action_index]" = ownership; and test "$words[-1]" = --parent
+      set scope ownership-parents
+    end
+  end
+  if contains -- "$scope" options:finish options:global-finish
+    set scope "$scope":fish
   end
   agent-session __complete "$scope" 2>/dev/null
 end
+complete -c agent-session -e
 complete -c agent-session -f -a '(__agent_session_candidates)'
 `;
 	}

@@ -211,8 +211,22 @@ function readSessionMetadata(root: string, slug: string, primary: string, path =
 	}
 	const metadata = value as Partial<SessionMetadata>;
 	if (
-		(metadata.version !== 1 && metadata.version !== 2) ||
-		(metadata.version === 2 ? metadata.initialBranchOwned !== false : metadata.initialBranchOwned === false) ||
+		(metadata.version !== 1 && metadata.version !== 2 && metadata.version !== 3) ||
+		(metadata.version === 3 && (!validSessionId(metadata.sessionId) || !Array.isArray(metadata.branches) || typeof metadata.initialBranchOwned !== "boolean")) ||
+		(metadata.version !== 3 && metadata.branches !== undefined) ||
+		((metadata.sessionId !== undefined || metadata.parentSessionId !== undefined) &&
+			(!validSessionId(metadata.sessionId) ||
+				(metadata.parentSessionId !== null && !validSessionId(metadata.parentSessionId)) ||
+				metadata.sessionId === metadata.parentSessionId)) ||
+		(metadata.branches !== undefined &&
+			(!metadata.sessionId || !Array.isArray(metadata.branches) ||
+				metadata.branches.some((branch) => !branch || typeof branch.name !== "string" ||
+					!branch.name || branch.name.startsWith("-") || !validSessionId(branch.id) ||
+					typeof branch.creationCommit !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(branch.creationCommit)) ||
+				new Set(metadata.branches.map((branch) => branch.name)).size !== metadata.branches.length ||
+				new Set(metadata.branches.map((branch) => branch.id)).size !== metadata.branches.length)) ||
+		(metadata.version === 2 && metadata.initialBranchOwned !== false) ||
+		(metadata.version === 1 && metadata.initialBranchOwned === false) ||
 		metadata.slug !== slug ||
 		typeof metadata.branch !== "string" ||
 		typeof metadata.worktreePath !== "string" ||
@@ -250,6 +264,26 @@ function readSessionMetadata(root: string, slug: string, primary: string, path =
 		throw new CliError(`Unsafe session metadata for ${slug}.`);
 	}
 	return metadata as SessionMetadata;
+}
+
+export function branchCreationMessage(sessionId: string, branchId: string): string {
+	return `agent-session branch ${sessionId} ${branchId}`;
+}
+
+function validSessionId(value: unknown): value is string {
+	return typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
+}
+
+// Creation is rooted in the caller's verified managed binding, not a slug,
+// directory prefix, environment variable or the primary checkout used for Git.
+export function creationParentSessionId(root: string): string | null {
+	const caller = repositoryRoot();
+	if (caller === root) return null;
+	const parent = readMetadata(root, resolveSessionTarget(".", caller));
+	if (!parent.sessionId) {
+		throw new CliError(`Session ${parent.slug} has unknown ancestry; an explicitly reviewed ownership mapping is required before creating descendants.`);
+	}
+	return parent.sessionId;
 }
 
 // Hold the global lock only while updating evidence, never while work runs.

@@ -22,6 +22,7 @@ pushing, PR creation or merging on a project merely because it uses `as`.
 | adopt | Explicit approval before project configuration edits; read [the adoption guide](references/adoption.md). |
 | upgrade | Explicit approval only when a needed capability is unavailable; no silent repinning. |
 | repair | Explicit approval for the proposed metadata repair, registration pruning or resource replacement. |
+| map ownership | Explicit approval of the declared ancestry and exact legacy mapping receipt. |
 | retire | Explicit approval to apply the exact previewed selection, following a separate retirement request. |
 
 A diagnostic, missing directory, green test suite or merged PR is not permission
@@ -117,6 +118,52 @@ Only explicitly configured ignored local settings may be linked into new
 worktrees. Never copy credentials, private Pi histories, `.pi/npm/`, runtime state
 or generated agent configuration. Read local-link policy; do not invent links.
 
+## Create session-owned branches explicitly
+
+After verifying that the installed CLI supports `branch create`, use
+`as . branch create <name>` from the current managed worktree, or
+`as <task-slug> branch create <name>` for an explicit session. This creates a new
+local branch at that session's HEAD and records ownership together. It does not
+switch branches; use `git switch <name>` afterward when needed.
+
+Creating or checking out a branch through plain Git does not establish ownership.
+Borrowed or unclaimed branches must be preserved during cleanup.
+Never infer ownership from names, timing or checkout history.
+Do not adopt an existing branch, edit ownership metadata, or recreate a deleted
+name to manufacture cleanup authority. Lost creation evidence, manual renames
+and ambiguous records require review; they are not permission to delete.
+
+Legacy sessions need the explicitly reviewed `ownership` mapping below before
+using this command. If the installed version lacks it, report the capability gap and ask
+before any pin upgrade; do not silently substitute `git switch -c` or claim a
+plain-Git branch later. Branch creation does not authorize retirement.
+
+## Review legacy ownership explicitly
+
+Verify support for `ownership` before offering it. The human declares ancestry;
+never choose `--root` merely because a parent is unknown. Preview a root or a
+child of an already mapped parent:
+
+```sh
+as <task-slug> ownership --root --dry-run --json
+as <task-slug> ownership --parent <parent-slug> --dry-run --json
+```
+
+Review the exact worktree, proposed stable ID, parent ID and saved initial-branch
+disposition. Only after explicit approval, repeat the same declaration with
+`--expected <ownership-receipt> --yes` instead of `--dry-run`. The receipt starts
+with `ownership-v1.` and cannot authorize retirement. Map parents before children.
+
+This maps only existing legacy records, never unrecorded worktrees or arbitrary
+branches. It retains the saved initial branch's existing ownership disposition;
+borrowed and follow-up plain-Git branches remain unclaimed. An owned initial
+branch receives a reviewed-incarnation reflog marker without moving its ref.
+The command requires Git with `reflog write` support for that marker. Missing
+support or changed evidence requires review, not manual metadata edits or a pin
+upgrade without approval. Already mapped sessions cannot be transferred through
+this command. A failed or uncertain metadata update calls for status inspection;
+an appended marker alone is not a completed mapping. No resources are retired.
+
 ## Diagnose without repairing
 
 Prefer `as <task-slug> doctor --json` (or verified `as . doctor --json`) and named
@@ -138,6 +185,10 @@ Preview from another worktree, inspect the exact paths, actual branches,
 cleanliness/refusal reasons and branch-preservation behavior, then obtain approval
 for applying that selection. Always preserve branches unless a separate explicit
 request authorizes their deletion. Never use force as a fallback.
+Shared branch claims or conflicting worktree bindings require review; preserve
+the resources and every claiming record. Do not delete another record or invent
+a transfer to make cleanup eligible. After an ownership change, obtain a fresh
+preview; an old receipt cannot authorize the changed or replacement session.
 
 Current devenv integration defaults cover the `.devenv` scratch subtree (including
 logs/task databases) and the hook-config symlink only when it matches the exact
@@ -168,6 +219,26 @@ prints the receipt and full apply command; JSON remains the machine interface.
 A preview is not cleanup authorization.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
+
+On versions supporting receipt-bound recursive finish, a named session's `--all`
+selects its recorded descendants, not every repository session:
+
+```sh
+as <task-slug> finish --all --keep-branch --dry-run --json
+# Only after approval of the exact selected tree and artifact scope:
+as <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes --json
+```
+
+The top-level `receipt` starts with `tree-v1.`; single-session and batch receipts
+are not interchangeable. Recursive preview does not authorize retirement.
+All branches remain preserved, children finish before parents, and a refused or
+uncertain removal stops later removals. Replaying the same approved receipt can
+reconcile proven absence, not expand the tree or override changed evidence.
+Do not turn a partial result into permission to force, prune, fabricate ancestry
+or discard residual records. Unknown legacy ancestry and branch ownership require
+an explicitly reviewed mapping; no automatic migration is implied. Without a
+matching receipt, `--keep-branch` and explicit approval, do not execute recursion.
+Repository-wide `as finish --all` remains a different, broader selection.
 
 On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.
