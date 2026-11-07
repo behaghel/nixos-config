@@ -117,6 +117,26 @@ Only explicitly configured ignored local settings may be linked into new
 worktrees. Never copy credentials, private Pi histories, `.pi/npm/`, runtime state
 or generated agent configuration. Read local-link policy; do not invent links.
 
+## Create session-owned branches explicitly
+
+After verifying that the installed CLI supports `branch create`, use
+`as . branch create <name>` from the current managed worktree, or
+`as <task-slug> branch create <name>` for an explicit session. This creates a new
+local branch at that session's HEAD and records ownership together. It does not
+switch branches; use `git switch <name>` afterward when needed.
+
+Creating or checking out a branch through plain Git does not establish ownership.
+Borrowed or unclaimed branches must be preserved during cleanup.
+Never infer ownership from names, timing or checkout history.
+Do not adopt an existing branch, edit ownership metadata, or recreate a deleted
+name to manufacture cleanup authority. Lost creation evidence, manual renames
+and ambiguous records require review; they are not permission to delete.
+
+Legacy sessions need an explicitly reviewed ownership mapping before using this
+command. If the installed version lacks it, report the capability gap and ask
+before any pin upgrade; do not silently substitute `git switch -c` or claim a
+plain-Git branch later. Branch creation does not authorize retirement.
+
 ## Diagnose without repairing
 
 Prefer `as <task-slug> doctor --json` (or verified `as . doctor --json`) and named

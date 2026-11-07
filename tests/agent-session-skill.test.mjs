@@ -34,6 +34,10 @@ assert.match(skill, /as <task-slug> run/);
 assert.match(skill, /system assembler/i);
 assert.match(skill, /installed version/i);
 assert.match(skill, /repository.*delivery policy/i);
+assert.match(skill, /as \. branch create <name>/, "explicit branch creation workflow");
+assert.match(skill, /plain Git.*does not establish ownership/is, "checkout is not ownership authority");
+assert.match(skill, /borrowed or unclaimed branches.*preserv/is, "unclaimed branches stay protected");
+assert.match(skill, /never infer ownership from names, timing or checkout history/i);
 
 // Bundled references must survive installing this plugin without the full repo.
 for (const document of [skillPath, join(dirname(skillPath), "references/adoption.md")]) {

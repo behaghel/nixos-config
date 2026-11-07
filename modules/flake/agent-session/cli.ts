@@ -2,7 +2,7 @@
 import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
-import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
+import { create, createBranch, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk, previewSessionTree } from "./finish.ts";
@@ -12,6 +12,7 @@ import {
 	argumentError,
 	didYouMean,
 	parseCreateArguments,
+	parseBranchArguments,
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
@@ -37,6 +38,11 @@ export function main(args: string[]): number {
 			const target = rest.slice(1);
 			if (!target[0]) throw argumentError("Missing <command> for 'run'.");
 			return runInSession(primaryRoot(repositoryRoot()), resolveSessionTarget(slug), target);
+		}
+		if (command === "branch") {
+			const options = parseBranchArguments(rest);
+			createBranch(primaryRoot(repositoryRoot()), resolveSessionTarget(options.slug), options.name, options.json);
+			return 0;
 		}
 		if (command === "create") {
 			const options = parseCreateArguments(rest);

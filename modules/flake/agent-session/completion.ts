@@ -10,6 +10,7 @@ import {
 
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
 const commandOptions: Record<string, string[]> = {
+	branch: ["create", "--json"],
 	create: ["--dry-run", "--json", ...prOptions],
 	start: ["--no-agent", ...prOptions],
 	status: ["--json", "--refresh"],

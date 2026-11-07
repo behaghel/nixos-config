@@ -4,7 +4,6 @@ import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	git,
-	localBranches,
 	worktreeIsRegistered,
 	assertPrimaryCheckout,
 	ensureClean,
@@ -29,6 +28,7 @@ import {
 	refreshMetadataRemote,
 	sessionRemotes,
 	sessionBaseBranch,
+	sessionBranchSets,
 } from "./inspection.ts";
 import {
 	CliError,
@@ -98,9 +98,7 @@ function forceFinishUnlocked(
 	const metadata = readMetadata(root, slug);
 	assertConfiguredWorktreePath(root, config, metadata);
 	assertNotInvokingWorktree(metadata, invocationRoot);
-	let ownedBranches = metadata.initialBranchOwned !== false && localBranches(root).has(metadata.branch)
-		? [metadata.branch]
-		: [];
+	let ownedBranches = sessionBranchSets(metadata, root).owned;
 	if (existsSync(metadata.worktreePath)) {
 		const status = inspectSession(metadata);
 		if (statusCannotOperate(status)) {
@@ -513,13 +511,10 @@ export function previewSessionTree(root: string, invocationRoot: string, slug: s
 	for (const record of selected) {
 		try {
 			const plan = previewFinish(root, invocationRoot, record.slug, false, keepBranch, report);
-			// Reflog-inferred branches are not recorded ownership authority.
-			const inferred = plan.ownedBranches as string[];
-			const ownedBranches = record.initialBranchOwned === false ? [] : inferred.filter((branch) => branch === record.branch);
-			const unresolvedBranches = inferred.filter((branch) => !ownedBranches.includes(branch));
+			const { owned: ownedBranches, unresolved: unresolvedBranches } = sessionBranchSets(record);
 			const { receipt: _receipt, ...inspection } = plan;
 			plans.push({ ...inspection, sessionId: record.sessionId, parentSessionId: record.parentSessionId,
-				ownedBranches, unresolvedBranches, branchOwnership: "initial-only" });
+				ownedBranches, unresolvedBranches, branchOwnership: record.branches ? "recorded" : "legacy-initial-only" });
 		} catch (error) {
 			skipped.push(`${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`);
 		}
@@ -527,7 +522,7 @@ export function previewSessionTree(root: string, invocationRoot: string, slug: s
 	const resourceText = plans.map((plan) => {
 		const branches = (plan.ownedBranches as string[]).join(", ") || "none";
 		const unresolvedBranches = plan.unresolvedBranches as string[];
-		return `  ${plan.slug}: ${plan.worktreePath}\n    initial owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
+		return `  ${plan.slug}: ${plan.worktreePath}\n    recorded owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
 	}).join("");
 	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: true,
 		slug, sessionId: target.sessionId ?? null, executionSupported: false, plans, skipped, remoteAssetsModified: false }, json,

@@ -131,6 +131,12 @@ function runCli(cwd: string, args: string[], env: Record<string, string> = {}) {
 	});
 }
 
+function createOwnedBranch(cwd: string, name: string, environment: Record<string, string> = {}): void {
+	const result = runCli(cwd, [".", "branch", "create", name], environment);
+	if (result.status !== 0) throw new Error(`branch create failed: ${result.stderr}`);
+	git(cwd, "switch", name);
+}
+
 function installedShellIntegration(shell: string): string {
 	const root = process.env.AGENT_SESSION_SHELL_ROOT;
 	if (!root) throw new Error("Run shell integration tests through devenv.");
@@ -173,6 +179,143 @@ function startManagedSession(
 		agentLog,
 	};
 }
+
+describe("explicit session branch ownership", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-session-branches-");
+		writeConfig(fixture.checkout, createFakeAgent(fixture.root, join(fixture.root, "agent-log")));
+		const created = runCli(fixture.checkout, ["owner", "create", "--json"]);
+		expect(created.status).toBe(0);
+		expect(JSON.parse(created.stdout).session.version).toBe(3);
+		return { ...fixture, session: JSON.parse(created.stdout).session };
+	}
+
+	it("creates and records multiple owned branches without switching, while plain Git branches remain unclaimed", () => {
+		const fixture = setup();
+		try {
+			const cwd = fixture.session.worktreePath;
+			for (const name of ["feat/owned-one", "fix/owned-two"]) {
+				const created = runCli(cwd, [".", "branch", "create", name, "--json"]);
+				expect(created.status).toBe(0);
+				expect(JSON.parse(created.stdout).branch.name).toBe(name);
+				expect(git(cwd, "branch", "--show-current")).toBe("agent/owner");
+			}
+			git(cwd, "switch", "feat/owned-one");
+			git(cwd, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Advance owned branch");
+			const owned = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			expect(JSON.parse(owned.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner,feat/owned-one,fix/owned-two");
+			git(cwd, "switch", "-c", "feat/plain-git");
+			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.includes("feat/plain-git")).toBe(false);
+			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const plan = JSON.parse(preview.stdout).plans[0];
+			expect(plan.ownedBranches.join(",")).toBe("agent/owner,feat/owned-one,fix/owned-two");
+			expect(plan.unresolvedBranches.includes("feat/plain-git")).toBe(true);
+			expect(plan.branchOwnership).toBe("recorded");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("advertises explicit branch creation and refuses invalid names or legacy adoption", () => {
+		const fixture = setup();
+		try {
+			const cwd = fixture.session.worktreePath;
+			expect(runCli(cwd, ["__complete", "current-commands"]).stdout).toContain("branch");
+			expect(runCli(cwd, ["__complete", "options:branch"]).stdout).toContain("create");
+			for (const name of ["HEAD", "-bad", "bad..name", "bad/name.lock", "@{-1}"]) {
+				const result = runCli(cwd, [".", "branch", "create", name]);
+				expect(result.status).toBe(64);
+			}
+			const record = sessionMetadataPath(fixture.checkout, "owner");
+			const metadata = JSON.parse(readFileSync(record, "utf8"));
+			metadata.version = 1;
+			delete metadata.sessionId;
+			delete metadata.parentSessionId;
+			delete metadata.branches;
+			writeFileSync(record, JSON.stringify(metadata));
+			const legacy = runCli(cwd, [".", "branch", "create", "feat/legacy"]);
+			expect(legacy.status).toBe(1);
+			expect(legacy.stderr).toContain("legacy sessions");
+			expect(git(cwd, "branch", "--list", "feat/legacy")).toBe("");
+			git(cwd, "switch", "-c", "feat/plain-legacy");
+			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves a recreated initial branch and a recorded branch with lost creation evidence", () => {
+		const fixture = setup();
+		try {
+			const cwd = fixture.session.worktreePath;
+			expect(runCli(cwd, [".", "branch", "create", "feat/expired"]).status).toBe(0);
+			git(cwd, "reflog", "expire", "--expire=all", "refs/heads/feat/expired");
+			git(cwd, "switch", "--detach", "HEAD");
+			git(cwd, "branch", "-D", "agent/owner");
+			git(cwd, "branch", "agent/owner");
+			git(cwd, "switch", "agent/owner");
+			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.length).toBe(0);
+			expect(JSON.parse(status.stdout).sessions[0].state).toBe("conflict");
+			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
+			expect(JSON.parse(preview.stdout).plans[0].unresolvedBranches.join(",")).toBe("agent/owner,feat/expired");
+			expect(runCli(fixture.checkout, ["owner", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(existsSync(cwd)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps native checked-out branch protection when failed preparation cannot remove the worktree", () => {
+		const fixture = createRepositoryFixture("agent-session-branch-rollback-");
+		try {
+			writeConfig(fixture.checkout, "/unused", ["sh", "-c", "exit 7"]);
+			const bin = join(fixture.root, "guard-bin");
+			mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["owner", "create", "--json"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(1);
+			expect(existsSync(join(fixture.worktrees, "owner"))).toBe(true);
+			expect(git(fixture.checkout, "rev-parse", "--verify", "refs/heads/agent/owner").length > 0).toBe(true);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "owner"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("never claims a plain Git branch just because it was checked out in the session", () => {
+		const fixture = setup();
+		try {
+			git(fixture.session.worktreePath, "switch", "-c", "feat/unclaimed");
+			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
+			const finish = runCli(fixture.checkout, ["owner", "finish", "--force", "--yes"]);
+			expect(finish.status).toBe(1);
+			expect(git(fixture.checkout, "show-ref", "--verify", "refs/heads/feat/unclaimed").length > 0).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses existing branches and does not adopt deleted-and-recreated recorded branch names", () => {
+		const fixture = setup();
+		try {
+			const cwd = fixture.session.worktreePath;
+			git(cwd, "branch", "feat/borrowed");
+			const before = git(cwd, "rev-parse", "feat/borrowed");
+			const borrowed = runCli(cwd, [".", "branch", "create", "feat/borrowed"]);
+			expect(borrowed.status).toBe(1);
+			expect(borrowed.stderr).toContain("already exists");
+			expect(git(cwd, "rev-parse", "feat/borrowed")).toBe(before);
+			git(cwd, "config", "branch.feat/stale.remote", "origin");
+			const stale = runCli(cwd, [".", "branch", "create", "feat/stale"]);
+			expect(stale.status).toBe(1);
+			expect(git(cwd, "config", "--get", "branch.feat/stale.remote")).toBe("origin");
+			expect(git(cwd, "branch", "--list", "feat/stale")).toBe("");
+			expect(runCli(cwd, [".", "branch", "create", "feat/reused"]).status).toBe(0);
+			git(cwd, "branch", "-D", "feat/reused");
+			git(cwd, "branch", "feat/reused");
+			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
+			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
+			expect(JSON.parse(preview.stdout).plans[0].unresolvedBranches.includes("feat/reused")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
 
 describe("session-scoped recursive preview", () => {
 	function setup() {
@@ -271,8 +414,10 @@ describe("session-scoped recursive preview", () => {
 		try {
 			const parent = createAt(fixture.checkout, "legacy");
 			const store = join(fixture.checkout, ".git", "agent-session", "sessions");
+			parent.version = 1;
 			delete parent.sessionId;
 			delete parent.parentSessionId;
+			delete parent.branches;
 			writeFileSync(join(store, "legacy.json"), JSON.stringify(parent));
 			createAt(fixture.checkout, "new-root");
 			const preview = runCli(fixture.checkout, ["new-root", "finish", "--all", "--dry-run", "--json"]);
@@ -1677,10 +1822,10 @@ describe("guarded inactive batch finish", () => {
 	});
 });
 
-function commitSessionWork(worktree: string): void {
+function commitSessionWork(worktree: string, content = "finished\n"): void {
 	git(worktree, "config", "user.name", "Agent Session Test");
 	git(worktree, "config", "user.email", "agent-session@example.invalid");
-	writeFileSync(join(worktree, "finished.txt"), "finished\n");
+	writeFileSync(join(worktree, "finished.txt"), content);
 	git(worktree, "add", "finished.txt");
 	git(
 		worktree,
@@ -1776,7 +1921,7 @@ describe("metadata-only inventory", () => {
 		try {
 			const { worktree } = startManagedSession(fixture, "target");
 			expect(runCli(fixture.checkout, ["unrelated", "create"]).status).toBe(0);
-			git(worktree, "switch", "-c", "renamed-target");
+			createOwnedBranch(worktree, "renamed-target");
 			const metadataDirectory = join(fixture.checkout, ".git/agent-session/sessions");
 			const before = readFileSync(join(metadataDirectory, "target.json"), "utf8");
 			const registrations = git(fixture.checkout, "worktree", "list", "--porcelain");
@@ -2524,7 +2669,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 				expect(result.status).toBe(0);
 				const metadata = JSON.parse(result.stdout).session;
 				expect(metadata.initialBranchOwned).toBe(false);
-				expect(metadata.version).toBe(2);
+				expect(metadata.version).toBe(3);
 				expect(JSON.parse(result.stdout).version).toBe(1);
 				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
 				let branch = fixture.branch;
@@ -2532,7 +2677,14 @@ describe("PR launch, reuse and borrowed branches", () => {
 				const status = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
 				expect(status.status).toBe(0);
 				expect(JSON.parse(status.stdout).sessions[0].ownedBranches.length).toBe(0);
-				expect(JSON.parse(status.stdout).sessions[0].state).toBe("ready");
+				expect(JSON.parse(status.stdout).sessions[0].state).toBe(mode === "renamed" ? "conflict" : "ready");
+				if (mode === "renamed") {
+					const refused = runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment);
+					expect(refused.status).toBe(1);
+					expect(existsSync(metadata.worktreePath)).toBe(true);
+					expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
+					return;
+				}
 				if (mode === "orphaned-force") rmSync(metadata.worktreePath, { recursive: true, force: true });
 				if (mode === "force") writeFileSync(join(metadata.worktreePath, "dirty.txt"), "discard checkout files only\n");
 				const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes", ...(mode.includes("force") ? ["--force"] : [])], fixture.environment);
@@ -2544,7 +2696,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 		});
 	}
 
-	it("requires ownership-aware v2 metadata even when a borrowed branch looks like a legacy managed branch", () => {
+	it("requires ownership-aware metadata even when a borrowed branch looks like a legacy managed branch", () => {
 		const fixture = createPullRequestFixture();
 		try {
 			const branch = "agent/review-auth";
@@ -2557,7 +2709,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 			expect(created.status).toBe(0);
 			const receipt = JSON.parse(created.stdout);
 			expect(receipt.version).toBe(1);
-			expect(receipt.session.version).toBe(2);
+			expect(receipt.session.version).toBe(3);
 			expect(receipt.session.initialBranchOwned).toBe(false);
 			const record = sessionMetadataPath(fixture.checkout, "review-auth");
 			const before = readFileSync(record, "utf8");
@@ -2608,7 +2760,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 			const created = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
 			expect(created.status).toBe(0);
 			const worktree = JSON.parse(created.stdout).session.worktreePath;
-			git(worktree, "checkout", "-b", "fix/session-owned");
+			createOwnedBranch(worktree, "fix/session-owned", fixture.environment);
 			const status = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("fix/session-owned");
 			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment).status).toBe(0);
@@ -2705,7 +2857,7 @@ describe("historical PRs and release bases", () => {
 			const created = runCli(fixture.checkout, ["history", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
 			expect(created.status).toBe(0);
 			const metadata = JSON.parse(created.stdout).session;
-			expect(metadata.version).toBe(2);
+			expect(metadata.version).toBe(3);
 			expect(metadata.initialBranchOwned).toBe(false);
 			expect(metadata.pr.sourceBranchMissing).toBe(true);
 			expect(runCli(fixture.checkout, ["history", "finish", "--yes"], fixture.environment).status).toBe(0);
@@ -5032,11 +5184,12 @@ describe("agent-session finish", () => {
 		try {
 			const { worktree } = startManagedSession(fixture);
 			commitSessionWork(worktree);
-			git(worktree, "branch", "-m", "feat/first-slice");
+			git(worktree, "push", "-u", "origin", "HEAD");
+			createOwnedBranch(worktree, "feat/first-slice");
 			git(worktree, "push", "-u", "origin", "HEAD");
 
-			git(worktree, "switch", "-c", "fix/second-slice", "origin/master");
-			commitSessionWork(worktree);
+			createOwnedBranch(worktree, "fix/second-slice");
+			commitSessionWork(worktree, "second slice\n");
 			git(worktree, "push", "-u", "origin", "HEAD");
 
 			const preview = runCli(fixture.checkout, [
@@ -5051,7 +5204,7 @@ describe("agent-session finish", () => {
 			};
 			expect(previewPayload.plan.currentBranch).toBe("fix/second-slice");
 			expect(previewPayload.plan.ownedBranches.join(",")).toBe(
-				"feat/first-slice,fix/second-slice",
+				"agent/git-hygiene,feat/first-slice,fix/second-slice",
 			);
 
 			const result = runCli(fixture.checkout, [
@@ -5062,7 +5215,7 @@ describe("agent-session finish", () => {
 
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("Session finished locally");
-			expect(result.stdout).toContain("2 local branches deleted");
+			expect(result.stdout).toContain("3 local branches deleted");
 			expect(existsSync(worktree)).toBe(false);
 			expect(
 				git(fixture.checkout, "branch", "--list", "feat/first-slice"),
@@ -5137,8 +5290,9 @@ describe("agent-session finish", () => {
 			worktree = startManagedSession(fixture).worktree;
 			commitSessionWork(worktree);
 			git(worktree, "push", "-u", "origin", "HEAD");
-			git(worktree, "switch", "-c", "fix/unpublished", "origin/master");
-			commitSessionWork(worktree);
+			createOwnedBranch(worktree, "fix/unpublished");
+			git(worktree, "branch", "--set-upstream-to=origin/master", "fix/unpublished");
+			commitSessionWork(worktree, "unpublished\n");
 		});
 		afterAll(() => {
 			rmSync(fixture.root, { recursive: true, force: true });
@@ -5173,9 +5327,9 @@ describe("agent-session finish", () => {
 		beforeAll(() => {
 			worktree = startManagedSession(fixture).worktree;
 			commitSessionWork(worktree);
-			git(worktree, "branch", "-m", "feat/unpublished-first");
-			git(worktree, "switch", "-c", "fix/unpublished-second", "origin/master");
-			commitSessionWork(worktree);
+			createOwnedBranch(worktree, "feat/unpublished-first");
+			createOwnedBranch(worktree, "fix/unpublished-second");
+			commitSessionWork(worktree, "unpublished second\n");
 		});
 		afterAll(() => {
 			rmSync(fixture.root, { recursive: true, force: true });
@@ -5190,7 +5344,7 @@ describe("agent-session finish", () => {
 			]);
 
 			expect(result.status).toBe(0);
-			expect(result.stdout).toContain("2 local branches deleted");
+			expect(result.stdout).toContain("3 local branches deleted");
 			expect(existsSync(worktree)).toBe(false);
 			expect(
 				git(fixture.checkout, "branch", "--list", "feat/unpublished-first"),
@@ -5205,8 +5359,8 @@ describe("agent-session finish", () => {
 		const fixture = createRepositoryFixture();
 		try {
 			const { worktree } = startManagedSession(fixture);
-			git(worktree, "branch", "-m", "feat/preserved-first");
-			git(worktree, "switch", "-c", "fix/preserved-second", "origin/master");
+			createOwnedBranch(worktree, "feat/preserved-first");
+			createOwnedBranch(worktree, "fix/preserved-second");
 
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
@@ -5217,7 +5371,7 @@ describe("agent-session finish", () => {
 
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain(
-				"Local branches preserved: feat/preserved-first, fix/preserved-second",
+				"Local branches preserved: agent/git-hygiene, feat/preserved-first, fix/preserved-second",
 			);
 			expect(existsSync(worktree)).toBe(false);
 			expect(

@@ -211,12 +211,22 @@ function readSessionMetadata(root: string, slug: string, primary: string, path =
 	}
 	const metadata = value as Partial<SessionMetadata>;
 	if (
-		(metadata.version !== 1 && metadata.version !== 2) ||
+		(metadata.version !== 1 && metadata.version !== 2 && metadata.version !== 3) ||
+		(metadata.version === 3 && (!validSessionId(metadata.sessionId) || !Array.isArray(metadata.branches) || typeof metadata.initialBranchOwned !== "boolean")) ||
+		(metadata.version !== 3 && metadata.branches !== undefined) ||
 		((metadata.sessionId !== undefined || metadata.parentSessionId !== undefined) &&
 			(!validSessionId(metadata.sessionId) ||
 				(metadata.parentSessionId !== null && !validSessionId(metadata.parentSessionId)) ||
 				metadata.sessionId === metadata.parentSessionId)) ||
-		(metadata.version === 2 ? metadata.initialBranchOwned !== false : metadata.initialBranchOwned === false) ||
+		(metadata.branches !== undefined &&
+			(!metadata.sessionId || !Array.isArray(metadata.branches) ||
+				metadata.branches.some((branch) => !branch || typeof branch.name !== "string" ||
+					!branch.name || branch.name.startsWith("-") || !validSessionId(branch.id) ||
+					typeof branch.creationCommit !== "string" || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(branch.creationCommit)) ||
+				new Set(metadata.branches.map((branch) => branch.name)).size !== metadata.branches.length ||
+				new Set(metadata.branches.map((branch) => branch.id)).size !== metadata.branches.length)) ||
+		(metadata.version === 2 && metadata.initialBranchOwned !== false) ||
+		(metadata.version === 1 && metadata.initialBranchOwned === false) ||
 		metadata.slug !== slug ||
 		typeof metadata.branch !== "string" ||
 		typeof metadata.worktreePath !== "string" ||
@@ -254,6 +264,10 @@ function readSessionMetadata(root: string, slug: string, primary: string, path =
 		throw new CliError(`Unsafe session metadata for ${slug}.`);
 	}
 	return metadata as SessionMetadata;
+}
+
+export function branchCreationMessage(sessionId: string, branchId: string): string {
+	return `agent-session branch ${sessionId} ${branchId}`;
 }
 
 function validSessionId(value: unknown): value is string {

@@ -37,6 +37,7 @@ as my-task launch                   # launch in an existing worktree
 as my-task resume                   # launch with --continue
 as my-task cd                       # change the current shell's directory
 as my-task run bun test             # run devenv -q shell -- bun test there
+as my-task branch create feat/work  # create and record ownership; no checkout
 as my-task finish --dry-run         # preview local cleanup
 as my-task finish                   # guarded local cleanup, with confirmation
 ```
@@ -96,8 +97,9 @@ Session-scoped `--all` currently supports **preview only**. It emits resources
 in descendants-first order, excludes unrelated sessions and modifies no assets.
 JSON uses `mode: "session-all"`, `sessionId`, ordered `plans`, `skipped` reasons
 and `executionSupported: false`. Each plan includes the worktree path, parent ID,
-initial owned branches and inspected artifact-disposal evidence. Additional
-reflog-inferred branches appear as `unresolvedBranches`, not recorded ownership.
+recorded owned branches and inspected artifact-disposal evidence. Branches whose
+creation evidence is lost and an unclaimed current branch appear as
+`unresolvedBranches`, never as cleanup authority.
 The preview emits no apply receipt; apply, `--force` and `--expected` are refused.
 It does not certify execution safety or authorize deletion.
 
@@ -108,6 +110,37 @@ identity or ancestry. An explicitly reviewed ownership mapping is required; ther
 is no automatic legacy migration. Missing ancestors are reported and preserved;
 duplicate identities, incomplete identity fields and ownership cycles fail closed.
 Remote branches remain untouched.
+
+## Explicit branch ownership
+
+```sh
+as . branch create feat/work       # create at this session's HEAD; no checkout
+# Switch separately if needed:
+git switch feat/work
+```
+
+Use `as <slug> branch create <name> [--json]` for a named session. The command
+creates a new local branch and records its ownership under the session's stable
+ID. New sessions use metadata schema version 3, which older CLI builds reject
+rather than interpreting with their earlier ownership inference. Legacy version
+1/2 records remain readable; there is no automatic migration.
+Existing local branches are refused, not adopted. It does not switch branches,
+copy dirty files, configure upstreams or touch remote branches. Session creation
+records its newly created initial branch too; a borrowed PR branch is excluded.
+
+Plain Git branch creation, checkout and rename do **not** establish ownership.
+Status and cleanup no longer infer additional owned branches from names,
+timestamps or checkout/rename history, including on legacy sessions. Legacy
+records retain only their explicitly saved initial branch disposition; the new
+branch command requires identity and branch records and refuses silent migration.
+
+A recorded branch also needs its unique creation marker in its own Git reflog.
+The marker verifies an already-recorded creation; it never discovers ownership
+from Git activity. Later commits do not invalidate it. Deleted/recreated names,
+manual renames and expired or missing creation evidence are not adopted. Such
+resources remain unclaimed or unresolved and are preserved; an unclaimed current
+branch blocks guarded retirement. This applies to individual cleanup as well as
+recursive previews. The branch command rejects reuse of an earlier recorded name.
 
 ## Recorded-binding inventory
 

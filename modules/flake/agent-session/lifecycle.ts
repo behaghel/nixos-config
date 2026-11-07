@@ -29,6 +29,7 @@ import {
 	withSessionActivity,
 	resolveWorktreeRoot,
 	creationParentSessionId,
+	branchCreationMessage,
 } from "./sessions.ts";
 import {
 	refreshMetadataRemote,
@@ -44,7 +45,7 @@ import {
 	writeCommandResult,
 	run,
 } from "./runtime.ts";
-import type { AgentSessionConfig, SessionMetadata, ProgressReporter, PullRequestSelection, PullRequestMetadata } from "./types.ts";
+import type { AgentSessionConfig, SessionMetadata, BranchOwnership, ProgressReporter, PullRequestSelection, PullRequestMetadata } from "./types.ts";
 
 function linkLocalFiles(root: string, worktree: string, paths: string[]): void {
 	for (const relativePath of paths) {
@@ -163,6 +164,34 @@ export function runInSession(root: string, slug: string, command: string[]): num
 		throw new CliError(`Cannot run devenv: ${result.error.message}`);
 	}
 	return result.status ?? (result.signal ? 128 + constants.signals[result.signal] : 1);
+}
+
+export function createBranch(root: string, slug: string, name: string, json: boolean): void {
+	withOperationLock(root, "branch-create", () => {
+		const cwd = sessionDirectory(root, slug);
+		const metadata = readMetadata(root, slug);
+		if (!metadata.sessionId || !metadata.branches) throw new CliError("Branch creation requires recorded session identity and branch ownership; legacy sessions need an explicitly reviewed mapping.");
+		if (!name || name === "HEAD" || name.startsWith("-") || run("git", ["check-ref-format", `refs/heads/${name}`], cwd).status !== 0) {
+			throw new CliError(`Invalid branch name: ${name}`, 64);
+		}
+		if (localBranches(root).has(name)) throw new CliError(`Local branch ${name} already exists; refusing to adopt it.`);
+		if (metadata.branches.some((branch) => branch.name === name)) throw new CliError(`Branch ${name} has an earlier ownership record; refusing to reuse its identity.`);
+		inspectCreationBranch(root, name);
+		const branch: BranchOwnership = { name, id: randomUUID(), creationCommit: git(cwd, ["rev-parse", "--verify", "HEAD"]) };
+		// An empty expected old value makes ref creation atomic against ordinary
+		// concurrent Git commands too. The unique marker proves this incarnation;
+		// deleting/recreating the name or losing its log cannot inherit ownership.
+		git(cwd, ["update-ref", "--create-reflog", "-m", branchCreationMessage(metadata.sessionId, branch.id),
+			`refs/heads/${name}`, branch.creationCommit, ""]);
+		try {
+			writeMetadata(root, { ...metadata, branches: [...metadata.branches, branch], lastWorkAt: new Date().toISOString() });
+		} catch (error) {
+			// Preserve the ref on uncertain recording, never delete concurrent work.
+			throw new CliError(`Branch ${name} was created but ownership recording failed; preserved as unclaimed. ${String(error)}`);
+		}
+		writeCommandResult({ version: 1, command: "branch", action: "create", slug, branch }, json,
+			`Created session-owned branch ${name} at ${branch.creationCommit}. Current branch unchanged; switch explicitly when needed.\n`);
+	});
 }
 
 function repairUnlocked(root: string, slug: string): void {
@@ -423,7 +452,12 @@ function createSession(
 		);
 	}
 
+	const sessionId = randomUUID();
+	const initialOwnership: BranchOwnership | undefined = borrowed ? undefined : {
+		name: branch, id: randomUUID(), creationCommit: git(root, ["rev-parse", pr?.headCommit ?? `${remote}/${defaultBranch}`]),
+	};
 	let created = false;
+	let createdBranch = false;
 	let recorded = false;
 	let createdSourceRemote: string | undefined;
 	try {
@@ -435,15 +469,17 @@ function createSession(
 			if (source.missing) pr.sourceBranchMissing = true;
 		});
 		runPhase(report, "worktree-create", () => {
+			if (initialOwnership) {
+				git(root, ["update-ref", "--create-reflog", "-m", branchCreationMessage(sessionId, initialOwnership.id),
+					`refs/heads/${branch}`, initialOwnership.creationCommit, ""]);
+				createdBranch = true;
+			}
 			const added = run(
 				"git",
 				[
 					"worktree",
 					"add",
-					...(borrowed ? [worktreePath, branch] : [
-						"--no-track", "-b", branch, worktreePath,
-						pr?.headCommit ?? `${remote}/${defaultBranch}`,
-					]),
+					worktreePath, branch,
 				],
 				root,
 				json ? "pipe" : "inherit",
@@ -475,9 +511,10 @@ function createSession(
 		});
 
 		const metadata: SessionMetadata = {
-			version: borrowed ? 2 : 1,
-			sessionId: randomUUID(),
+			version: 3,
+			sessionId,
 			parentSessionId,
+			branches: initialOwnership ? [initialOwnership] : [],
 			slug,
 			branch,
 			worktreePath,
@@ -486,7 +523,7 @@ function createSession(
 			createdAt: new Date().toISOString(),
 			conversation: null,
 			preexistingBranches,
-			...(borrowed ? { initialBranchOwned: false } : {}),
+			initialBranchOwned: !borrowed,
 			...(pr ? { pr } : {}),
 		};
 		runPhase(report, "metadata-record", () => writeMetadata(root, metadata));
@@ -499,7 +536,14 @@ function createSession(
 				root,
 				json ? "pipe" : "inherit",
 			);
-			if (!borrowed) run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
+		}
+		if (createdBranch && !recorded && initialOwnership) {
+			const head = run("git", ["rev-parse", "--verify", `refs/heads/${branch}`], root);
+			// Keep native branch-deletion safeguards: update-ref -d would bypass
+			// protection for a branch still checked out after failed removal.
+			if (head.status === 0 && head.stdout === initialOwnership.creationCommit) {
+				run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
+			} else process.stderr.write(`Branch ${branch} changed during preparation; preserved for review.\n`);
 		}
 		if (!recorded && createdSourceRemote) git(root, ["remote", "remove", createdSourceRemote]);
 	}

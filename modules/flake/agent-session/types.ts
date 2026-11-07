@@ -39,8 +39,14 @@ export interface ActiveOperation {
 	startedAt: string;
 }
 
+export interface BranchOwnership {
+	name: string;
+	id: string;
+	creationCommit: string;
+}
+
 export interface SessionMetadata {
-	version: 1 | 2;
+	version: 1 | 2 | 3;
 	slug: string;
 	branch: string;
 	worktreePath: string;
@@ -50,6 +56,7 @@ export interface SessionMetadata {
 	// Absent on legacy records: ancestry is unknown, not a root assumption.
 	sessionId?: string;
 	parentSessionId?: string | null;
+	branches?: BranchOwnership[];
 	lastWorkAt?: string;
 	activeOperations?: ActiveOperation[];
 	conversation: null;

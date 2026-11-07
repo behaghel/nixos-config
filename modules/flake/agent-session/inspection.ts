@@ -21,6 +21,7 @@ import {
 	readOperationLock,
 	resolveWorktreeRoot,
 	validateSlug,
+	branchCreationMessage,
 } from "./sessions.ts";
 import { CliError, run } from "./runtime.ts";
 import type { AgentSessionConfig, SessionMetadata, SessionStatus, ManagedWorktree } from "./types.ts";
@@ -84,46 +85,30 @@ export function statusCannotOperate(status: SessionStatus): boolean {
 	);
 }
 
-function sessionBranchSets(metadata: SessionMetadata): { owned: string[]; allowed: string[] } {
-	const local = localBranches(metadata.worktreePath);
-	const owned = new Set<string>(metadata.initialBranchOwned === false ? [] : [metadata.branch]);
-	const allowed = new Set([metadata.branch]);
-	const preexisting = new Set(metadata.preexistingBranches ?? []);
-	const legacyCreationBoundary = Math.floor(
-		new Date(metadata.createdAt).getTime() / 1000,
-	);
-	const entries = reflogEntries(metadata.worktreePath, "HEAD").reverse();
-	for (const entry of entries) {
-		const rename = entry.summary.match(
-			/^Branch: renamed refs\/heads\/(.+) to refs\/heads\/(.+)$/,
-		);
-		if (rename?.[1] && rename[2] && allowed.has(rename[1])) {
-			allowed.add(rename[2]);
-			if (owned.has(rename[1])) owned.add(rename[2]);
-			continue;
+export function sessionBranchSets(metadata: SessionMetadata, cwd = metadata.worktreePath): { owned: string[]; allowed: string[]; unresolved: string[] } {
+	const local = localBranches(cwd);
+	const owned = new Set<string>();
+	const unresolved = new Set<string>();
+	if (metadata.branches) {
+		for (const branch of metadata.branches) {
+			if (!local.has(branch.name)) continue;
+			const marker = branchCreationMessage(metadata.sessionId!, branch.id);
+			const verified = reflogEntries(cwd, `refs/heads/${branch.name}`).some((entry) =>
+				entry.summary === marker && entry.commit === branch.creationCommit);
+			if (verified) owned.add(branch.name);
+			else unresolved.add(branch.name);
 		}
-		const checkout = entry.summary.match(/^checkout: moving from .+ to (.+)$/);
-		const destination = checkout?.[1];
-		if (!destination || !local.has(destination)) continue;
-		const creation = reflogEntries(metadata.worktreePath, destination).at(-1);
-		const createdDuringSession = metadata.preexistingBranches
-			? !preexisting.has(destination)
-			: Number.parseInt(creation?.timestamp ?? "0", 10) >
-				legacyCreationBoundary;
-		if (
-			createdDuringSession &&
-			creation?.summary.startsWith("branch: Created from ") &&
-			creation.timestamp === entry.timestamp &&
-			creation.commit === entry.commit
-		) {
-			owned.add(destination);
-			allowed.add(destination);
-		}
+	} else if (metadata.initialBranchOwned !== false && local.has(metadata.branch)) {
+		// Legacy metadata records only its initial branch. Never expand ownership
+		// from timestamps, checkout messages or rename history.
+		owned.add(metadata.branch);
 	}
-	return {
-		owned: [...owned].filter((branch) => local.has(branch)).sort(),
-		allowed: [...allowed].filter((branch) => local.has(branch)),
-	};
+	const current = git(cwd, ["branch", "--show-current"]);
+	if (current && !owned.has(current)) unresolved.add(current);
+	const allowed = new Set(owned);
+	if (metadata.initialBranchOwned === false || !metadata.branches) allowed.add(metadata.branch);
+	return { owned: [...owned].sort(), allowed: [...allowed].filter((branch) => local.has(branch)),
+		unresolved: [...unresolved].sort() };
 }
 
 export function sessionBaseBranch(metadata: SessionMetadata, defaultBranch = metadata.defaultBranch): string {

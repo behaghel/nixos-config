@@ -6,6 +6,7 @@ import type { BatchFinishOptions, PullRequestSelection } from "./types.ts";
 export const commandNames = [
 	"cd",
 	"run",
+	"branch",
 	"create",
 	"launch",
 	"start",
@@ -108,6 +109,14 @@ function unknownOption(
 	return argumentError(
 		`Unknown option '${option}' for '${command}'.${didYouMean(option, validOptions)}`,
 	);
+}
+
+export function parseBranchArguments(args: string[]): { slug: string; name: string; json: boolean } {
+	const [slug, action, name, ...options] = args;
+	if (!slug || action !== "create" || !name || options.some((option) => option !== "--json") || options.length > 1) {
+		throw argumentError("Use: agent-session <task-slug> branch create <name> [--json]. Creates without switching; plain Git branches are not adopted.");
+	}
+	return { slug, name, json: options.includes("--json") };
 }
 
 export function parseCreateArguments(args: string[]): {
@@ -354,6 +363,7 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
+		"  agent-session <task-slug> branch create <name> [--json] (create and record ownership without switching)",
 		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
@@ -362,7 +372,7 @@ function usage(): string {
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent; no execution yet)",
-		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
+		"  agent-session . <cd|run|branch|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",
