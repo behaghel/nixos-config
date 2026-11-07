@@ -2,16 +2,19 @@
 import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
-import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
+import { create, createBranch, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
-import { finish, finishBulk } from "./finish.ts";
+import { finish, finishBulk, finishSessionTree } from "./finish.ts";
 import { batchFinish } from "./batch.ts";
+import { mapOwnership } from "./ownership.ts";
 import {
 	commandNames,
 	argumentError,
 	didYouMean,
 	parseCreateArguments,
+	parseBranchArguments,
+	parseOwnershipArguments,
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
@@ -37,6 +40,16 @@ export function main(args: string[]): number {
 			const target = rest.slice(1);
 			if (!target[0]) throw argumentError("Missing <command> for 'run'.");
 			return runInSession(primaryRoot(repositoryRoot()), resolveSessionTarget(slug), target);
+		}
+		if (command === "ownership") {
+			const options = parseOwnershipArguments(rest);
+			mapOwnership(primaryRoot(repositoryRoot()), { ...options, slug: resolveSessionTarget(options.slug) });
+			return 0;
+		}
+		if (command === "branch") {
+			const options = parseBranchArguments(rest);
+			createBranch(primaryRoot(repositoryRoot()), resolveSessionTarget(options.slug), options.name, options.json);
+			return 0;
 		}
 		if (command === "create") {
 			const options = parseCreateArguments(rest);
@@ -125,7 +138,10 @@ export function main(args: string[]): number {
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
-			if (options.all || options.gone) {
+			if (options.slug && options.all) {
+				return finishSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
+					options.keepBranch, options.dryRun, options.json, options.expected);
+			} else if (options.all || options.gone) {
 				finishBulk(
 					root,
 					invocationRoot,

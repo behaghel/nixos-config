@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
+import { captureProcesses, inspectCandidate, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	git,
-	localBranches,
 	worktreeIsRegistered,
 	assertPrimaryCheckout,
 	ensureClean,
@@ -15,6 +15,7 @@ import {
 	validateSlug,
 	loadConfig,
 	readMetadata,
+	readMetadataInventory,
 	assertConfiguredWorktreePath,
 	metadataPath,
 	withOperationLock,
@@ -28,6 +29,9 @@ import {
 	refreshMetadataRemote,
 	sessionRemotes,
 	sessionBaseBranch,
+	sessionBranchSets,
+	snapshotExactResources,
+	inspectExactResource,
 } from "./inspection.ts";
 import {
 	CliError,
@@ -37,7 +41,7 @@ import {
 	writeCommandResult,
 	run,
 } from "./runtime.ts";
-import type { SessionMetadata, SessionStatus, ProgressReporter } from "./types.ts";
+import type { SessionMetadata, SessionStatus, ProgressReporter, BatchFinishOptions } from "./types.ts";
 
 function assertNotInvokingWorktree(
 	metadata: Pick<SessionMetadata, "worktreePath">,
@@ -97,9 +101,7 @@ function forceFinishUnlocked(
 	const metadata = readMetadata(root, slug);
 	assertConfiguredWorktreePath(root, config, metadata);
 	assertNotInvokingWorktree(metadata, invocationRoot);
-	let ownedBranches = metadata.initialBranchOwned !== false && localBranches(root).has(metadata.branch)
-		? [metadata.branch]
-		: [];
+	let ownedBranches = sessionBranchSets(metadata, root).owned;
 	if (existsSync(metadata.worktreePath)) {
 		const status = inspectSession(metadata);
 		if (statusCannotOperate(status)) {
@@ -459,6 +461,229 @@ export function finish(
 				: finishUnlocked(root, invocationRoot, slug, yes, keepBranch, expected, report);
 		}),
 	);
+}
+
+function selectSessionTree(root: string, slug: string) {
+	validateSlug(slug);
+	const records = readMetadataInventory(root);
+	const target = records.find((record) => record.slug === slug);
+	if (!target) throw new CliError(`No managed session: ${slug}`);
+	const byId = new Map<string, SessionMetadata>();
+	const skipped: string[] = [];
+	for (const record of records) {
+		if (!record.sessionId) {
+			skipped.push(`${record.slug}: unknown ancestry; explicit reviewed ownership mapping required; preserved.`);
+			continue;
+		}
+		if (byId.has(record.sessionId)) throw new CliError("Duplicate session identity; recursive ownership is unresolved. No resources changed.");
+		byId.set(record.sessionId, record);
+	}
+	// Check full ancestry, including orphans and cycles, without assigning an
+	// old parent's surviving descendants to a newly reused slug.
+	const unresolved = new Set<string>();
+	for (const record of byId.values()) {
+		const seen = new Set<string>();
+		let current = record;
+		while (current.sessionId) {
+			if (seen.has(current.sessionId)) throw new CliError("Cyclic session ownership; no resources changed.");
+			seen.add(current.sessionId);
+			if (current.parentSessionId === null) break;
+			const parent = byId.get(current.parentSessionId!);
+			if (!parent) {
+				unresolved.add(record.sessionId!);
+				skipped.push(`${record.slug}: unresolved parent ${current.parentSessionId}; preserved.`);
+				break;
+			}
+			current = parent;
+		}
+	}
+	const selected: SessionMetadata[] = [];
+	const visit = (record: SessionMetadata) => {
+		if (!record.sessionId || unresolved.has(record.sessionId)) return;
+		for (const child of records) {
+			if (child.parentSessionId === record.sessionId) visit(child);
+		}
+		selected.push(record);
+	};
+	visit(target);
+	return { target, selected, records, skipped };
+}
+
+export function finishSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, expected?: string): number {
+	if (!dryRun) return applySessionTree(root, invocationRoot, slug, expected!, json);
+	const { target, selected, skipped } = selectSessionTree(root, slug);
+	const plans: Record<string, unknown>[] = [];
+	const report = progressReporter("finish", json);
+	for (const record of selected) {
+		try {
+			const plan = previewFinish(root, invocationRoot, record.slug, false, keepBranch, report);
+			const { owned: ownedBranches, unresolved: unresolvedBranches } = sessionBranchSets(record);
+			const { receipt: _receipt, ...inspection } = plan;
+			plans.push({ ...inspection, sessionId: record.sessionId, parentSessionId: record.parentSessionId,
+				ownedBranches, unresolvedBranches, branchOwnership: record.branches ? "recorded" : "legacy-initial-only" });
+		} catch (error) {
+			skipped.push(`${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`);
+		}
+	}
+	const resourceText = plans.map((plan) => {
+		const branches = (plan.ownedBranches as string[]).join(", ") || "none";
+		const unresolvedBranches = plan.unresolvedBranches as string[];
+		return `  ${plan.slug}: ${plan.worktreePath}\n    recorded owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
+	}).join("");
+	const observedAt = new Date().toISOString();
+	const context = keepBranch ? snapshotExactResources(root) : undefined;
+	const processes = keepBranch ? captureProcesses() : undefined;
+	const candidates = keepBranch ? selected.map((record) => {
+		const candidate = inspectCandidate(root, invocationRoot, record.slug,
+			treeInspectionOptions, Date.parse(observedAt), processes, report, context, false);
+		if (record.version !== 3) {
+			candidate.reason = "unresolved-ownership";
+			candidate.problem = "Legacy ownership needs an explicitly reviewed mapping; preserved.";
+			candidate.blockers.push({ reason: candidate.reason, problem: candidate.problem });
+			delete candidate.snapshot;
+		}
+		return candidate;
+	}) : [];
+	const executable = keepBranch && selected.length > 0 && selected.every((record) => record.version === 3) &&
+		plans.length === selected.length && candidates.every((candidate) => candidate.snapshot);
+	const token = executable ? encodeTreeReceipt({ version: 1, slug, sessionId: target.sessionId!, rootKey: rootKey(root),
+		observedAt, keepBranch: true, targets: candidates.map((candidate, index) => ({ ...candidate.snapshot!,
+			sessionId: selected[index]!.sessionId!, parentSessionId: selected[index]!.parentSessionId! })) }) : undefined;
+	const resources = candidates.map(({ snapshot, ...candidate }) => ({ ...candidate, ...(snapshot ? { fingerprint: snapshot.fingerprint } : {}) }));
+	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: true,
+		slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources,
+		...(token ? { receipt: token } : {}), keepBranch, remoteAssetsModified: false }, json,
+		`Recursive preview only for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}No resources changed.${token ? `\nReceipt: ${token}\nApply: ${sessionCommand(slug, "finish")} --all --keep-branch --expected ${token} --yes` : "\nNo execution receipt: use --keep-branch with a fully resolved, safe tree."}${resources.filter((resource) => resource.reason !== "eligible").map((resource) => `\n  ${resource.slug}: ${resource.problem ?? resource.reason}`).join("")}${skipped.length ? `\nPreserved/unresolved:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}` : ""}\n`);
+	return 0;
+}
+
+interface TreeTarget extends Target { sessionId: string; parentSessionId: string | null }
+interface TreeReceipt {
+	version: 1;
+	slug: string;
+	sessionId: string;
+	rootKey: string;
+	observedAt: string;
+	keepBranch: true;
+	targets: TreeTarget[];
+}
+
+const treeInspectionOptions: BatchFinishOptions = {
+	inactiveFor: "explicit-tree", inactiveMs: 0, exclusions: [], json: false, dryRun: true, yes: false,
+};
+const digest = (value: string) => createHash("sha256").update(value).digest("hex");
+function encodeTreeReceipt(receipt: TreeReceipt): string {
+	const body = Buffer.from(JSON.stringify(receipt)).toString("base64url");
+	return `tree-v1.${body}.${digest(body)}`;
+}
+
+function decodeTreeReceipt(root: string, slug: string, token: string): TreeReceipt {
+	try {
+		const [prefix, body = "", checksum] = token.split(".");
+		if (prefix !== "tree-v1" || body.length > 2_000_000 || digest(body) !== checksum) throw new Error("Invalid receipt encoding.");
+		const receipt: TreeReceipt = JSON.parse(Buffer.from(body, "base64url").toString("utf8"));
+		if (receipt.version !== 1 || receipt.slug !== slug || receipt.keepBranch !== true || receipt.rootKey !== rootKey(root) ||
+			!Number.isFinite(Date.parse(receipt.observedAt)) || !Array.isArray(receipt.targets) || !receipt.targets.length || receipt.targets.length > 10000) throw new Error("Preview context changed.");
+		const slugs = new Set<string>(), paths = new Set<string>(), ids = new Set<string>();
+		for (const target of receipt.targets) {
+			validateSlug(target.slug);
+			if (typeof target.sessionId !== "string" || (target.parentSessionId !== null && typeof target.parentSessionId !== "string") ||
+				slugs.has(target.slug) || paths.has(target.worktreePath) || ids.has(target.sessionId) || typeof target.worktreePath !== "string" ||
+				!/^[a-f0-9]{64}$/.test(target.fingerprint) || !/^[a-f0-9]{64}$/.test(target.metadataHash) ||
+				!target.branches || typeof target.branches !== "object" || Array.isArray(target.branches) || !Object.keys(target.branches).length ||
+				Object.values(target.branches).some((revision) => !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(revision))) throw new Error("Invalid target identity.");
+			slugs.add(target.slug); paths.add(target.worktreePath); ids.add(target.sessionId);
+		}
+		if (receipt.targets.at(-1)!.slug !== slug || receipt.targets.at(-1)!.sessionId !== receipt.sessionId) throw new Error("Root identity changed.");
+		return receipt;
+	} catch (error) { throw new CliError(`Invalid or mismatched tree receipt; obtain a fresh preview. ${String(error)}`, 64); }
+}
+
+function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean): number {
+	const receipt = decodeTreeReceipt(root, slug, token);
+	const report = progressReporter("recursive finish", json);
+	let resources: Outcome[];
+	try {
+		resources = withOperationLock(root, "recursive finish", () => {
+			assertPrimaryCheckout(root); ensureClean(root, true);
+			const journal = journalStore(root, receipt, token);
+			const scope = () => {
+				if (receipt.rootKey !== rootKey(root)) throw new CliError("Tree configuration changed; obtain a fresh preview.");
+				const context = snapshotExactResources(root);
+				const states = receipt.targets.map((target) => {
+					const exact = inspectExactResource(root, target.worktreePath, context);
+					if (exact.resourceState === "absent" && journal.started(target)) return { target, kind: "absent" as const };
+					const record = context.recordsBySlug.get(target.slug);
+					if (!record || record.sessionId !== target.sessionId || record.parentSessionId !== target.parentSessionId || record.version !== 3) throw new CliError(`Tree ownership changed: ${target.slug}.`);
+					if (journal.started(target) && residualRecord(root, target, exact)) {
+						for (const [branch, revision] of Object.entries(target.branches)) {
+							if (git(root, ["rev-parse", "--verify", `refs/heads/${branch}`]) !== revision) throw new CliError(`Branch evidence changed: ${branch}.`);
+						}
+						return { target, kind: "residual" as const };
+					}
+					return { target, kind: "present" as const };
+				});
+				const remaining = states.filter((state) => state.kind !== "absent").map((state) => state.target.sessionId);
+				const allIds = new Set(receipt.targets.map((target) => target.sessionId));
+				for (const record of context.recordsBySlug.values()) {
+					if (record.parentSessionId && allIds.has(record.parentSessionId) && !allIds.has(record.sessionId!)) throw new CliError("New descendant appeared; obtain a fresh tree preview.");
+				}
+				const current = remaining.length ? selectSessionTree(root, slug).selected.map((record) => record.sessionId) : [];
+				if (JSON.stringify(current) !== JSON.stringify(remaining)) throw new CliError("Tree selection changed; obtain a fresh preview.");
+				return { context, states };
+			};
+			// Refuse the whole operation before the first native effect when any
+			// approved target has already changed. Explicit scope needs no age cutoff.
+			const initial = scope();
+			for (const state of initial.states) {
+				if (state.kind !== "present") continue;
+				const candidate = inspectCandidate(root, invocationRoot, state.target.slug, treeInspectionOptions,
+					Date.now(), undefined, report, initial.context, false);
+				if (candidate.snapshot?.fingerprint !== state.target.fingerprint) throw new CliError(`${state.target.slug}: ${candidate.problem ?? "changed since preview"}`);
+			}
+			const outcomes: Outcome[] = [];
+			let stopped = false;
+			for (const target of receipt.targets) {
+				const base = { slug: target.slug, worktreePath: target.worktreePath };
+				if (stopped) { outcomes.push({ ...base, outcome: "refused", reason: "earlier-target-not-finished" }); continue; }
+				let outcome: Outcome;
+				let cleanupStarted = false;
+				try {
+					const current = scope(), state = current.states.find((entry) => entry.target.slug === target.slug)!;
+					if (state.kind === "absent") outcome = { ...base, outcome: "absent", reason: "confirmed-absence" };
+					else if (state.kind === "residual") {
+						cleanupStarted = true;
+						outcome = completeRemoval(root, target, true);
+					}
+					else {
+						const candidate = inspectCandidate(root, invocationRoot, target.slug, treeInspectionOptions,
+							Date.now(), undefined, report, current.context, false);
+						if (candidate.snapshot?.fingerprint !== target.fingerprint) throw new CliError(candidate.problem ?? "Changed since preview.");
+						scope();
+						journal.start(target);
+						cleanupStarted = true;
+						const removed = run("git", ["worktree", "remove", "--", target.worktreePath], root);
+						outcome = removed.status === 0 ? completeRemoval(root, target, false)
+							: { ...base, outcome: "uncertain", reason: "native-removal-unconfirmed", problem: removed.stderr };
+					}
+				} catch (error) { outcome = { ...base, outcome: cleanupStarted ? "uncertain" : "refused",
+					reason: cleanupStarted ? "cleanup-not-confirmed" : "revalidation-failed", problem: String(error) }; }
+				outcomes.push(outcome);
+				stopped = !["finished", "absent"].includes(outcome.outcome);
+				report(`apply:${target.slug}`, stopped ? "failed" : "completed", outcome.reason);
+			}
+			return outcomes;
+		});
+	} catch (error) {
+		resources = receipt.targets.map((target) => ({ slug: target.slug, worktreePath: target.worktreePath,
+			outcome: "refused", reason: "tree-preflight", problem: String(error) }));
+	}
+	const success = resources.every((resource) => ["finished", "absent"].includes(resource.outcome));
+	const partial = !success && resources.some((resource) => ["finished", "absent"].includes(resource.outcome));
+	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: false, keepBranch: true,
+		branchesModified: false, remoteAssetsModified: false, success, partial, resources }, json,
+		`${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n`);
+	return success ? 0 : 1;
 }
 
 function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean) {
