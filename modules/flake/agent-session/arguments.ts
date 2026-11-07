@@ -217,7 +217,7 @@ export function parseFinishArguments(args: string[]): {
 		const argument = args[index] ?? "";
 		if (argument === "--expected") {
 			const value = args[++index];
-			if (expected || !value || !/^[a-f0-9]{64}$/.test(value))
+			if (expected || !value || !/^(?:[a-f0-9]{64}|tree-v1\.[A-Za-z0-9_-]+\.[a-f0-9]{64})$/.test(value))
 				throw argumentError("finish --expected requires one preview receipt.");
 			expected = value;
 		} else if (argument === "--yes") yes = true;
@@ -248,10 +248,12 @@ export function parseFinishArguments(args: string[]): {
 			"Choose a finish selector: <task-slug> [--all], --all, or --gone.",
 		);
 	}
-	if (slug && all && (force || expected)) {
-		throw argumentError("Session-scoped --all is preview only and does not accept --force or --expected.");
+	if (slug && all && force) throw argumentError("Session-scoped --all does not accept --force.");
+	if (slug && all && !dryRun && (!keepBranch || !expected || !yes)) {
+		throw argumentError("Recursive finish requires --keep-branch, --expected <tree-receipt> and --yes.");
 	}
-	if (json && !dryRun) {
+	if (expected && (all ? !expected.startsWith("tree-v1.") : expected.startsWith("tree-v1."))) throw argumentError("Receipt does not match the finish selector.");
+	if (json && !dryRun && !(slug && all)) {
 		throw new CliError("finish --json requires --dry-run.", 64);
 	}
 	if (expected && (!slug || force || !keepBranch))
@@ -371,7 +373,8 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
-		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent; no execution yet)",
+		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
+		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
 		"  agent-session . <cd|run|branch|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",

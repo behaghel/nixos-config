@@ -74,7 +74,7 @@ finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a fa
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
 
-## Session-tree ownership preview
+## Session-tree ownership and guarded finish
 
 ```sh
 as parent create
@@ -93,15 +93,46 @@ same ownership recording. Reusing a slug creates a new ID and never adopts the
 previous session's surviving descendants. Reusing an existing PR session retains
 its identity and parent. Directory nesting and names do not determine ownership.
 
-Session-scoped `--all` currently supports **preview only**. It emits resources
-in descendants-first order, excludes unrelated sessions and modifies no assets.
-JSON uses `mode: "session-all"`, `sessionId`, ordered `plans`, `skipped` reasons
-and `executionSupported: false`. Each plan includes the worktree path, parent ID,
-recorded owned branches and inspected artifact-disposal evidence. Branches whose
-creation evidence is lost and an unclaimed current branch appear as
-`unresolvedBranches`, never as cleanup authority.
-The preview emits no apply receipt; apply, `--force` and `--expected` are refused.
-It does not certify execution safety or authorize deletion.
+A recursive preview emits resources in descendants-first order, excludes
+unrelated sessions and modifies no assets. JSON uses `mode: "session-all"`,
+`sessionId`, ordered `plans`, `skipped` reasons and `resources` with execution
+guards. Each plan includes the worktree path, parent ID, recorded owned branches
+and artifact-disposal evidence. Lost branch evidence and an unclaimed current
+branch appear as `unresolvedBranches`, never as cleanup authority.
+
+Branch-preserving recursive execution requires a matching tree receipt and
+explicit approval:
+
+```sh
+as parent finish --all --keep-branch --dry-run --json
+# Review the selected worktrees, branches, artifact scopes and blockers.
+# Only after separately approving this exact selection:
+as parent finish --all --keep-branch --expected <receipt> --yes --json
+```
+
+A fully resolved metadata-v3 tree with no blockers receives a top-level
+`receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no
+execution receipt is issued. Preview without `--keep-branch` remains available
+for inspection, but recursive branch deletion and `--force` are not supported.
+Single-session and inactive-batch receipts cannot authorize a recursive finish.
+
+Apply rechecks the complete selected tree before any native removal and freshly
+rechecks each target before its turn. Changed ownership, descendants, commits,
+configuration, artifact metadata, dirtiness, native locks, uncertain/live managed
+operations and unavailable or live same-user cwd evidence refuse cleanup.
+Explicitly selecting a tree does not impose an inactivity cutoff; it does not
+waive activity guards. Process observation has the same limits as inactive-batch
+finish: it cannot detect editors with cwd elsewhere, other users or remote use.
+All local and remote branches are preserved; native worktree removal is non-forced.
+
+Execution stops on the first refused or uncertain target, preserving all later
+targets including its ancestors. Results distinguish `success`, `partial` and
+per-resource outcomes. A durable journal binds started removals to the receipt.
+Replaying the same approved receipt may reconcile uniquely unchanged residual
+metadata only after filesystem and native-registration absence are confirmed;
+it does not repeat a confirmed native removal or broaden the selection. Changed
+or ambiguous evidence requires a fresh review, not force or registration pruning.
+A preview does not authorize deletion.
 
 Older records without identity/parentage remain usable through existing commands,
 but their ancestry is reported as unknown and they are excluded from recursive

@@ -5,7 +5,7 @@ import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, createBranch, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
-import { finish, finishBulk, previewSessionTree } from "./finish.ts";
+import { finish, finishBulk, finishSessionTree } from "./finish.ts";
 import { batchFinish } from "./batch.ts";
 import {
 	commandNames,
@@ -132,8 +132,8 @@ export function main(args: string[]): number {
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
 			if (options.slug && options.all) {
-				previewSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
-					options.keepBranch, options.dryRun, options.json);
+				return finishSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
+					options.keepBranch, options.dryRun, options.json, options.expected);
 			} else if (options.all || options.gone) {
 				finishBulk(
 					root,

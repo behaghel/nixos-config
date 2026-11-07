@@ -189,6 +189,26 @@ A preview is not cleanup authorization.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 
+On versions supporting receipt-bound recursive finish, a named session's `--all`
+selects its recorded descendants, not every repository session:
+
+```sh
+as <task-slug> finish --all --keep-branch --dry-run --json
+# Only after approval of the exact selected tree and artifact scope:
+as <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes --json
+```
+
+The top-level `receipt` starts with `tree-v1.`; single-session and batch receipts
+are not interchangeable. Recursive preview does not authorize retirement.
+All branches remain preserved, children finish before parents, and a refused or
+uncertain removal stops later removals. Replaying the same approved receipt can
+reconcile proven absence, not expand the tree or override changed evidence.
+Do not turn a partial result into permission to force, prune, fabricate ancestry
+or discard residual records. Unknown legacy ancestry and branch ownership require
+an explicitly reviewed mapping; no automatic migration is implied. Without a
+matching receipt, `--keep-branch` and explicit approval, do not execute recursion.
+Repository-wide `as finish --all` remains a different, broader selection.
+
 On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.
 Batch receipts are top-level `receipt`, not `plan.receipt`. Apply with the same
