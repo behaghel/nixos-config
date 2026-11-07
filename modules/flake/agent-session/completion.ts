@@ -1,5 +1,5 @@
 import { primaryRoot, repositoryRoot } from "./git.ts";
-import { loadConfig, metadataSlugs, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
+import { loadConfig, metadataSlugs, readMetadataInventory, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
 import {
 	commandNames,
 	sessionCommandNames,
@@ -11,6 +11,7 @@ import {
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
 const commandOptions: Record<string, string[]> = {
 	branch: ["create", "--json"],
+	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
 	create: ["--dry-run", "--json", ...prOptions],
 	start: ["--no-agent", ...prOptions],
 	status: ["--json", "--refresh"],
@@ -39,6 +40,7 @@ export function completionCandidates(scope: string): string[] {
 	try {
 		const root = primaryRoot(repositoryRoot());
 		const recorded = metadataSlugs(root);
+		if (scope === "ownership-parents") return readMetadataInventory(root).filter((record) => record.version === 3).map((record) => record.slug);
 		if (scope === "repair") {
 			return [...discoverManagedWorktrees(root, loadConfig(root)).keys()]
 				.filter((slug) => !recorded.includes(slug))
@@ -98,6 +100,7 @@ _agent_session() {
       COMPREPLY=(); return
     fi
     scope="options:$action"
+    if [[ $action == ownership && \${COMP_WORDS[COMP_CWORD-1]-} == --parent ]]; then scope=ownership-parents; fi
   fi
   candidates="$(agent-session __complete "$scope" 2>/dev/null)"
   COMPREPLY=( $(compgen -W "$candidates" -- "$current") )
@@ -147,6 +150,7 @@ else
     return
   fi
   scope="options:$action"
+  if [[ $action == ownership && $words[$(( CURRENT - 1 ))] == --parent ]]; then scope=ownership-parents; fi
 fi
 candidates=(\${(f)"$(agent-session __complete "$scope" 2>/dev/null)"})
 _describe 'option' candidates
@@ -191,6 +195,9 @@ function __agent_session_candidates
       return
     end
     set scope "options:$words[$action_index]"
+    if test "$words[$action_index]" = ownership; and test "$words[-1]" = --parent
+      set scope ownership-parents
+    end
   end
   agent-session __complete "$scope" 2>/dev/null
 end

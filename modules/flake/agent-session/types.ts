@@ -65,6 +65,15 @@ export interface SessionMetadata {
 	pr?: PullRequestMetadata;
 }
 
+export interface OwnershipOptions {
+	slug: string;
+	parent: string | null;
+	dryRun: boolean;
+	json: boolean;
+	yes: boolean;
+	expected?: string;
+}
+
 export interface BatchFinishOptions {
 	inactiveFor: string;
 	inactiveMs: number;

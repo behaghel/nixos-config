@@ -40,6 +40,9 @@ assert.match(skill, /borrowed or unclaimed branches.*preserv/is, "unclaimed bran
 assert.match(skill, /never infer ownership from names, timing or checkout history/i);
 assert.match(skill, /finish --all --keep-branch --dry-run --json/, "recursive preview command");
 assert.match(skill, /tree-v1/, "tree-specific receipt boundary");
+assert.match(skill, /ownership --root --dry-run --json/, "reviewed root declaration");
+assert.match(skill, /ownership --parent <parent-slug> --dry-run --json/, "reviewed parent declaration");
+assert.match(skill, /ownership-v1/, "mapping-specific receipt boundary");
 assert.match(skill, /recursive.*does not authorize/is, "recursive preview is not consent");
 
 // Bundled references must survive installing this plugin without the full repo.

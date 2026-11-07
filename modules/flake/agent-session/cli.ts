@@ -7,12 +7,14 @@ import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk, finishSessionTree } from "./finish.ts";
 import { batchFinish } from "./batch.ts";
+import { mapOwnership } from "./ownership.ts";
 import {
 	commandNames,
 	argumentError,
 	didYouMean,
 	parseCreateArguments,
 	parseBranchArguments,
+	parseOwnershipArguments,
 	parseStartArguments,
 	parseFinishArguments,
 	parseStatusArguments,
@@ -38,6 +40,11 @@ export function main(args: string[]): number {
 			const target = rest.slice(1);
 			if (!target[0]) throw argumentError("Missing <command> for 'run'.");
 			return runInSession(primaryRoot(repositoryRoot()), resolveSessionTarget(slug), target);
+		}
+		if (command === "ownership") {
+			const options = parseOwnershipArguments(rest);
+			mapOwnership(primaryRoot(repositoryRoot()), { ...options, slug: resolveSessionTarget(options.slug) });
+			return 0;
 		}
 		if (command === "branch") {
 			const options = parseBranchArguments(rest);

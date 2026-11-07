@@ -317,6 +317,155 @@ describe("explicit session branch ownership", () => {
 	});
 });
 
+describe("reviewed legacy ownership mapping", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-session-mapping-");
+		writeConfig(fixture.checkout, createFakeAgent(fixture.root, join(fixture.root, "agent-log")));
+		const legacy = (slug: string) => {
+			const requested = join(fixture.worktrees, slug);
+			git(fixture.checkout, "worktree", "add", "--no-track", "-b", `agent/${slug}`, requested, "origin/master");
+			const worktree = realpathSync(requested);
+			const record = sessionMetadataPath(fixture.checkout, slug);
+			mkdirSync(join(fixture.checkout, ".git/agent-session/sessions"), { recursive: true });
+			writeFileSync(record, JSON.stringify({ version: 1, slug, branch: `agent/${slug}`, worktreePath: worktree,
+				remote: "origin", defaultBranch: "master", createdAt: new Date().toISOString(), conversation: null }));
+			return { worktree, record };
+		};
+		const preview = (slug: string, parent?: string) => {
+			const result = runCli(fixture.checkout, [slug, "ownership", ...(parent ? ["--parent", parent] : ["--root"]), "--dry-run", "--json"]);
+			if (result.status !== 0) throw new Error(result.stderr);
+			return JSON.parse(result.stdout);
+		};
+		const apply = (slug: string, receipt: string, parent?: string) => runCli(fixture.checkout,
+			[slug, "ownership", ...(parent ? ["--parent", parent] : ["--root"]), "--expected", receipt, "--yes", "--json"]);
+		return { ...fixture, legacy, preview, apply };
+	}
+
+	it("maps an explicitly declared legacy root and child without guessing or changing work, then previews their tree", () => {
+		const fixture = setup();
+		try {
+			const parent = fixture.legacy("parent"), child = fixture.legacy("child");
+			const before = readFileSync(parent.record, "utf8"), head = git(parent.worktree, "rev-parse", "HEAD");
+			writeFileSync(join(parent.worktree, "keep.txt"), "retain dirty work\n");
+			git(parent.worktree, "branch", "feat/unclaimed");
+			const root = fixture.preview("parent");
+			expect(root.receipt.startsWith("ownership-v1.")).toBe(true);
+			expect(readFileSync(parent.record, "utf8")).toBe(before);
+			expect(root.plan.parentSessionId).toBe(null);
+			expect(fixture.apply("parent", root.receipt).status).toBe(0);
+			const mapped = JSON.parse(readFileSync(parent.record, "utf8"));
+			expect(mapped.version).toBe(3);
+			expect(mapped.sessionId).toBe(root.plan.sessionId);
+			expect(mapped.branches.map((branch: { name: string }) => branch.name).join(",")).toBe("agent/parent");
+			expect(git(parent.worktree, "branch", "--list", "feat/unclaimed")).toContain("feat/unclaimed");
+			expect(git(parent.worktree, "rev-parse", "HEAD")).toBe(head);
+			expect(readFileSync(join(parent.worktree, "keep.txt"), "utf8")).toBe("retain dirty work\n");
+			const parents = runCli(fixture.checkout, ["__complete", "ownership-parents"]);
+			expect(parents.stdout.trim()).toBe("parent");
+			expect(runCli(fixture.checkout, ["__complete", "options:ownership"]).stdout).toContain("--parent");
+			const descendant = fixture.preview("child", "parent");
+			expect(descendant.plan.parentSessionId).toBe(mapped.sessionId);
+			expect(fixture.apply("child", descendant.receipt, "parent").status).toBe(0);
+			expect(runCli(child.worktree, [".", "branch", "create", "feat/owned"]).status).toBe(0);
+			const preview = runCli(fixture.checkout, ["parent", "finish", "--all", "--dry-run", "--json"]);
+			expect(JSON.parse(preview.stdout).plans.map((plan: { slug: string }) => plan.slug).join(",")).toBe("child,parent");
+			expect(existsSync(child.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses changed evidence, unreviewed application, unknown parents and self-parenting", () => {
+		const fixture = setup();
+		try {
+			const parent = fixture.legacy("parent"), child = fixture.legacy("child");
+			const unknown = runCli(fixture.checkout, ["child", "ownership", "--parent", "parent", "--dry-run", "--json"]);
+			expect(unknown.status).toBe(1);
+			const self = runCli(fixture.checkout, ["parent", "ownership", "--parent", "parent", "--dry-run"]);
+			expect(self.status).toBe(1);
+			const unapproved = runCli(fixture.checkout, ["parent", "ownership", "--root", "--yes"]);
+			expect(unapproved.status).toBe(64);
+			const preview = fixture.preview("parent");
+			const metadata = JSON.parse(readFileSync(parent.record, "utf8"));
+			writeFileSync(parent.record, JSON.stringify({ ...metadata, lastWorkAt: new Date().toISOString() }));
+			expect(fixture.apply("parent", preview.receipt).status).toBe(1);
+			expect(JSON.parse(readFileSync(parent.record, "utf8")).version).toBe(1);
+			expect(existsSync(child.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves borrowed legacy branches and their reflogs and tracking configuration", () => {
+		const fixture = createPullRequestFixture();
+		try {
+			prepareBorrowedBranch(fixture);
+			const created = runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
+			expect(created.status).toBe(0);
+			const metadata = JSON.parse(created.stdout).session, record = sessionMetadataPath(fixture.checkout, "review-auth");
+			metadata.version = 2; delete metadata.sessionId; delete metadata.parentSessionId; delete metadata.branches;
+			writeFileSync(record, JSON.stringify(metadata));
+			const config = readFileSync(join(fixture.checkout, ".git/config"), "utf8");
+			const log = git(fixture.checkout, "reflog", "show", fixture.branch);
+			const preview = runCli(fixture.checkout, ["review-auth", "ownership", "--root", "--dry-run", "--json"], fixture.environment);
+			expect(preview.status).toBe(0);
+			const plan = JSON.parse(preview.stdout);
+			expect(plan.plan.branch).toBe(null);
+			const applied = runCli(fixture.checkout, ["review-auth", "ownership", "--root", "--expected", plan.receipt, "--yes", "--json"], fixture.environment);
+			expect(applied.status).toBe(0);
+			expect(JSON.parse(readFileSync(record, "utf8")).branches.length).toBe(0);
+			expect(readFileSync(join(fixture.checkout, ".git/config"), "utf8")).toBe(config);
+			expect(git(fixture.checkout, "reflog", "show", fixture.branch)).toBe(log);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("leaves legacy metadata unchanged when Git cannot append review evidence", () => {
+		const fixture = setup();
+		try {
+			const legacy = fixture.legacy("parent"), before = readFileSync(legacy.record, "utf8");
+			const preview = fixture.preview("parent"), bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = reflog ] && [ "$2" = write ]; then echo "unsupported reflog write" >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const applied = runCli(fixture.checkout, ["parent", "ownership", "--root", "--expected", preview.receipt, "--yes"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(applied.status).toBe(1);
+			expect(applied.stderr).toContain("unsupported reflog write");
+			expect(readFileSync(legacy.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("revalidates evidence after appending a review marker rather than overwriting concurrent metadata", () => {
+		const fixture = setup();
+		try {
+			const legacy = fixture.legacy("parent"), preview = fixture.preview("parent"), bin = join(fixture.root, "bin");
+			mkdirSync(bin);
+			const changed = JSON.stringify({ ...JSON.parse(readFileSync(legacy.record, "utf8")), lastWorkAt: new Date().toISOString() });
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = reflog ] && [ "$2" = write ]; then\n${tomlString(executable)} "$@" || exit $?\nprintf '%s' ${tomlString(changed)} > ${tomlString(legacy.record)}\nexit 0\nfi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const applied = runCli(fixture.checkout, ["parent", "ownership", "--root", "--expected", preview.receipt, "--yes"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(applied.status).toBe(1);
+			expect(readFileSync(legacy.record, "utf8")).toBe(changed);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses retroactive cycles and does not convert an already mapped session into an ownership transfer", () => {
+		const fixture = setup();
+		try {
+			const parent = fixture.legacy("parent"), child = fixture.legacy("child");
+			const proposed = fixture.preview("parent");
+			const old = JSON.parse(readFileSync(parent.record, "utf8"));
+			writeFileSync(parent.record, JSON.stringify({ ...old, sessionId: proposed.plan.sessionId, parentSessionId: null }));
+			const newRoot = fixture.preview("parent");
+			expect(fixture.apply("parent", newRoot.receipt).status).toBe(0);
+			const childPlan = fixture.preview("child", "parent");
+			expect(fixture.apply("child", childPlan.receipt, "parent").status).toBe(0);
+			const mappedParent = readFileSync(parent.record, "utf8");
+			writeFileSync(parent.record, JSON.stringify({ ...old, sessionId: proposed.plan.sessionId, parentSessionId: null }));
+			const cycle = runCli(fixture.checkout, ["parent", "ownership", "--parent", "child", "--dry-run"]);
+			expect(cycle.status).toBe(1);
+			expect(cycle.stderr).toContain("cycle");
+			writeFileSync(parent.record, mappedParent);
+			expect(runCli(fixture.checkout, ["parent", "ownership", "--parent", "child", "--dry-run"]).status).toBe(1);
+			expect(existsSync(child.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("receipt-bound recursive finish", () => {
 	function setup() {
 		const fixture = createRepositoryFixture("agent-session-recursive-");

@@ -1,12 +1,13 @@
 import { CliError } from "./runtime.ts";
 import { validateSlug } from "./sessions.ts";
 import { parsePullRequestSelection } from "./github.ts";
-import type { BatchFinishOptions, PullRequestSelection } from "./types.ts";
+import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions } from "./types.ts";
 
 export const commandNames = [
 	"cd",
 	"run",
 	"branch",
+	"ownership",
 	"create",
 	"launch",
 	"start",
@@ -109,6 +110,32 @@ function unknownOption(
 	return argumentError(
 		`Unknown option '${option}' for '${command}'.${didYouMean(option, validOptions)}`,
 	);
+}
+
+export function parseOwnershipArguments(args: string[]): OwnershipOptions {
+	const [slug, ...tail] = args;
+	let parent: string | null | undefined, expected: string | undefined;
+	let dryRun = false, json = false, yes = false;
+	for (let index = 0; index < tail.length; index++) {
+		const option = tail[index];
+		if (option === "--root" || option === "--parent") {
+			if (parent !== undefined) throw argumentError("Declare exactly one ownership root or parent.");
+			parent = option === "--root" ? null : tail[++index];
+			if (parent === undefined) throw argumentError("--parent requires a mapped session slug.");
+			if (parent !== null) validateSlug(parent);
+		} else if (option === "--expected") {
+			const token = tail[++index] ?? "";
+			if (expected || !/^ownership-v1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$/.test(token)) throw argumentError("--expected requires one ownership preview receipt.");
+			expected = token;
+		} else if (option === "--dry-run") dryRun = true;
+		else if (option === "--json") json = true;
+		else if (option === "--yes") yes = true;
+		else throw argumentError(`Unknown ownership option: ${option}`);
+	}
+	if (!slug || parent === undefined) throw argumentError("Use: agent-session <slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json].");
+	if (dryRun && (expected || yes)) throw argumentError("Ownership preview does not accept approval flags.");
+	if (!dryRun && (!expected || !yes)) throw argumentError("Ownership mapping requires a reviewed --expected receipt and --yes.");
+	return { slug, parent, dryRun, json, yes, expected };
 }
 
 export function parseBranchArguments(args: string[]): { slug: string; name: string; json: boolean } {
@@ -366,6 +393,7 @@ function usage(): string {
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
 		"  agent-session <task-slug> branch create <name> [--json] (create and record ownership without switching)",
+		"  agent-session <task-slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json] (explicitly reviewed legacy mapping)",
 		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
@@ -375,7 +403,7 @@ function usage(): string {
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
-		"  agent-session . <cd|run|branch|launch|resume|status|doctor|finish> (current managed worktree)",
+		"  agent-session . <cd|run|branch|ownership|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",

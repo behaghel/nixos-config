@@ -137,10 +137,48 @@ A preview does not authorize deletion.
 Older records without identity/parentage remain usable through existing commands,
 but their ancestry is reported as unknown and they are excluded from recursive
 selection. Creation from a legacy parent is refused rather than inventing its
-identity or ancestry. An explicitly reviewed ownership mapping is required; there
-is no automatic legacy migration. Missing ancestors are reported and preserved;
+identity or ancestry. An explicitly reviewed [legacy mapping](#reviewed-legacy-mappings)
+is required; there is no automatic migration. Missing ancestors are reported and preserved;
 duplicate identities, incomplete identity fields and ownership cycles fail closed.
 Remote branches remain untouched.
+
+## Reviewed legacy mappings
+
+The human explicitly declares each legacy record to be a root or the child of
+an already mapped parent. The tool never reconstructs ancestry from names,
+checkout history or directory nesting. Map parents first:
+
+```sh
+as old-root ownership --root --dry-run --json
+# After reviewing and approving that exact mapping:
+as old-root ownership --root --expected <ownership-receipt> --yes --json
+as old-child ownership --parent old-root --dry-run --json
+# After separate review and approval:
+as old-child ownership --parent old-root --expected <ownership-receipt> --yes --json
+```
+
+The top-level `ownership-v1.` receipt binds the worktree's physical/native
+identity, metadata, current saved initial branch, HEAD/reflog evidence,
+configuration and declared parent ancestry. Apply rechecks the same declaration
+under the repository operation lock. The reviewed stable ID is retained, including
+an existing recorded ID; known ancestry cannot be changed into a transfer.
+Duplicate IDs, cycles, unresolved parents, conflicting saved branches and recorded
+managed activity refuse mapping. Already mapped v3 sessions cannot be remapped.
+
+Apply upgrades the one legacy record to schema v3 and records only its saved
+initial branch's existing ownership disposition. An owned initial branch receives
+a unique reviewed-incarnation marker via `git reflog write`; its ref never moves.
+Borrowed branches receive no ownership record or marker. Other plain-Git branches
+are not adopted. Dirty files, commits, branch refs, worktrees and remote resources
+remain unchanged. Git without `reflog write` support cannot map an owned initial
+branch; metadata remains unchanged if that command fails. If metadata persistence
+cannot be confirmed after a marker was appended, inspect status and obtain fresh
+review; the marker alone is not a completed mapping.
+
+Preview is read-only. Mapping approval is not retirement approval, does not
+approve artifact disposal and cannot substitute for a single-session, tree or
+batch retirement receipt. This command does not repair missing/ambiguous bindings,
+transfer ownership, import renamed branches or silently upgrade an installed CLI.
 
 ## Explicit branch ownership
 
@@ -973,6 +1011,7 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
 | `github.ts` | GitHub PR resolution, source-head verification, and review push safeguards |
 | `inspection.ts` | Local session state, branch ownership, and status reporting |
+| `ownership.ts` | Explicitly reviewed legacy identity and ancestry mapping |
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
 | `finish.ts` | Cleanup previews, receipts, confirmations, and guarded removal |

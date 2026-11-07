@@ -22,6 +22,7 @@ pushing, PR creation or merging on a project merely because it uses `as`.
 | adopt | Explicit approval before project configuration edits; read [the adoption guide](references/adoption.md). |
 | upgrade | Explicit approval only when a needed capability is unavailable; no silent repinning. |
 | repair | Explicit approval for the proposed metadata repair, registration pruning or resource replacement. |
+| map ownership | Explicit approval of the declared ancestry and exact legacy mapping receipt. |
 | retire | Explicit approval to apply the exact previewed selection, following a separate retirement request. |
 
 A diagnostic, missing directory, green test suite or merged PR is not permission
@@ -132,10 +133,36 @@ Do not adopt an existing branch, edit ownership metadata, or recreate a deleted
 name to manufacture cleanup authority. Lost creation evidence, manual renames
 and ambiguous records require review; they are not permission to delete.
 
-Legacy sessions need an explicitly reviewed ownership mapping before using this
-command. If the installed version lacks it, report the capability gap and ask
+Legacy sessions need the explicitly reviewed `ownership` mapping below before
+using this command. If the installed version lacks it, report the capability gap and ask
 before any pin upgrade; do not silently substitute `git switch -c` or claim a
 plain-Git branch later. Branch creation does not authorize retirement.
+
+## Review legacy ownership explicitly
+
+Verify support for `ownership` before offering it. The human declares ancestry;
+never choose `--root` merely because a parent is unknown. Preview a root or a
+child of an already mapped parent:
+
+```sh
+as <task-slug> ownership --root --dry-run --json
+as <task-slug> ownership --parent <parent-slug> --dry-run --json
+```
+
+Review the exact worktree, proposed stable ID, parent ID and saved initial-branch
+disposition. Only after explicit approval, repeat the same declaration with
+`--expected <ownership-receipt> --yes` instead of `--dry-run`. The receipt starts
+with `ownership-v1.` and cannot authorize retirement. Map parents before children.
+
+This maps only existing legacy records, never unrecorded worktrees or arbitrary
+branches. It retains the saved initial branch's existing ownership disposition;
+borrowed and follow-up plain-Git branches remain unclaimed. An owned initial
+branch receives a reviewed-incarnation reflog marker without moving its ref.
+The command requires Git with `reflog write` support for that marker. Missing
+support or changed evidence requires review, not manual metadata edits or a pin
+upgrade without approval. Already mapped sessions cannot be transferred through
+this command. A failed or uncertain metadata update calls for status inspection;
+an appended marker alone is not a completed mapping. No resources are retired.
 
 ## Diagnose without repairing
 
