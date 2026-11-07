@@ -5,7 +5,7 @@ import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, runInSession, launch, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
-import { finish, finishBulk } from "./finish.ts";
+import { finish, finishBulk, previewSessionTree } from "./finish.ts";
 import { batchFinish } from "./batch.ts";
 import {
 	commandNames,
@@ -125,7 +125,10 @@ export function main(args: string[]): number {
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
-			if (options.all || options.gone) {
+			if (options.slug && options.all) {
+				previewSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
+					options.keepBranch, options.dryRun, options.json);
+			} else if (options.all || options.gone) {
 				finishBulk(
 					root,
 					invocationRoot,

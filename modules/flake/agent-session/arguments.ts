@@ -234,10 +234,13 @@ export function parseFinishArguments(args: string[]): {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
-	if ([Boolean(slug), all, gone].filter(Boolean).length !== 1) {
+	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
-			"Choose exactly one finish selector: <task-slug>, --all, or --gone.",
+			"Choose a finish selector: <task-slug> [--all], --all, or --gone.",
 		);
+	}
+	if (slug && all && (force || expected)) {
+		throw argumentError("Session-scoped --all is preview only and does not accept --force or --expected.");
 	}
 	if (json && !dryRun) {
 		throw new CliError("finish --json requires --dry-run.", 64);
@@ -358,6 +361,7 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent; no execution yet)",
 		"  agent-session . <cd|run|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",

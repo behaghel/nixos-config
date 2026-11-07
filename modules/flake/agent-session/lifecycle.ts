@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { resolvePullRequest, fetchPullRequestHead, assertPullRequestTarget, prepareReviewSource, borrowedReviewSource, pullRequestSummary } from "./github.ts";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
@@ -27,6 +28,7 @@ import {
 	writeMetadata,
 	withSessionActivity,
 	resolveWorktreeRoot,
+	creationParentSessionId,
 } from "./sessions.ts";
 import {
 	refreshMetadataRemote,
@@ -211,6 +213,7 @@ function previewCreate(
 		validateSlug(slug);
 		assertPrimaryCheckout(root);
 		const config = loadConfig(root);
+		creationParentSessionId(root);
 		ensureClean(root, selection !== undefined);
 		const currentBranch = git(root, ["branch", "--show-current"]);
 		if (!currentBranch) {
@@ -328,6 +331,7 @@ function createSession(
 	assertPrimaryCheckout(root);
 	const config = loadConfig(root);
 	ensureClean(root);
+	const parentSessionId = creationParentSessionId(root);
 	const preexistingBranches = [...localBranches(root)].sort();
 
 	const currentBranch = git(root, ["branch", "--show-current"]);
@@ -472,6 +476,8 @@ function createSession(
 
 		const metadata: SessionMetadata = {
 			version: borrowed ? 2 : 1,
+			sessionId: randomUUID(),
+			parentSessionId,
 			slug,
 			branch,
 			worktreePath,

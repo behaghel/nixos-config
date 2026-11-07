@@ -15,6 +15,7 @@ import {
 	validateSlug,
 	loadConfig,
 	readMetadata,
+	readMetadataInventory,
 	assertConfiguredWorktreePath,
 	metadataPath,
 	withOperationLock,
@@ -459,6 +460,78 @@ export function finish(
 				: finishUnlocked(root, invocationRoot, slug, yes, keepBranch, expected, report);
 		}),
 	);
+}
+
+// This slice intentionally emits no apply receipt. A recursive preview is an
+// ownership inspection, not authorization for the legacy bulk execution path.
+export function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean): void {
+	if (!dryRun) throw new CliError("Session-scoped --all is preview only; recursive execution is not supported yet. No resources changed.");
+	validateSlug(slug);
+	const records = readMetadataInventory(root);
+	const target = records.find((record) => record.slug === slug);
+	if (!target) throw new CliError(`No managed session: ${slug}`);
+	const byId = new Map<string, SessionMetadata>();
+	const skipped: string[] = [];
+	for (const record of records) {
+		if (!record.sessionId) {
+			skipped.push(`${record.slug}: unknown ancestry; explicit reviewed ownership mapping required; preserved.`);
+			continue;
+		}
+		if (byId.has(record.sessionId)) throw new CliError("Duplicate session identity; recursive ownership is unresolved. No resources changed.");
+		byId.set(record.sessionId, record);
+	}
+	// Check full ancestry, including orphans and cycles, without assigning an
+	// old parent's surviving descendants to a newly reused slug.
+	const unresolved = new Set<string>();
+	for (const record of byId.values()) {
+		const seen = new Set<string>();
+		let current = record;
+		while (current.sessionId) {
+			if (seen.has(current.sessionId)) throw new CliError("Cyclic session ownership; no resources changed.");
+			seen.add(current.sessionId);
+			if (current.parentSessionId === null) break;
+			const parent = byId.get(current.parentSessionId!);
+			if (!parent) {
+				unresolved.add(record.sessionId!);
+				skipped.push(`${record.slug}: unresolved parent ${current.parentSessionId}; preserved.`);
+				break;
+			}
+			current = parent;
+		}
+	}
+	const selected: SessionMetadata[] = [];
+	const visit = (record: SessionMetadata) => {
+		if (!record.sessionId || unresolved.has(record.sessionId)) return;
+		for (const child of records) {
+			if (child.parentSessionId === record.sessionId) visit(child);
+		}
+		selected.push(record);
+	};
+	visit(target);
+	const plans: Record<string, unknown>[] = [];
+	const report = progressReporter("finish", json);
+	for (const record of selected) {
+		try {
+			const plan = previewFinish(root, invocationRoot, record.slug, false, keepBranch, report);
+			// Reflog-inferred branches are not recorded ownership authority.
+			const inferred = plan.ownedBranches as string[];
+			const ownedBranches = record.initialBranchOwned === false ? [] : inferred.filter((branch) => branch === record.branch);
+			const unresolvedBranches = inferred.filter((branch) => !ownedBranches.includes(branch));
+			const { receipt: _receipt, ...inspection } = plan;
+			plans.push({ ...inspection, sessionId: record.sessionId, parentSessionId: record.parentSessionId,
+				ownedBranches, unresolvedBranches, branchOwnership: "initial-only" });
+		} catch (error) {
+			skipped.push(`${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`);
+		}
+	}
+	const resourceText = plans.map((plan) => {
+		const branches = (plan.ownedBranches as string[]).join(", ") || "none";
+		const unresolvedBranches = plan.unresolvedBranches as string[];
+		return `  ${plan.slug}: ${plan.worktreePath}\n    initial owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
+	}).join("");
+	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: true,
+		slug, sessionId: target.sessionId ?? null, executionSupported: false, plans, skipped, remoteAssetsModified: false }, json,
+		`Recursive preview only for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}No resources changed; execution is not supported yet.${skipped.length ? `\nPreserved/unresolved:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}` : ""}\n`);
 }
 
 function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean) {

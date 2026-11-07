@@ -47,6 +47,9 @@ export interface SessionMetadata {
 	remote: string;
 	defaultBranch: string;
 	createdAt: string;
+	// Absent on legacy records: ancestry is unknown, not a root assumption.
+	sessionId?: string;
+	parentSessionId?: string | null;
 	lastWorkAt?: string;
 	activeOperations?: ActiveOperation[];
 	conversation: null;

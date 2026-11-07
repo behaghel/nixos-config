@@ -46,6 +46,8 @@ as my-task finish                   # guarded local cleanup, with confirmation
 Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
 Repository-wide commands remain command-first: `as list`, `as status`, `as doctor`,
 `as finish --all|--gone`, and `as completion bash|zsh|fish`.
+`as <slug> finish --all --dry-run` previews only that recorded session tree;
+`as finish --all --dry-run` retains repository-wide scope.
 
 Command words are reserved in the first position so old command-first calls cannot
 be mistaken for an action on a differently named session. To address an existing
@@ -70,6 +72,42 @@ Interactive cleanup uses Node-compatible confirmation for normal, forced and bul
 finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a failed
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
+
+## Session-tree ownership preview
+
+```sh
+as parent create
+# From parent's managed worktree:
+as child create
+# From child's managed worktree:
+as grandchild create
+# From another checkout, outside the selected tree:
+as parent finish --all --dry-run --json
+```
+
+New session records have a unique `sessionId` and a `parentSessionId`: `null`
+means creation from the primary checkout; creation from a verified managed
+worktree records that session's ID automatically. Creation and `start` use the
+same ownership recording. Reusing a slug creates a new ID and never adopts the
+previous session's surviving descendants. Reusing an existing PR session retains
+its identity and parent. Directory nesting and names do not determine ownership.
+
+Session-scoped `--all` currently supports **preview only**. It emits resources
+in descendants-first order, excludes unrelated sessions and modifies no assets.
+JSON uses `mode: "session-all"`, `sessionId`, ordered `plans`, `skipped` reasons
+and `executionSupported: false`. Each plan includes the worktree path, parent ID,
+initial owned branches and inspected artifact-disposal evidence. Additional
+reflog-inferred branches appear as `unresolvedBranches`, not recorded ownership.
+The preview emits no apply receipt; apply, `--force` and `--expected` are refused.
+It does not certify execution safety or authorize deletion.
+
+Older records without identity/parentage remain usable through existing commands,
+but their ancestry is reported as unknown and they are excluded from recursive
+selection. Creation from a legacy parent is refused rather than inventing its
+identity or ancestry. An explicitly reviewed ownership mapping is required; there
+is no automatic legacy migration. Missing ancestors are reported and preserved;
+duplicate identities, incomplete identity fields and ownership cycles fail closed.
+Remote branches remain untouched.
 
 ## Recorded-binding inventory
 
