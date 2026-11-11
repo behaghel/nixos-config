@@ -220,6 +220,20 @@ A preview is not cleanup authorization.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 
+On versions supporting interactive recursive finish, a human operator can run
+`as <task-slug> finish --all`, review the selected tree, choose whether to delete
+eligible local branches (default No), then confirm the final plan (default No).
+`--keep-branch` skips the branch question. Only verified exclusively owned tips
+merged by ancestry into the displayed local default/base branch qualify; unmerged,
+unclaimed or externally checked-out branches are preserved with reasons. Shared
+claims block cleanup. Branch deletion follows successful removal of the entire
+tree, rechecks evidence and atomically compares the approved tip. Failures stop
+later deletions; interruptions require inspection, not inferred retry authority.
+This terminal-only approval is not encoded in a replayable deletion receipt.
+An agent must never synthesize terminal consent or use this human path to bypass
+separately approved scope. Verify installed support first; newer instructions do
+not upgrade an older CLI.
+
 On versions supporting receipt-bound recursive finish, a named session's `--all`
 selects its recorded descendants, not every repository session:
 
@@ -231,13 +245,15 @@ as <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes --json
 
 The top-level `receipt` starts with `tree-v1.`; single-session and batch receipts
 are not interchangeable. Recursive preview does not authorize retirement.
-All branches remain preserved, children finish before parents, and a refused or
+In this automation flow all branches remain preserved, children finish before
+parents, and a refused or
 uncertain removal stops later removals. Replaying the same approved receipt can
 reconcile proven absence, not expand the tree or override changed evidence.
 Do not turn a partial result into permission to force, prune, fabricate ancestry
 or discard residual records. Unknown legacy ancestry and branch ownership require
 an explicitly reviewed mapping; no automatic migration is implied. Without a
-matching receipt, `--keep-branch` and explicit approval, do not execute recursion.
+matching receipt, `--keep-branch` and explicit approval, an agent must not execute
+recursion. The human terminal flow above is not an automation exception.
 Repository-wide `as finish --all` remains a different, broader selection.
 
 On versions supporting inactive batches, supply an explicit inactivity window,

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { inspectTreeBranches, treeBranchSummary, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
 import { captureProcesses, inspectCandidate, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
@@ -513,7 +514,25 @@ function selectSessionTree(root: string, slug: string) {
 }
 
 export function finishSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, expected?: string): number {
-	if (!dryRun) return applySessionTree(root, invocationRoot, slug, expected!, json);
+	if (expected && !dryRun) return applySessionTree(root, invocationRoot, slug, expected, json);
+	if (!dryRun && !process.stdin.isTTY) throw new CliError("Recursive finish requires a terminal, or --keep-branch --expected <tree-receipt> --yes after a dry-run preview.");
+	const preview = previewSessionTree(root, invocationRoot, slug, dryRun ? keepBranch : true, json);
+	if (dryRun) {
+		writeCommandResult(preview.value, json, preview.text);
+		return 0;
+	}
+	process.stderr.write(preview.summary);
+	if (!preview.token) throw new CliError("Recursive cleanup blocked; resolve the reported blockers first. No resources changed.");
+	const receipt = decodeTreeReceipt(root, slug, preview.token);
+	const branches = inspectTreeBranches(root, receipt.targets);
+	process.stderr.write(treeBranchSummary(branches, false));
+	const deleteBranches = !keepBranch && branches.some((branch) => !branch.reason) && confirm("Also delete eligible local branches? [y/N]");
+	process.stderr.write(`Final removal plan (descendants first):\n${preview.summary}${treeBranchSummary(branches, deleteBranches)}Remote assets will not be modified.\n`);
+	if (!confirm("Remove these local session assets? [y/N]")) throw new CliError("Cleanup cancelled. No resources changed.");
+	return applySessionTree(root, invocationRoot, slug, preview.token, false, deleteBranches ? branches.filter((branch) => !branch.reason) : undefined);
+}
+
+function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, json: boolean) {
 	const { target, selected, skipped, sharedBranches } = selectSessionTree(root, slug);
 	const plans: Record<string, unknown>[] = [];
 	const report = progressReporter("finish", json);
@@ -538,7 +557,7 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 		const unresolvedBranches = plan.unresolvedBranches as string[];
 		const shared = plan.sharedBranches as typeof sharedBranches;
 		const sharedText = shared.map((branch) => `    shared branch claim (preserve): ${branch.name}; claimants: ${branch.claims.map((claim) => claim.slug).join(", ")}\n`).join("");
-		return `  ${plan.slug}: ${plan.worktreePath}\n    recorded owned branches (${keepBranch ? "preserve" : "deletion requested, not approved"}): ${branches}\n${sharedText}${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
+		return `  ${plan.slug}: ${plan.worktreePath}\n    recorded owned branches: ${branches}\n${sharedText}${artifactSummary(plan.ignoredData as IgnoredDataInspection | undefined)}${unresolvedBranches.length ? `    unresolved branch ownership (preserve): ${unresolvedBranches.join(", ")}\n` : ""}`;
 	}).join("");
 	const observedAt = new Date().toISOString();
 	const context = keepBranch ? snapshotExactResources(root) : undefined;
@@ -568,11 +587,14 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 		observedAt, keepBranch: true, targets: candidates.map((candidate, index) => ({ ...candidate.snapshot!,
 			sessionId: selected[index]!.sessionId!, parentSessionId: selected[index]!.parentSessionId! })) }) : undefined;
 	const resources = candidates.map(({ snapshot, ...candidate }) => ({ ...candidate, ...(snapshot ? { fingerprint: snapshot.fingerprint } : {}) }));
-	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: true,
-		slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources, sharedBranches,
-		...(token ? { receipt: token } : {}), keepBranch, remoteAssetsModified: false }, json,
-		`Recursive preview only for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}No resources changed.${token ? `\nReceipt: ${token}\nApply: ${sessionCommand(slug, "finish")} --all --keep-branch --expected ${token} --yes` : "\nNo execution receipt: use --keep-branch with a fully resolved, safe tree."}${resources.filter((resource) => resource.reason !== "eligible").map((resource) => `\n  ${resource.slug}: ${resource.problem ?? resource.reason}`).join("")}${skipped.length ? `\nPreserved/unresolved:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}` : ""}\n`);
-	return 0;
+	const summary = `Selected tree for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}${resources.filter((resource) => resource.reason !== "eligible").map((resource) => `  ${resource.slug}: ${resource.problem ?? resource.reason}\n`).join("")}${skipped.length ? `Preserved/unresolved:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}\n` : ""}`;
+	return {
+		value: { version: 1, command: "finish", mode: "session-all", dryRun: true,
+			slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources, sharedBranches,
+			...(token ? { receipt: token } : {}), keepBranch, remoteAssetsModified: false },
+		token, summary,
+		text: `Recursive preview only. ${summary}No resources changed.${token ? `\nReceipt: ${token}\nApply: ${sessionCommand(slug, "finish")} --all --keep-branch --expected ${token} --yes` : "\nNo execution receipt: use --keep-branch with a fully resolved, safe tree."}\n`,
+	};
 }
 
 interface TreeTarget extends Target { sessionId: string; parentSessionId: string | null }
@@ -617,9 +639,10 @@ function decodeTreeReceipt(root: string, slug: string, token: string): TreeRecei
 	} catch (error) { throw new CliError(`Invalid or mismatched tree receipt; obtain a fresh preview. ${String(error)}`, 64); }
 }
 
-function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean): number {
+function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean, branchesToDelete?: TreeBranch[]): number {
 	const receipt = decodeTreeReceipt(root, slug, token);
 	const report = progressReporter("recursive finish", json);
+	const branchResources: { name: string; outcome: "deleted" | "refused"; problem?: string }[] = [];
 	let resources: Outcome[];
 	try {
 		resources = withOperationLock(root, "recursive finish", () => {
@@ -656,6 +679,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 			// Refuse the whole operation before the first native effect when any
 			// approved target has already changed. Explicit scope needs no age cutoff.
 			const initial = scope();
+			for (const branch of branchesToDelete ?? []) assertTreeBranchUnchanged(root, branch, new Set(receipt.targets.map((target) => target.worktreePath)));
 			for (const state of initial.states) {
 				if (state.kind !== "present") continue;
 				const candidate = inspectCandidate(root, invocationRoot, state.target.slug, treeInspectionOptions,
@@ -693,17 +717,32 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 				stopped = !["finished", "absent"].includes(outcome.outcome);
 				report(`apply:${target.slug}`, stopped ? "failed" : "completed", outcome.reason);
 			}
+			// Delete branches only after the complete tree has been removed safely.
+			// A partial worktree cleanup never authorizes branch deletion.
+			if (!stopped) {
+				for (const branch of branchesToDelete ?? []) {
+					if (branchResources.some((result) => result.outcome === "refused")) {
+						branchResources.push({ name: branch.name, outcome: "refused", problem: "Earlier branch deletion failed; preserved." });
+						continue;
+					}
+					try {
+						if (receipt.rootKey !== rootKey(root)) throw new CliError("Tree configuration changed; branch preserved.");
+						deleteTreeBranch(root, branch);
+						branchResources.push({ name: branch.name, outcome: "deleted" });
+					} catch (error) { branchResources.push({ name: branch.name, outcome: "refused", problem: String(error) }); }
+				}
+			}
 			return outcomes;
 		});
 	} catch (error) {
 		resources = receipt.targets.map((target) => ({ slug: target.slug, worktreePath: target.worktreePath,
 			outcome: "refused", reason: "tree-preflight", problem: String(error) }));
 	}
-	const success = resources.every((resource) => ["finished", "absent"].includes(resource.outcome));
+	const success = resources.every((resource) => ["finished", "absent"].includes(resource.outcome)) && branchResources.every((branch) => branch.outcome === "deleted");
 	const partial = !success && resources.some((resource) => ["finished", "absent"].includes(resource.outcome));
-	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: false, keepBranch: true,
-		branchesModified: false, remoteAssetsModified: false, success, partial, resources }, json,
-		`${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n`);
+	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: false, keepBranch: branchesToDelete === undefined,
+		branchesModified: branchResources.some((branch) => branch.outcome === "deleted"), remoteAssetsModified: false, success, partial, resources, branchResources }, json,
+		`${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n${branchResources.map((branch) => `${branch.name}: ${branch.outcome}${branch.problem ? `: ${branch.problem}` : ""}\n`).join("")}`);
 	return success ? 0 : 1;
 }
 

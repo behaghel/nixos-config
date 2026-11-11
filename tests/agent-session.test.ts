@@ -74,6 +74,8 @@ function createRepositoryFixture(prefix = "agent-session-"): {
 	git(seed, "push", "-u", "origin", "master");
 	git(remote, "symbolic-ref", "HEAD", "refs/heads/master");
 	git(root, "clone", remote, checkout);
+	git(checkout, "config", "user.name", "Agent Session Test");
+	git(checkout, "config", "user.email", "agent-session@example.invalid");
 
 	return { root, remote, seed, checkout, worktrees };
 }
@@ -510,6 +512,146 @@ describe("receipt-bound recursive finish", () => {
 		const apply = (receipt: string) => runCli(fixture.checkout, [...args, "--expected", receipt, "--yes", "--json"], environment);
 		return { ...fixture, parent, child, grandchild, bin, log, environment, createAt, preview, apply };
 	}
+
+	it("finishes a tree interactively while preserving branches by default", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["\n", "y\n"], "", fixture.environment);
+			expect(result.status).toBe(0);
+			expect(result.output).toContain("Also delete eligible local branches?");
+			expect(result.output).toContain("Final removal plan");
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) {
+				expect(existsSync(session.worktreePath)).toBe(false);
+				expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("deletes only merged owned branches after explicit interactive approval", () => {
+		const fixture = setup();
+		try {
+			const unrelated = fixture.createAt(fixture.checkout, "unrelated");
+			writeFileSync(join(fixture.child.worktreePath, "README.md"), "unmerged work\n");
+			git(fixture.child.worktreePath, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-am", "Unmerged work");
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "yes\n"], "", fixture.environment);
+			expect(result.status).toBe(0);
+			expect(result.output).toContain("unmerged");
+			expect(result.output).toContain(`delete: ${fixture.parent.branch}`);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toBe("");
+			expect(git(fixture.checkout, "branch", "--list", fixture.grandchild.branch)).toBe("");
+			expect(git(fixture.checkout, "branch", "--list", fixture.child.branch)).toContain(fixture.child.branch);
+			expect(existsSync(unrelated.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves a borrowed unclaimed branch while deleting eligible owned branches", () => {
+		const fixture = setup();
+		try {
+			const tip = git(fixture.checkout, "rev-parse", fixture.parent.branch);
+			writeFileSync(sessionMetadataPath(fixture.checkout, "parent"), JSON.stringify({
+				...fixture.parent, initialBranchOwned: false, branches: [],
+				preexistingBranches: [...fixture.parent.preexistingBranches, fixture.parent.branch],
+				pr: { number: 1, url: "https://github.com/example/project/pull/1", repository: "example/project",
+					baseBranch: "master", headBranch: fixture.parent.branch, headCommit: tip, trustedHeadCommit: tip,
+					state: "OPEN", isDraft: false, mode: "review" },
+			}));
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "", fixture.environment);
+			if (result.status !== 0) throw new Error(result.output);
+			expect(result.output).toContain("unclaimed or unresolved ownership");
+			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toContain(fixture.parent.branch);
+			expect(git(fixture.checkout, "branch", "--list", fixture.child.branch)).toBe("");
+			expect(existsSync(fixture.parent.worktreePath)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000); // Includes three worktree preparations and two terminal prompts.
+
+	for (const answer of ["\n", "n\n", "EOF"]) {
+		it(`cancels recursive cleanup without effects on final answer ${JSON.stringify(answer)}`, () => {
+			const fixture = setup();
+			try {
+				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", answer], "", fixture.environment);
+				expect(result.status).toBe(1);
+				expect(result.output).toContain("cancelled");
+				expect(existsSync(fixture.log)).toBe(false);
+				for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(true);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("refuses non-terminal recursive cleanup without an explicit receipt", () => {
+		const fixture = setup();
+		try {
+			const result = runCli(fixture.checkout, ["parent", "finish", "--all"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("terminal");
+			expect(existsSync(fixture.log)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rechecks the tree after interactive branch approval before any removal", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "head", fixture.environment, fixture.child.worktreePath);
+			expect(result.status).toBe(1);
+			expect(existsSync(fixture.log)).toBe(false);
+			expect(existsSync(fixture.parent.worktreePath)).toBe(true);
+			expect(git(fixture.checkout, "branch", "--list", fixture.child.branch)).toContain(fixture.child.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("supports a single final confirmation with explicit --keep-branch", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch"], "y\n", "", fixture.environment);
+			expect(result.status).toBe(0);
+			expect(result.output.includes("Also delete")).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toContain(fixture.parent.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses changed merge-base evidence before removing any worktree", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "base", fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.output).toContain("merge base changed");
+			expect(existsSync(fixture.log)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("never deletes branches after a partial worktree removal failure", () => {
+		const fixture = setup();
+		try {
+			const path = join(fixture.bin, "git"), original = readFileSync(path, "utf8");
+			writeFileSync(path, original.replace("exec ", `if [ "$1" = worktree ] && [ "$2" = remove ] && [ "$4" = ${tomlString(fixture.child.worktreePath)} ]; then exit 1; fi\nexec `));
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "", fixture.environment);
+			expect(result.status).toBe(1);
+			expect(existsSync(fixture.grandchild.worktreePath)).toBe(false);
+			expect(existsSync(fixture.parent.worktreePath)).toBe(true);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const raceTarget of ["tip", "base"]) it(`atomically preserves branches when the ${raceTarget} moves during deletion`, () => {
+		const fixture = setup();
+		try {
+			const outside = fixture.createAt(fixture.checkout, "outside");
+			git(outside.worktreePath, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Concurrent tip");
+			const moved = git(outside.worktreePath, "rev-parse", "HEAD");
+			const path = join(fixture.bin, "git"), original = readFileSync(path, "utf8");
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const racedRef = raceTarget === "tip" ? `refs/heads/${fixture.grandchild.branch}` : "refs/heads/master";
+			writeFileSync(path, original.replace("exec ", `if [ "$1" = update-ref ]; then ${tomlString(executable)} update-ref ${tomlString(racedRef)} ${moved}; fi\nexec `));
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "", fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.output).toContain("refused");
+			expect(git(fixture.checkout, "branch", "--list", fixture.grandchild.branch)).toContain(fixture.grandchild.branch);
+			expect(git(fixture.checkout, "rev-parse", racedRef)).toBe(moved);
+			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toContain(fixture.parent.branch);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(false);
+			expect(existsSync(outside.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
 
 	it("finishes only the approved tree, descendants first, preserves every branch and replays confirmed absence", () => {
 		const fixture = setup();
@@ -1357,15 +1499,16 @@ finally:
 	}, 60000);
 });
 
-function runFixtureOnTerminal(fixture: ReturnType<typeof createRepositoryFixture>, command: string[], answer: string, mutation = "") {
+function runFixtureOnTerminal(fixture: ReturnType<typeof createRepositoryFixture>, command: string[], answer: string | string[], mutation = "", environment: Record<string, string> = {}, mutationWorktree = join(fixture.worktrees, "human")) {
 	const driver = `
 import errno, json, os, pty, select, subprocess, sys, time
 master, slave = pty.openpty()
 child = subprocess.Popen(json.loads(sys.argv[1]), stdin=slave, stdout=slave, stderr=slave)
 os.close(slave)
-output, answered = b'', False
+output, answered, prompt_count = b'', False, 0
+answers = json.loads(sys.argv[2])
 try:
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         if select.select([master], [], [], 0.05)[0]:
             try:
@@ -1377,8 +1520,9 @@ try:
             if not chunk:
                 break
             output += chunk
-            if b'[y/N]' in output and not answered:
-                worktree, mutation = sys.argv[3], sys.argv[4]
+            if output.count(b'[y/N]') > prompt_count and prompt_count < len(answers):
+                worktree = sys.argv[3]
+                mutation = sys.argv[4] if prompt_count == len(answers) - 1 else ''
                 if mutation == 'artifact':
                     with open(os.path.join(worktree, '.cache', 'tasks.sqlite'), 'w') as data:
                         data.write('new data during confirmation')
@@ -1389,6 +1533,8 @@ try:
                     with open(os.path.join(worktree, 'README.md'), 'a') as data:
                         data.write('concurrent work\\n')
                     subprocess.run(['git', '-C', worktree, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-am', 'Concurrent work'], check=True, stdout=subprocess.DEVNULL)
+                elif mutation == 'base':
+                    subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Concurrent base'], check=True, stdout=subprocess.DEVNULL)
                 elif mutation == 'policy':
                     with open(os.environ['AGENT_SESSION_CONFIG']) as data:
                         record = json.load(data)
@@ -1401,7 +1547,9 @@ try:
                     record['lastWorkAt'] = '2026-10-28T00:00:00Z'
                     with open(sys.argv[5], 'w') as data:
                         json.dump(record, data)
-                os.write(master, b'\\x04' if sys.argv[2] == 'EOF' else sys.argv[2].encode())
+                answer = answers[prompt_count]
+                os.write(master, b'\\x04' if answer == 'EOF' else answer.encode())
+                prompt_count += 1
                 answered = True
         elif child.poll() is not None:
             break
@@ -1414,9 +1562,9 @@ finally:
         child.wait()
     os.close(master)
 `;
-	const result = spawnSync("python3", ["-c", driver, JSON.stringify(command), answer,
-		join(fixture.worktrees, "human"), mutation, sessionMetadataPath(fixture.checkout, "human")], {
-		cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+	const result = spawnSync("python3", ["-c", driver, JSON.stringify(command), JSON.stringify(Array.isArray(answer) ? answer : [answer]),
+		mutationWorktree, mutation, sessionMetadataPath(fixture.checkout, "human")], {
+		cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, ...environment, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
 	});
 	if (result.status !== 0) throw new Error(result.stderr);
 	return JSON.parse(result.stdout);
