@@ -70,6 +70,8 @@ pkgs.runCommand "agent-session-tests"
           JSON.stringify(config.generated_links) !== JSON.stringify(expectedLinks)) throw new Error("Artifact defaults module wiring failed: " + variable);
     }
     JS
-    bun test ./tests/agent-session.test.ts ./tests/agent-session-templates.test.ts --timeout 30000
+    # Recursive fixtures run many real Git/Node subprocesses; leave headroom
+    # for loaded builders without relaxing any cleanup assertions.
+    bun test ./tests/agent-session.test.ts ./tests/agent-session-templates.test.ts --timeout 90000
     touch "$out"
   ''

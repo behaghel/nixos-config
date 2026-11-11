@@ -195,7 +195,7 @@ function metadataHash(root: string, slug: string, commonDirectory?: string): str
 }
 
 export function inspectCandidate(root: string, invocationRoot: string, slug: string, options: BatchFinishOptions,
-	now = Date.now(), processes?: ProcessSnapshot, report?: ProgressReporter, sharedContext?: ExactInspectionContext, requireInactivity = true): Candidate {
+	now = Date.now(), processes?: ProcessSnapshot, report?: ProgressReporter, sharedContext?: ExactInspectionContext, requireInactivity = true, branchScope: "owned" | "worktree-history" = "owned"): Candidate {
 	const candidate: Candidate = { slug, reason: "eligible", blockers: [], inspectionComplete: true };
 	const block = (reason: string, problem?: string) => candidate.blockers.push({ reason, ...(problem ? { problem } : {}) });
 	const finish = () => {
@@ -218,8 +218,15 @@ export function inspectCandidate(root: string, invocationRoot: string, slug: str
 		if (metadata.worktreePath === invocationRoot) block("invoking-worktree");
 		const exact = inspectExactResource(root, metadata.worktreePath, sharedContext);
 		candidate.resource = { state: exact.resourceState, evidence: exact.evidence, bindingSlugs: exact.bindingSlugs };
-		if (exact.resourceState !== "present") block("unresolved-resource", exact.problem);
 		const status = exact.sessions[0];
+		// Historical selection does not manufacture branch ownership. It permits
+		// review of a different checked-out branch only after proving the same
+		// uniquely bound native worktree. Every other resource/activity guard stays.
+		const reviewedConflict = branchScope === "worktree-history" && status?.state === "conflict" && status.currentBranch &&
+			exact.bindingSlugs.length === 1 && exact.bindingSlugs[0] === slug &&
+			exact.evidence.registered === true && exact.evidence.filesystem === "present" &&
+			realpathSync(git(metadata.worktreePath, ["rev-parse", "--show-toplevel"])) === metadata.worktreePath;
+		if (exact.resourceState !== "present" && !reviewedConflict) block("unresolved-resource", exact.problem);
 		// A returned session proves the physical checkout identity, even when its
 		// current branch conflicts. Without it, do not inspect an unsafe path.
 		if (!status) { candidate.inspectionComplete = false; return finish(); }

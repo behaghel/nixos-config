@@ -1,25 +1,13 @@
-import { spawnSync } from "node:child_process";
-import { git } from "./git.ts";
+import { git, branchCheckedOutElsewhere, assertBranchRefsUnchanged, deleteBranchRef, type BranchRef } from "./git.ts";
 import { readMetadata, readMetadataInventory } from "./sessions.ts";
 import { sessionBaseBranch, sessionBranchSets } from "./inspection.ts";
 import { CliError, run } from "./runtime.ts";
 import type { Target } from "./batch.ts";
 import type { SessionMetadata } from "./types.ts";
 
-export interface TreeBranch {
-	name: string;
-	revision: string;
-	baseRef: string;
-	baseRevision: string;
+export interface TreeBranch extends BranchRef {
 	metadata: SessionMetadata;
 	reason?: string;
-}
-
-function branchCheckedOutElsewhere(root: string, name: string, allowedWorktrees: Set<string>): boolean {
-	return git(root, ["worktree", "list", "--porcelain", "-z"]).split("\0\0").some((record) => {
-		const fields = record.split("\0");
-		return fields.includes(`branch refs/heads/${name}`) && !allowedWorktrees.has(fields.find((field) => field.startsWith("worktree "))?.slice(9) ?? "");
-	});
 }
 
 // Branch deletion is a separate, terminal-only approval. The ordinary tree
@@ -55,21 +43,13 @@ export function treeBranchSummary(branches: TreeBranch[], deleteEligible: boolea
 
 export function deleteTreeBranch(root: string, branch: TreeBranch): void {
 	assertTreeBranchUnchanged(root, branch, new Set());
-	// Verify the merge base and compare-and-delete the tip in one ref transaction.
-	const result = spawnSync("git", ["update-ref", "--stdin"], {
-		cwd: root, encoding: "utf8",
-		input: `start\nverify ${branch.baseRef} ${branch.baseRevision}\ndelete refs/heads/${branch.name} ${branch.revision}\nprepare\ncommit\n`,
-	});
-	if (result.status !== 0) throw new CliError(result.stderr?.trim() || result.error?.message || "Local branch deletion failed.");
+	deleteBranchRef(root, branch);
 }
 
 export function assertTreeBranchUnchanged(root: string, branch: TreeBranch, allowedWorktrees: Set<string>): void {
-	if (git(root, ["rev-parse", "--verify", `refs/heads/${branch.name}`]) !== branch.revision ||
-		git(root, ["rev-parse", "--verify", branch.baseRef]) !== branch.baseRevision) throw new CliError(`Branch or merge base changed: ${branch.name}; preserved.`);
+	assertBranchRefsUnchanged(root, branch, allowedWorktrees);
 	if (!sessionBranchSets(branch.metadata, root).owned.includes(branch.name)) throw new CliError(`Branch ownership evidence changed: ${branch.name}; preserved.`);
 	const claims = readMetadataInventory(root).filter((record) =>
 		(record.branches?.some((entry) => entry.name === branch.name) ?? record.branch === branch.name) && record.sessionId !== branch.metadata.sessionId);
 	if (claims.length) throw new CliError(`Branch has another session claim: ${branch.name}; preserved.`);
-	if (branchCheckedOutElsewhere(root, branch.name, allowedWorktrees)) throw new CliError(`Branch is checked out outside the approved tree: ${branch.name}; preserved.`);
-	if (run("git", ["merge-base", "--is-ancestor", branch.revision, branch.baseRevision], root).status !== 0) throw new CliError(`Branch is no longer safely merged: ${branch.name}; preserved.`);
 }

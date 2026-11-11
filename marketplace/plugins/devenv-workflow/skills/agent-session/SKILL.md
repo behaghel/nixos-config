@@ -220,6 +220,22 @@ A preview is not cleanup authorization.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 
+On versions supporting historical branch review, a human operator can run
+`as <task-slug> finish --branches`. It selects one recorded worktree and candidate
+local branches from its saved initial/current branch, recorded creations and
+retained checkout history, not descendant sessions. The operator reviews the
+current refs, optionally approves eligible local deletion (default No), then
+confirms the final removal plan (default No). `--keep-branch` skips deletion.
+This is explicit branch-selection authority, not ownership inferred from history.
+Expired reflogs mean discovery is not guaranteed exhaustive. Legacy ancestry and
+an unclaimed current branch need no fabricated ownership mapping in this mode;
+physical identity, clean state, artifacts, activity and native guards still apply.
+Unmerged/protected/shared/externally checked-out branches are preserved. Changed
+scope is refused; interrupted or partial cleanup requires inspection, not force.
+`--dry-run --json` previews do not authorize retirement. `--yes`, `--expected`,
+`--force`, `--all` and `--gone` are not accepted with `--branches`. An agent must
+never synthesize terminal consent for a real worktree; use the human handoff.
+
 On versions supporting interactive recursive finish, a human operator can run
 `as <task-slug> finish --all`, review the selected tree, choose whether to delete
 eligible local branches (default No), then confirm the final plan (default No).

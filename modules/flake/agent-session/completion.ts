@@ -17,7 +17,7 @@ const commandOptions: Record<string, string[]> = {
 	status: ["--json", "--refresh"],
 	doctor: ["--json"],
 	"global-doctor": ["--json"],
-	finish: ["--all", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
+	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
 	"global-status": ["--json", "--refresh", "--worktree"],
 	"global-list": ["--json"],
 	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json"],
@@ -30,8 +30,10 @@ export function completionCandidates(scope: string): string[] {
 		const plain = scope.slice(0, -(format.length + 1));
 		const description = plain === "options:finish" ? "Recorded descendants of selected session"
 			: plain === "options:global-finish" ? "Repository-wide sessions" : undefined;
-		return completionCandidates(plain).map((candidate) => candidate === "--all" && description
-			? `${candidate}${format === "zsh" ? ":" : "\t"}${description}` : candidate);
+		return completionCandidates(plain).map((candidate) => {
+			const detail = candidate === "--branches" ? "Branches used in selected worktree" : candidate === "--all" ? description : undefined;
+			return detail ? `${candidate}${format === "zsh" ? ":" : "\t"}${detail}` : candidate;
+		});
 	}
 	if (scope === "commands") return sessionCommandNames;
 	if (scope === "current-commands") {

@@ -226,6 +226,7 @@ export function parseFinishArguments(args: string[]): {
 	force: boolean;
 	keepBranch: boolean;
 	all: boolean;
+	branches: boolean;
 	gone: boolean;
 	dryRun: boolean;
 	json: boolean;
@@ -237,6 +238,7 @@ export function parseFinishArguments(args: string[]): {
 	let force = false;
 	let keepBranch = false;
 	let all = false;
+	let branches = false;
 	let gone = false;
 	let dryRun = false;
 	let json = false;
@@ -251,6 +253,7 @@ export function parseFinishArguments(args: string[]): {
 		else if (argument === "--force") force = true;
 		else if (argument === "--keep-branch") keepBranch = true;
 		else if (argument === "--all") all = true;
+		else if (argument === "--branches") branches = true;
 		else if (argument === "--gone") gone = true;
 		else if (argument === "--dry-run") dryRun = true;
 		else if (argument === "--json") json = true;
@@ -262,6 +265,7 @@ export function parseFinishArguments(args: string[]): {
 				"--keep-branch",
 				"--expected",
 				"--all",
+				"--branches",
 				"--gone",
 				"--dry-run",
 				"--json",
@@ -270,6 +274,7 @@ export function parseFinishArguments(args: string[]): {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
+	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
 			"Choose a finish selector: <task-slug> [--all], --all, or --gone.",
@@ -288,7 +293,7 @@ export function parseFinishArguments(args: string[]): {
 		throw argumentError(
 			"finish --expected requires one slug, --keep-branch and non-forced cleanup.",
 		);
-	return { slug, yes, force, keepBranch, all, gone, dryRun, json, expected };
+	return { slug, yes, force, keepBranch, all, branches, gone, dryRun, json, expected };
 }
 
 export function parseBatchArguments(args: string[]): BatchFinishOptions {
@@ -402,6 +407,7 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session <task-slug> finish --branches [--keep-branch] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
 		"  agent-session <task-slug> finish --all [--keep-branch] (preview recorded descendants, choose eligible branch deletion and confirm)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",

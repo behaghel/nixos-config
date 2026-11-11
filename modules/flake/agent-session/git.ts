@@ -19,6 +19,38 @@ export function gitRaw(cwd: string, args: string[]): string {
 	return result.stdout;
 }
 
+export interface BranchRef {
+	name: string;
+	revision: string;
+	baseRef: string;
+	baseRevision: string;
+}
+
+export function branchCheckedOutElsewhere(root: string, name: string, allowedWorktrees: Set<string>): boolean {
+	return git(root, ["worktree", "list", "--porcelain", "-z"]).split("\0\0").some((record) => {
+		const fields = record.split("\0");
+		return fields.includes(`branch refs/heads/${name}`) && !allowedWorktrees.has(fields.find((field) => field.startsWith("worktree "))?.slice(9) ?? "");
+	});
+}
+
+export function assertBranchRefsUnchanged(root: string, branch: BranchRef, allowedWorktrees: Set<string>): void {
+	if (git(root, ["rev-parse", "--verify", `refs/heads/${branch.name}`]) !== branch.revision ||
+		git(root, ["rev-parse", "--verify", branch.baseRef]) !== branch.baseRevision) throw new CliError(`Branch or merge base changed: ${branch.name}; preserved.`);
+	if (branchCheckedOutElsewhere(root, branch.name, allowedWorktrees)) throw new CliError(`Branch is checked out outside the approved scope: ${branch.name}; preserved.`);
+	if (run("git", ["merge-base", "--is-ancestor", branch.revision, branch.baseRevision], root).status !== 0) throw new CliError(`Branch is no longer safely merged: ${branch.name}; preserved.`);
+}
+
+// Callers supply either verified ownership or explicit historical-branch
+// approval. Native ref mechanics never infer that authority from a reflog.
+export function deleteBranchRef(root: string, branch: BranchRef): void {
+	assertBranchRefsUnchanged(root, branch, new Set());
+	const result = spawnSync("git", ["update-ref", "--stdin"], {
+		cwd: root, encoding: "utf8",
+		input: `start\nverify ${branch.baseRef} ${branch.baseRevision}\ndelete refs/heads/${branch.name} ${branch.revision}\nprepare\ncommit\n`,
+	});
+	if (result.status !== 0) throw new CliError(result.stderr?.trim() || result.error?.message || "Local branch deletion failed.");
+}
+
 export function repositoryRoot(cwd = process.cwd()): string {
 	const result = run("git", ["rev-parse", "--show-toplevel"], cwd);
 	if (result.status !== 0) {
