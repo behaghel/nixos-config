@@ -26,6 +26,10 @@ let
 
   disabledCfg = evalCfg { enable = false; };
   plainCfg = evalCfg { enable = true; };
+  legacyNpmCfg = evalCfg {
+    enable = true;
+    npm.enable = true;
+  };
   selfManagedCfg = evalCfg {
     enable = true;
     npm.enable = false;
@@ -61,12 +65,18 @@ let
     (!builtins.hasAttr ".pi/agent/models.json" plainCfg.home.file
       && !builtins.hasAttr ".local/share/pi-local/agent/models.json" plainCfg.home.file
       && !builtins.elem "pi-local" (packageNames plainCfg)
-      && !builtins.elem "pi-coding-agent" (packageNames plainCfg));
+      && !builtins.elem "pi-coding-agent" (packageNames plainCfg)
+      && !builtins.hasAttr "installPiWithNpm" plainCfg.home.activation
+      && builtins.elem "nodejs" (packageNames plainCfg));
 
   selfManagedCheck = assert' "self-managed Pi retains integration without activation-time npm"
     (!builtins.hasAttr "installPiWithNpm" selfManagedCfg.home.activation
       && builtins.hasAttr ".pi/agent/extensions/tmux-attention.ts" selfManagedCfg.home.file
-      && !builtins.elem "nodejs" (packageNames selfManagedCfg));
+      && builtins.elem "nodejs" (packageNames selfManagedCfg));
+
+  legacyNpmCheck = assert' "legacy npm provisioning remains opt-in"
+    (builtins.hasAttr "installPiWithNpm" legacyNpmCfg.home.activation
+      && builtins.elem "nodejs" (packageNames legacyNpmCfg));
 
   piAttentionCheck =
     let
@@ -134,7 +144,7 @@ in
 pkgs.runCommand "pi-module-tests" { } ''
   cat <<'RESULTS'
   ── Pi Home Manager module ──
-  ${disabledCheck}${plainCheck}${selfManagedCheck}${piAttentionCheck}${relativePathsCheck}${tmuxAttentionCheck}${localCheck}${ds4Check}RESULTS
+  ${disabledCheck}${plainCheck}${selfManagedCheck}${legacyNpmCheck}${piAttentionCheck}${relativePathsCheck}${tmuxAttentionCheck}${localCheck}${ds4Check}RESULTS
   # Exercise the generated launcher without pass, network access, or real credentials.
   sh=${pkgs.dash}/bin/dash
   "$sh" -n ${ds4Wrapper}

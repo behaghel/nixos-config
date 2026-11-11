@@ -46,6 +46,56 @@ def validate_evidence(records):
         )
 
 
+class RuntimeSelectionTests(unittest.TestCase):
+    """Exercise the shared launcher selection without starting Pi."""
+
+    def test_managed_and_legacy_layouts(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "modules/flake/agent-session/sandbox.nix"
+        ).read_text()
+        script = source.split("  selectRuntime = ''\n", 1)[1].split(
+            "\n  '';", 1,
+        )[0]
+        with tempfile.TemporaryDirectory() as tmp:
+            managed = Path(tmp) / "managed"
+            legacy = Path(tmp) / "legacy"
+            managed.mkdir()
+            suffix = (
+                "node_modules/@earendil-works/pi-coding-agent"
+                "/dist/bundle/cli.js"
+            )
+            legacy_cli = legacy / "lib" / suffix
+            legacy_cli.parent.mkdir(parents=True)
+            legacy_cli.touch()
+            script = script.replace("${managedRuntimeDir}", str(managed))
+            script = script.replace("${legacyRuntimeDir}", str(legacy))
+
+            def check(expected=None, status=0):
+                result = subprocess.run(
+                    ["bash", "-eu", "-c", script + '\nprintf "%s" "$cli"'],
+                    capture_output=True, text=True,
+                )
+                self.assertEqual(result.returncode, status, result.stderr)
+                if expected is not None:
+                    self.assertEqual(result.stdout, str(expected))
+
+            check(legacy_cli)
+            managed_cli = managed / "releases/1.5.2" / suffix
+            managed_cli.parent.mkdir(parents=True)
+            managed_cli.touch()
+            version_file = managed / "current-version"
+            version_file.write_text("1.5.2\n")
+            check(managed_cli)
+            version_file.write_text("../../invalid\n")
+            check(status=69)
+            version_file.write_text("1.5.3\n")
+            check(status=69)
+            version_file.unlink()
+            legacy_cli.unlink()
+            check(status=69)
+
+
 def connect_socket(path):
     with socket.socket(socket.AF_UNIX) as client:
         client.settimeout(2)

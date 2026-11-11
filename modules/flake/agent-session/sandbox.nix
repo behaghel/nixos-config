@@ -4,8 +4,24 @@ let
   lib = pkgs.lib;
   sandbox = import inputs.agent-sandbox { inherit pkgs; };
   agentDir = "$HOME/.local/state/pi-sandbox/agent";
-  runtimeDir = "$HOME/.local/share/pi-npm";
-  cli = "${runtimeDir}/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js";
+  managedRuntimeDir = "$HOME/.pi/agent/install";
+  legacyRuntimeDir = "$HOME/.local/share/pi-npm";
+  selectRuntime = ''
+    cli="${legacyRuntimeDir}/lib/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+    if IFS= read -r version 2>/dev/null < "${managedRuntimeDir}/current-version"; then
+      case "$version" in
+        ""|.|..|*[!0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz._+-]*)
+          echo 'Invalid managed Pi version; refusing sandbox launch.' >&2
+          exit 69
+          ;;
+      esac
+      cli="${managedRuntimeDir}/releases/$version/node_modules/@earendil-works/pi-coding-agent/dist/bundle/cli.js"
+    fi
+    if [ ! -r "$cli" ]; then
+      echo 'This pilot requires Pi in ~/.pi/agent/install or ~/.local/share/pi-npm.' >&2
+      exit 69
+    fi
+  '';
   instructions = pkgs.writeText "pi-sandbox-instructions.md" ''
     This is the restricted editing/testing pilot, not a normal host session.
     Use the pre-provisioned tools directly. Do not invoke as, devenv, Nix,
@@ -24,7 +40,7 @@ let
     allowNix = false;
     allowUnixSockets = false;
     rwDirs = [ agentDir ];
-    roDirs = [ runtimeDir ];
+    roDirs = [ managedRuntimeDir legacyRuntimeDir ];
     env = {
       PI_CODING_AGENT_DIR = agentDir;
       PI_SKIP_VERSION_CHECK = "1";
@@ -35,9 +51,10 @@ let
     };
   };
   piEntry = pkgs.writeShellScriptBin "pi-pilot" ''
+    ${selectRuntime}
     # Pi dispatches subcommands only when they precede session flags.
     if [ "''${1-}" = auth ] && [ "''${2-}" = check ]; then
-      exec ${lib.getExe pkgs.nodejs_24} "${cli}" "$@"
+      exec ${lib.getExe pkgs.nodejs_24} "$cli" "$@"
     fi
     case "''${1-}" in
       install|remove|uninstall|update|list|config|auth|mcp)
@@ -45,7 +62,7 @@ let
         exit 64
         ;;
     esac
-    exec ${lib.getExe pkgs.nodejs_24} "${cli}" \
+    exec ${lib.getExe pkgs.nodejs_24} "$cli" \
       --no-approve --no-mcp --no-extensions --no-context-files \
       --no-skills --no-prompt-templates --no-themes \
       --append-system-prompt ${instructions} "$@"
@@ -90,10 +107,7 @@ let
           exit 64
           ;;
       esac
-      if [ ! -r "${cli}" ]; then
-        echo 'This pilot requires the existing ~/.local/share/pi-npm Pi runtime.' >&2
-        exit 69
-      fi
+      ${selectRuntime}
       ${prepareState}
       echo 'Restricted pilot: dedicated Pi state; no Nix/MCP, signing or host credentials.' >&2
       exec ${lib.getExe confinedPi} "$@"
