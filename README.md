@@ -61,12 +61,21 @@ Doctor may identify missing links in older worktrees; metadata `repair` does not
 restore links, and existing files must never be overwritten blindly. Worktrees
 separate Git work, not operating-system permissions or credential access.
 
+### Pi installation
+
+Pi is installed and updated manually with the upstream managed installer and
+`pi update`. Home Manager supplies Node/npm and Pi integrations, but does not
+replace the launcher by default. Legacy activation-time npm provisioning remains
+available via `hub.pi.npm.enable = true` (currently enabled on Linux).
+
 ### Restricted Pi mode (experimental, macOS)
 
-The opt-in `agent-sandbox` devenv profile wraps the existing Pi npm runtime
+The opt-in `agent-sandbox` devenv profile wraps the existing Pi runtime
 with revision-pinned [agent-sandbox.nix](https://github.com/archie-judd/agent-sandbox.nix).
 Normal `as` commands and the host Nix configuration are unchanged. The wrapper
-requires Pi at `~/.local/share/pi-npm` and a prepared linked worktree; it refuses
+reads `~/.pi/agent/install/current-version` to select the managed release,
+falling back to `~/.local/share/pi-npm` when no managed version is recorded. Custom managed installation roots are
+not supported by this pilot. It requires a prepared linked worktree and refuses
 a primary checkout or a launch from a worktree subdirectory.
 
 From a host terminal, launch it in an existing managed worktree:

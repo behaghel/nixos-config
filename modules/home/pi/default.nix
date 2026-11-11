@@ -214,8 +214,8 @@ in
     npm = {
       enable = lib.mkOption {
         type = lib.types.bool;
-        default = true;
-        description = "Install/update Pi with npm during Home Manager activation.";
+        default = false;
+        description = "Legacy opt-in: install/update Pi with npm during activation instead of using the upstream managed installer.";
       };
 
       package = lib.mkOption {
@@ -262,7 +262,8 @@ in
   config = lib.mkIf cfg.enable {
     home.packages =
       lib.optionals cfg.installPackage [ cfg.package ]
-      ++ lib.optionals cfg.npm.enable [ pkgs.nodejs ]
+      # The upstream managed installer and `pi update` still need Node/npm.
+      ++ lib.optionals (!cfg.installPackage || cfg.npm.enable) [ pkgs.nodejs ]
       ++ lib.optionals cfg.local.enable [ piLocal pkgs.ollama ];
 
     hub.passLaunchers =
