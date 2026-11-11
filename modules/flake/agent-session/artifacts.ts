@@ -3,6 +3,15 @@ import { lstatSync, readdirSync, readlinkSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { gitRaw } from "./git.ts";
 
+export function artifactSummary(evidence: IgnoredDataInspection | undefined): string {
+	if (!evidence?.approvedArtifacts.length) return "";
+	const artifacts = evidence.approvedArtifacts.map((path) => ({ path, tree: evidence.policyRoots.find((root) => root.path === path)?.tree ?? evidence.ignoredPaths.find((entry) => entry.path === path) }));
+	const entries = artifacts.map(({ path, tree }) => {
+		return `  artifact: ${path} (${tree?.type ?? "entry"}${tree?.type === "directory" ? `, entire subtree, ${tree.size.entries} entries` : tree?.type === "symlink" ? ", link only; target preserved" : ""})`;
+	});
+	return `${entries.join("\n")}\n${artifacts.some(({ tree }) => tree?.type === "directory") ? "  Directory scopes include all descendants, including logs and task databases.\n" : ""}`;
+}
+
 interface Identity {
 	device: string;
 	inode: string;

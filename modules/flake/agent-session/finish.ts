@@ -3,7 +3,7 @@ import { inspectTreeBranches, treeBranchSummary, assertTreeBranchUnchanged, dele
 import { captureProcesses, inspectCandidate, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
-import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
+import { inspectIgnoredData, ignoredDataProblem, artifactSummary, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	git,
 	worktreeIsRegistered,
@@ -173,15 +173,6 @@ function forceFinishUnlocked(
 	process.stdout.write(
 		`Session force-finished locally. ${disposition} Remote assets were not modified.\nProject root: ${root}\n`,
 	);
-}
-
-function artifactSummary(evidence: IgnoredDataInspection | undefined): string {
-	if (!evidence?.approvedArtifacts.length) return "";
-	const artifacts = evidence.approvedArtifacts.map((path) => ({ path, tree: evidence.policyRoots.find((root) => root.path === path)?.tree ?? evidence.ignoredPaths.find((entry) => entry.path === path) }));
-	const entries = artifacts.map(({ path, tree }) => {
-		return `  artifact: ${path} (${tree?.type ?? "entry"}${tree?.type === "directory" ? `, entire subtree, ${tree.size.entries} entries` : tree?.type === "symlink" ? ", link only; target preserved" : ""})`;
-	});
-	return `${entries.join("\n")}\n${artifacts.some(({ tree }) => tree?.type === "directory") ? "  Directory scopes include all descendants, including logs and task databases.\n" : ""}`;
 }
 
 // Interactive consent binds the observed scope, not a token the user must copy.

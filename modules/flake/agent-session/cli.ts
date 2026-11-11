@@ -6,6 +6,7 @@ import { create, createBranch, runInSession, launch, start, repair } from "./lif
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk, finishSessionTree } from "./finish.ts";
+import { finishWorktreeBranches } from "./finish-branches.ts";
 import { batchFinish } from "./batch.ts";
 import { mapOwnership } from "./ownership.ts";
 import {
@@ -138,7 +139,9 @@ export function main(args: string[]): number {
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
-			if (options.slug && options.all) {
+			if (options.branches) {
+				return finishWorktreeBranches(root, invocationRoot, resolveSessionTarget(options.slug!, invocationRoot), options.keepBranch, options.dryRun, options.json);
+			} else if (options.slug && options.all) {
 				return finishSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
 					options.keepBranch, options.dryRun, options.json, options.expected);
 			} else if (options.all || options.gone) {

@@ -74,6 +74,53 @@ finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a fa
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
 
+## Branches used in one worktree
+
+`as <slug> finish --branches` reviews one recorded worktree and the local branches
+found in its saved initial/current branch, recorded branch creations and retained
+HEAD checkout history. It does **not** select descendant sessions; `--all` retains
+that separate meaning.
+
+```sh
+as my-task finish --branches --dry-run --json  # read-only discovery
+as my-task finish --branches                 # interactive approval
+as my-task finish --branches --keep-branch   # remove worktree, preserve refs
+```
+
+Checkout history is candidate-discovery evidence, **not proof of ownership**.
+Reflogs may expire, branches may be renamed or recreated, and deleted refs may
+appear in the list. The preview reports this limitation, candidate sources and
+current tips. It never promises exhaustive history or silently adopts branches.
+
+The operator first reviews the candidate branches, then optionally approves
+local deletion (default No), explicitly including branches without recorded
+ownership. The final plan states what will be removed and asks for confirmation
+(default No). `--keep-branch` skips the deletion question. Non-terminal removal,
+`--yes`, `--expected`, `--force`, `--all` and `--gone` cannot be combined with this
+mode. `--json` is available only for read-only previews, not as an apply receipt.
+
+This path supports legacy records and a different currently checked-out branch
+without inventing ancestry or branch ownership. It requires the uniquely bound
+native worktree to match its recorded path and preserves all other guards:
+clean tracked/untracked state, approved ignored artifacts, native locks,
+submodules, managed activity and same-user process cwd evidence. Detached HEAD,
+missing or ambiguous resources remain blocked. Only the selected worktree is
+removed, non-forcibly, after scope is rechecked under the operation lock.
+
+Branches qualify for deletion only when their reviewed tips are ancestors of the
+local default/PR-base ref. Primary/default/base branches, shared session references,
+external checkouts, missing local refs/bases and unmerged commits are preserved
+with reasons. Squash merges without ancestry proof are not treated as merged.
+Remote refs and worktrees outside the selected path remain untouched.
+
+The post-confirmation recheck binds the worktree, metadata, policy, retained
+history, branch tips and merge base. Branch deletion starts only after confirmed
+native removal and metadata cleanup, and uses the shared compare-and-delete ref
+transaction. A changed tip/base or new session reference refuses deletion and
+stops later deletions. Failure after native removal is reported as partial or
+uncertain; no automatic rollback, force fallback or replay authorization is
+implied. Inspect interrupted cleanup before taking further action.
+
 ## Session-tree ownership and guarded finish
 
 ```sh
