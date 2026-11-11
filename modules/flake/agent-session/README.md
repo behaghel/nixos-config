@@ -90,7 +90,10 @@ as my-task finish --branches --keep-branch   # remove worktree, preserve refs
 Checkout history is candidate-discovery evidence, **not proof of ownership**.
 Reflogs may expire, branches may be renamed or recreated, and deleted refs may
 appear in the list. The preview reports this limitation, candidate sources and
-current tips. It never promises exhaustive history or silently adopts branches.
+current tips. Undecided eligible candidates are labeled `branch:`; the final
+plan uses `delete:` or `preserve:` after the operator chooses. Branches blocked
+from deletion are always labeled `preserve:` with their reason. The preview
+never promises exhaustive history or silently adopts branches.
 
 The operator first reviews the candidate branches, then optionally approves
 local deletion (default No), explicitly including branches without recorded
