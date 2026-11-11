@@ -859,6 +859,9 @@ describe("worktree branch history finish", () => {
 			expect(plan.mode).toBe("worktree-branches");
 			expect(plan.branches.map((branch: { name: string }) => branch.name).sort().join(",")).toBe("agent/human,feat/one,feat/two");
 			expect(plan.historyComplete).toBe(false);
+			const text = runCli(fixture.checkout, [...fixture.args, "--dry-run"], fixture.environment);
+			expect(text.stdout).toContain("  branch: agent/human @");
+			expect(text.stdout.includes("  preserve: agent/human")).toBe(false);
 			expect(readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8")).toBe(old);
 			expect(existsSync(fixture.session.worktreePath)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -926,9 +929,22 @@ describe("worktree branch history finish", () => {
 			writeFileSync(join(fixture.checkout, ".git/info/exclude"), ".cache/\n");
 			mkdirSync(join(fixture.session.worktreePath, ".cache"));
 			writeFileSync(join(fixture.session.worktreePath, ".cache/log"), "approved artifact");
+			const machine = fixture.preview();
+			expect(machine.status).toBe(0);
+			expect(JSON.parse(machine.stdout).mode).toBe("worktree-branches");
+			const events = machine.stderr.trim().split("\n").map((line: string) => JSON.parse(line));
+			expect(events.every((event: { type: string }) => event.type === "progress")).toBe(true);
 			const result = runFixtureOnTerminal(fixture, ["node", cliScript, ...fixture.args, "--keep-branch"], "y\n", "", fixture.environment);
 			if (result.status !== 0) throw new Error(result.output);
 			expect(result.output.includes("Also delete")).toBe(false);
+			expect(result.output).toContain("Scanning");
+			expect(result.output).toContain("\r\x1b[2KWorktree:");
+			expect(result.output).toContain("\r\x1b[2Khuman: finished");
+			const [preview, final] = result.output.split("Final removal plan:");
+			expect(preview).toContain("  branch: agent/human @");
+			expect(preview.includes("  preserve: agent/human")).toBe(false);
+			expect(final).toContain("  preserve: agent/human @");
+			expect(final).toContain("deletion not requested");
 			expect(result.output).toContain("entire subtree");
 			expect(existsSync(fixture.session.worktreePath)).toBe(false);
 			expect(git(fixture.checkout, "branch", "--list", "feat/two")).toContain("feat/two");

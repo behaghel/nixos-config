@@ -12,9 +12,15 @@ const limitation = "Retained checkout history does not establish ownership and m
 function inspectHistory(root: string, invocationRoot: string, slug: string, json: boolean) {
 	assertPrimaryCheckout(root);
 	const metadata = readMetadata(root, slug);
-	const candidate = inspectCandidate(root, invocationRoot, slug,
-		{ inactiveFor: "explicit-worktree", inactiveMs: 0, exclusions: [], json, dryRun: true, yes: false },
-		Date.now(), undefined, progressReporter("finish --branches", json), undefined, false, "worktree-history");
+	const report = progressReporter("finish --branches", json);
+	let candidate: ReturnType<typeof inspectCandidate>;
+	try {
+		candidate = inspectCandidate(root, invocationRoot, slug,
+			{ inactiveFor: "explicit-worktree", inactiveMs: 0, exclusions: [], json, dryRun: true, yes: false },
+			Date.now(), undefined, report, undefined, false, "worktree-history");
+	} finally {
+		report.flush?.();
+	}
 	const evidence = new Map<string, string[]>();
 	const note = (name: string, source: string) => {
 		if (name) evidence.set(name, [...new Set([...(evidence.get(name) ?? []), source])]);
@@ -52,10 +58,11 @@ function inspectHistory(root: string, invocationRoot: string, slug: string, json
 	};
 }
 
-function describe(plan: ReturnType<typeof inspectHistory>, deleteEligible: boolean): string {
+function describe(plan: ReturnType<typeof inspectHistory>, deleteEligible?: boolean): string {
 	return `Worktree: ${plan.metadata.worktreePath}\n${limitation}\n${artifactSummary(plan.candidate.ignoredData)}${plan.branches.map((branch) => {
-		const action = deleteEligible && !branch.reason ? "delete" : "preserve";
-		const reason = branch.reason ?? (deleteEligible ? `merged into ${branch.baseRef} @ ${branch.baseRevision.slice(0, 12)}` : "eligible for explicit deletion approval");
+		const action = branch.reason ? "preserve" : deleteEligible === undefined ? "branch" : deleteEligible ? "delete" : "preserve";
+		const reason = branch.reason ?? (deleteEligible === undefined ? "eligible for explicit deletion approval"
+			: deleteEligible ? `merged into ${branch.baseRef} @ ${branch.baseRevision.slice(0, 12)}` : "deletion not requested");
 		return `  ${action}: ${branch.name}${branch.revision ? ` @ ${branch.revision.slice(0, 12)}` : ""} (${reason}; ${branch.sources.join(", ")})\n`;
 	}).join("")}${plan.candidate.snapshot ? "" : `Cleanup blocked: ${plan.candidate.problem ?? plan.candidate.reason}\n`}`;
 }
@@ -74,10 +81,10 @@ export function finishWorktreeBranches(root: string, invocationRoot: string, slu
 		writeCommandResult({ version: 1, command: "finish", mode: "worktree-branches", dryRun: true, slug,
 			worktreePath: plan.metadata.worktreePath, branches: plan.branches, historyComplete: false, limitation,
 			executionSupported: Boolean(plan.candidate.snapshot), inspection: plan.candidate, remoteAssetsModified: false }, json,
-			`${describe(plan, false)}No resources changed.\n`);
+			`${describe(plan)}No resources changed.\n`);
 		return 0;
 	}
-	process.stderr.write(describe(plan, false));
+	process.stderr.write(describe(plan));
 	const approvedTarget = plan.candidate.snapshot;
 	if (!approvedTarget) throw new CliError("Cleanup blocked. No resources changed.");
 	const deleteEligible = !keepBranch && plan.branches.some((branch) => !branch.reason) && confirm("Also delete the listed eligible local branches, including those without recorded ownership? [y/N]");
