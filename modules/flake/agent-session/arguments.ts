@@ -276,9 +276,10 @@ export function parseFinishArguments(args: string[]): {
 		);
 	}
 	if (slug && all && force) throw argumentError("Session-scoped --all does not accept --force.");
-	if (slug && all && !dryRun && (!keepBranch || !expected || !yes)) {
+	if (slug && all && !dryRun && (expected || yes) && (!keepBranch || !expected || !yes)) {
 		throw argumentError("Recursive finish requires --keep-branch, --expected <tree-receipt> and --yes.");
 	}
+	if (slug && all && json && !dryRun && !expected) throw argumentError("Interactive recursive finish does not accept --json; use a receipt for automation.");
 	if (expected && (all ? !expected.startsWith("tree-v1.") : expected.startsWith("tree-v1."))) throw argumentError("Receipt does not match the finish selector.");
 	if (json && !dryRun && !(slug && all)) {
 		throw new CliError("finish --json requires --dry-run.", 64);
@@ -401,6 +402,7 @@ function usage(): string {
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session <task-slug> finish --all [--keep-branch] (preview recorded descendants, choose eligible branch deletion and confirm)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
 		"  agent-session . <cd|run|branch|ownership|launch|resume|status|doctor|finish> (current managed worktree)",

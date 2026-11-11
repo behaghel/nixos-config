@@ -100,8 +100,42 @@ guards. Each plan includes the worktree path, parent ID, recorded owned branches
 and artifact-disposal evidence. Lost branch evidence and an unclaimed current
 branch appear as `unresolvedBranches`, never as cleanup authority.
 
-Branch-preserving recursive execution requires a matching tree receipt and
-explicit approval:
+Interactive recursive cleanup needs no receipt to copy:
+
+```sh
+as parent finish --all
+# Review the selected tree and eligible/preserved branches.
+# Also delete eligible local branches? [y/N]
+# Review the final removal plan.
+# Remove these local session assets? [y/N]
+```
+
+The branch question defaults to preserving all branches. `--keep-branch` skips
+that question. The final confirmation defaults to cancellation; empty input,
+EOF and failed confirmation never approve removal. Non-terminal calls cannot
+use this interactive path, and `--yes` alone does not replace receipt approval.
+
+Only exclusively owned branches whose creation evidence is still verified and
+whose approved tip is an ancestor of the **local** default/base branch qualify
+for deletion. A missing local base, unmerged work (including squash-merged work
+without ancestry proof), unclaimed ownership or an external checkout preserves
+the branch with a reason. Primary/default/base branches are never candidates.
+Shared ownership claims still block tree cleanup entirely, as described below.
+No fetch is required; this conservative check uses the displayed local base ref.
+
+Branch deletion starts only after every selected worktree has been removed.
+The CLI rechecks ownership, claims, checkout state, merge-base revision and tip
+before cleanup and again before each branch deletion. A Git ref transaction
+verifies the approved merge base and compares-and-deletes the approved tip
+atomically. A refusal stops later branch deletions
+and is reported as partial completion; already removed worktrees are not restored.
+Branch-deletion approval exists only for this terminal invocation, not in the
+branch-preserving receipt. After an interruption, inspect remaining resources
+rather than assuming that replaying a receipt resumes branch deletion.
+Remote refs are never deleted.
+
+For automation, branch-preserving recursive execution requires a matching tree
+receipt and explicit approval:
 
 ```sh
 as parent finish --all --keep-branch --dry-run --json
@@ -113,7 +147,8 @@ as parent finish --all --keep-branch --expected <receipt> --yes --json
 A fully resolved metadata-v3 tree with no blockers receives a top-level
 `receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no
 execution receipt is issued. Preview without `--keep-branch` remains available
-for inspection, but recursive branch deletion and `--force` are not supported.
+for inspection. Automated recursive branch deletion and recursive `--force`
+are not supported.
 Single-session and inactive-batch receipts cannot authorize a recursive finish.
 
 Conflicting branch claims appear in `sharedBranches` with every claiming session
@@ -131,7 +166,9 @@ operations and unavailable or live same-user cwd evidence refuse cleanup.
 Explicitly selecting a tree does not impose an inactivity cutoff; it does not
 waive activity guards. Process observation has the same limits as inactive-batch
 finish: it cannot detect editors with cwd elsewhere, other users or remote use.
-All local and remote branches are preserved; native worktree removal is non-forced.
+Receipt-based automation preserves all branches. Interactive branch deletion
+requires the separate choice and final confirmation above. Native worktree
+removal is always non-forced.
 
 Execution stops on the first refused or uncertain target, preserving all later
 targets including its ancestors. Results distinguish `success`, `partial` and
