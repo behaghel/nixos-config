@@ -1047,6 +1047,214 @@ describe("worktree branch history finish", () => {
 	});
 });
 
+describe("interrupted activity reconciliation", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-session-activity-");
+		writeConfig(fixture.checkout, createFakeAgent(fixture.root, join(fixture.root, "agent-log")));
+		const created = runCli(fixture.checkout, ["human", "create", "--json"]);
+		if (created.status !== 0) throw new Error(created.stderr);
+		const metadata = JSON.parse(created.stdout).session;
+		const pid = Number(spawnSync("node", ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout);
+		const operation = { id: "interrupted-fixture", pid, hostname: hostname(), startedAt: "2026-01-01T00:00:00.000Z" };
+		const record = sessionMetadataPath(fixture.checkout, "human");
+		metadata.activeOperations = [operation];
+		metadata.lastWorkAt = operation.startedAt;
+		writeFileSync(record, JSON.stringify(metadata));
+		const bin = join(fixture.root, "bin"); mkdirSync(bin);
+		const lsof = join(bin, "lsof");
+		writeFileSync(lsof, "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+		const environment = { PATH: `${bin}:${process.env.PATH}` };
+		const args = ["human", "activity", "reconcile"];
+		const preview = () => runCli(fixture.checkout, [...args, "--dry-run", "--json"], environment);
+		const terminal = (answer: string, mutation = "") => runFixtureOnTerminal(fixture, ["node", cliScript, ...args], answer, mutation, environment, metadata.worktreePath);
+		return { ...fixture, metadata, operation, record, lsof, environment, args, preview, terminal };
+	}
+
+	it("reports interrupted activity in doctor without mutating the session", () => {
+		const fixture = setup();
+		try {
+			const before = readFileSync(fixture.record, "utf8");
+			const result = runCli(fixture.checkout, ["human", "doctor", "--json"], fixture.environment);
+			expect(result.status).toBe(1);
+			const report = JSON.parse(result.stdout);
+			expect(report.ok).toBe(false);
+			expect(report.checks.some((check: { code: string }) => check.code === "activity-interrupted")).toBe(true);
+			expect(result.stdout).toContain("activity reconcile");
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("previews the exact interrupted records without inventing completion", () => {
+		const fixture = setup();
+		try {
+			const before = readFileSync(fixture.record, "utf8");
+			const result = fixture.preview();
+			expect(result.status).toBe(0);
+			const plan = JSON.parse(result.stdout);
+			expect(plan.executionSupported).toBe(true);
+			expect(plan.operations[0].state).toBe("interrupted");
+			expect(plan.operations[0].id).toBe(fixture.operation.id);
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("acknowledges interruption explicitly, preserves audit and work, and unblocks ordinary cleanup guards", () => {
+		const fixture = setup();
+		try {
+			const tip = git(fixture.checkout, "rev-parse", fixture.metadata.branch);
+			const result = fixture.terminal("y\n");
+			if (result.status !== 0) throw new Error(result.output);
+			expect(result.output).toContain("not completed");
+			const saved = JSON.parse(readFileSync(fixture.record, "utf8"));
+			expect(saved.activeOperations.length).toBe(0);
+			expect(saved.lastWorkAt).toBe(fixture.metadata.lastWorkAt);
+			expect(saved.acknowledgedInterruptions.length).toBe(1);
+			const acknowledged = saved.acknowledgedInterruptions[0];
+			for (const field of ["id", "pid", "hostname", "startedAt"] as const) expect(acknowledged[field]).toBe(fixture.operation[field]);
+			expect(acknowledged.outcome).toBe("interrupted");
+			expect(Number.isFinite(Date.parse(acknowledged.acknowledgedAt))).toBe(true);
+			expect(acknowledged.completedAt).toBe(undefined);
+			expect(git(fixture.checkout, "rev-parse", fixture.metadata.branch)).toBe(tip);
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+			expect(runCli(fixture.checkout, ["human", "doctor", "--json"], fixture.environment).status).toBe(0);
+			const finish = runCli(fixture.checkout, ["human", "finish", "--branches", "--dry-run", "--json"], fixture.environment);
+			expect(JSON.parse(finish.stdout).executionSupported).toBe(true);
+			writeFileSync(join(fixture.metadata.worktreePath, "dirty"), "retain");
+			const blocked = runCli(fixture.checkout, ["human", "finish", "--branches", "--dry-run", "--json"], fixture.environment);
+			expect(JSON.parse(blocked.stdout).executionSupported).toBe(false);
+			const audit = JSON.stringify(saved.acknowledgedInterruptions);
+			expect(runCli(fixture.checkout, fixture.args, fixture.environment).status).toBe(0);
+			expect(JSON.stringify(JSON.parse(readFileSync(fixture.record, "utf8")).acknowledgedInterruptions)).toBe(audit);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000);
+
+	for (const answer of ["n\n", "\n", "EOF"]) {
+		it(`does not acknowledge interruption on answer ${JSON.stringify(answer)}`, () => {
+			const fixture = setup();
+			try {
+				const before = readFileSync(fixture.record, "utf8");
+				const result = fixture.terminal(answer);
+				expect(result.status).toBe(1);
+				expect(result.output).toContain("cancelled");
+				expect(readFileSync(fixture.record, "utf8")).toBe(before);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	for (const blocker of ["live", "foreign", "cwd", "probe"]) {
+		it(`refuses reconciliation with ${blocker} activity evidence`, () => {
+			const fixture = setup();
+			try {
+				if (blocker === "live" || blocker === "foreign") {
+					const operation = { ...fixture.operation, ...(blocker === "live" ? { pid: process.pid } : { hostname: "another-host" }) };
+					writeFileSync(fixture.record, JSON.stringify({ ...fixture.metadata, activeOperations: [operation] }));
+				} else writeFileSync(fixture.lsof, blocker === "probe" ? "#!/bin/sh\nexit 1\n" : `#!/bin/sh\nprintf 'p1\\000fcwd\\000n${fixture.metadata.worktreePath}\\000\\n'\n`);
+				const before = readFileSync(fixture.record, "utf8");
+				expect(JSON.parse(fixture.preview().stdout).executionSupported).toBe(false);
+				const result = fixture.terminal("y\n");
+				expect(result.status).toBe(1);
+				expect(result.answered).toBe(false);
+				expect(readFileSync(fixture.record, "utf8")).toBe(before);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 90000);
+	}
+
+	for (const mutation of ["metadata", "operation", "cwd-probe"]) {
+		it(`refuses ${mutation} changes while confirmation waits`, () => {
+			const fixture = setup();
+			try {
+				const result = fixture.terminal("y\n", mutation);
+				expect(result.status).toBe(1);
+				expect(result.output).toContain("changed");
+				const record = JSON.parse(readFileSync(fixture.record, "utf8"));
+				expect(record.acknowledgedInterruptions).toBe(undefined);
+				expect(record.activeOperations.length >= 1).toBe(true);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 90000);
+	}
+
+	it("treats PID probe permission failures as unknown, never as absence", () => {
+		const fixture = setup();
+		try {
+			const script = `const {main} = await import(process.argv[1]); process.kill = () => { throw Object.assign(new Error("permission denied"), {code:"EPERM"}); }; process.exitCode = main(["human","activity","reconcile","--dry-run","--json"]);`;
+			const result = spawnSync("node", ["--input-type=module", "-e", script, cliScript], {
+				cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, ...fixture.environment, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+			});
+			expect(result.status).toBe(0);
+			const plan = JSON.parse(result.stdout);
+			expect(plan.operations[0].state).toBe("unknown");
+			expect(plan.executionSupported).toBe(false);
+			expect(plan.operations[0].problem).toContain("permission denied");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("appends acknowledgements without overwriting previous interruption evidence", () => {
+		const fixture = setup();
+		try {
+			const prior = { ...fixture.operation, id: "previous-interruption", outcome: "interrupted", acknowledgedAt: "2026-01-01T00:00:00.000Z" };
+			writeFileSync(fixture.record, JSON.stringify({ ...fixture.metadata, acknowledgedInterruptions: [prior] }));
+			const result = fixture.terminal("yes\n");
+			if (result.status !== 0) throw new Error(result.output);
+			const saved = JSON.parse(readFileSync(fixture.record, "utf8"));
+			expect(saved.acknowledgedInterruptions.length).toBe(2);
+			expect(JSON.stringify(saved.acknowledgedInterruptions[0])).toBe(JSON.stringify(prior));
+			expect(saved.lastWorkAt).toBe(fixture.metadata.lastWorkAt);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses malformed acknowledgement history rather than rewriting it", () => {
+		const fixture = setup();
+		try {
+			writeFileSync(fixture.record, JSON.stringify({ ...fixture.metadata, acknowledgedInterruptions: [{ ...fixture.operation, outcome: "completed", acknowledgedAt: "not-a-date" }] }));
+			const before = readFileSync(fixture.record, "utf8");
+			expect(fixture.preview().status).toBe(1);
+			expect(runCli(fixture.checkout, ["human", "doctor", "--json"], fixture.environment).status).toBe(1);
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses ambiguous worktree bindings without acknowledging operations", () => {
+		const fixture = setup();
+		try {
+			const created = runCli(fixture.checkout, ["outside", "create", "--json"], fixture.environment);
+			const outside = JSON.parse(created.stdout).session;
+			writeFileSync(sessionMetadataPath(fixture.checkout, "outside"), JSON.stringify({ ...outside, worktreePath: fixture.metadata.worktreePath }));
+			const before = readFileSync(fixture.record, "utf8");
+			const result = fixture.preview();
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("ambiguous");
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires the lifecycle lock before applying acknowledgement", () => {
+		const fixture = setup();
+		try {
+			const lock = join(fixture.checkout, ".git/agent-session/operation.lock");
+			mkdirSync(lock);
+			writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid, command: "fixture", createdAt: new Date().toISOString() }));
+			const before = readFileSync(fixture.record, "utf8");
+			const result = fixture.terminal("y\n");
+			expect(result.status).toBe(1);
+			expect(result.output).toContain("Another agent-session operation");
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires terminal consent and advertises only preview flags, not a force or yes bypass", () => {
+		const fixture = setup();
+		try {
+			expect(runCli(fixture.checkout, fixture.args, fixture.environment).status).toBe(1);
+			for (const flag of ["--yes", "--force", "--json"]) expect(runCli(fixture.checkout, [...fixture.args, flag], fixture.environment).status).toBe(64);
+			expect(runCli(fixture.checkout, []).stderr).toContain("activity reconcile");
+			const completions = runCli(fixture.checkout, ["__complete", "options:activity"]).stdout;
+			expect(completions).toContain("reconcile");
+			expect(completions).toContain("--dry-run");
+			expect(completions.includes("--yes")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("recursive scope completion guidance", () => {
 	for (const shell of ["bash", "zsh", "fish"]) {
 		it(`distinguishes selected descendants from repository-wide cleanup in ${shell} completions`, () => {
@@ -1068,6 +1276,8 @@ complete -C 'as task finish --all'
 complete -C 'agent-session finish --all'
 complete -C 'as task finish --branches'
 complete -C 'agent-session task finish --branches'
+complete -C 'as task activity rec'
+complete -C 'agent-session task activity rec'
 ` : shell === "zsh" ? `
 fpath=("$FIXTURE_ROOT" $fpath)
 autoload -Uz compinit; compinit -D -i
@@ -1076,22 +1286,27 @@ words=(as task finish --all); CURRENT=4; _agent_session
 words=(agent-session finish --all); CURRENT=3; _agent_session
 words=(as task finish --branches); CURRENT=4; _agent_session
 words=(agent-session task finish --branches); CURRENT=4; _agent_session
+words=(as task activity rec); CURRENT=4; _agent_session
+words=(agent-session task activity rec); CURRENT=4; _agent_session
 ` : `
 source "$COMPLETION"
 COMP_WORDS=(as task finish --all); COMP_CWORD=3; _agent_session; printf '%s\\n' "\${COMPREPLY[@]}"
 COMP_WORDS=(agent-session finish --all); COMP_CWORD=2; _agent_session; printf '%s\\n' "\${COMPREPLY[@]}"
 COMP_WORDS=(as task finish --branches); COMP_CWORD=3; _agent_session; printf '%s\\n' "\${COMPREPLY[@]}"
 COMP_WORDS=(agent-session task finish --branches); COMP_CWORD=3; _agent_session; printf '%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(as task activity rec); COMP_CWORD=3; _agent_session; printf '%s\\n' "\${COMPREPLY[@]}"
+COMP_WORDS=(agent-session task activity rec); COMP_CWORD=3; _agent_session; printf '%s\\n' "\${COMPREPLY[@]}"
 `;
 				const result = spawnSync(shell, [shell === "fish" ? "--no-config" : shell === "zsh" ? "-f" : "--noprofile", "-c", script], {
 					cwd: fixture.checkout, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, COMPLETION: path, FIXTURE_ROOT: fixture.root },
 				});
 				expect(result.status).toBe(0);
-				if (shell === "bash") expect(result.stdout.trim()).toBe("--all\n--all\n--branches\n--branches");
+				if (shell === "bash") expect(result.stdout.trim()).toBe("--all\n--all\n--branches\n--branches\nreconcile\nreconcile");
 				else {
 					expect(result.stdout).toContain("Recorded descendants");
 					expect(result.stdout).toContain("Repository-wide");
 					expect(result.stdout).toContain("Branches used in selected worktree");
+					expect(result.stdout).toContain("reconcile");
 				}
 			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 		});
@@ -1770,6 +1985,16 @@ try:
                     record['disposable_paths'].append('.unused')
                     with open(os.environ['AGENT_SESSION_CONFIG'], 'w') as data:
                         json.dump(record, data)
+                elif mutation == 'operation':
+                    with open(sys.argv[5]) as data:
+                        record = json.load(data)
+                    record['activeOperations'].append({**record['activeOperations'][0], 'id': 'new-operation'})
+                    with open(sys.argv[5], 'w') as data:
+                        json.dump(record, data)
+                elif mutation == 'cwd-probe':
+                    probe = os.path.join(os.environ['PATH'].split(os.pathsep)[0], 'lsof')
+                    with open(probe, 'w') as data:
+                        data.write('#!/bin/sh\\nprintf "p1\\\\000fcwd\\\\000n' + worktree + '\\\\000\\\\n"\\n')
                 elif mutation == 'metadata':
                     with open(sys.argv[5]) as data:
                         record = json.load(data)

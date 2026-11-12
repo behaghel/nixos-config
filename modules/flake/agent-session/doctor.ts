@@ -1,7 +1,7 @@
 import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { commonGitDirectory, git, primaryRoot, repositoryRoot } from "./git.ts";
-import { loadConfig, metadataPath, metadataSlugs, readMetadata, assertConfiguredWorktreePath, readOperationLock, resolveSessionTarget, resolveWorktreeRoot, sessionDirectory, validateSlug } from "./sessions.ts";
+import { loadConfig, metadataPath, metadataSlugs, readMetadata, assertConfiguredWorktreePath, readOperationLock, inspectActiveOperation, resolveSessionTarget, resolveWorktreeRoot, sessionDirectory, validateSlug } from "./sessions.ts";
 import { run, writeCommandResult } from "./runtime.ts";
 import { sessionCommand, unrecordedRetirementHint } from "./arguments.ts";
 import type { AgentSessionConfig, SessionMetadata } from "./types.ts";
@@ -140,6 +140,18 @@ export function doctor(target?: string, json = false): number {
 					problem("metadata-path-mismatch", "Recorded worktree location does not match the configured slot. Verify whether configuration or location changed; do not delete or repair by guessing.");
 					continue;
 				}
+				for (const operation of metadata.activeOperations ?? []) {
+					const observation = inspectActiveOperation(operation);
+					const next = observation.state === "interrupted"
+						? ` Review with: ${sessionCommand(candidate, "activity reconcile")}. This acknowledges interruption, not successful completion.`
+						: observation.state === "live" ? " The recorded PID exists and may be reused; verify it rather than clearing the record or killing a process based only on this PID."
+						: " Verify the original host/process manually; uncertain activity cannot be acknowledged automatically.";
+					add("activity", observation.state === "live" ? "info" : "error",
+						`Managed operation ${operation.id} (pid ${operation.pid}, ${operation.hostname}, started ${operation.startedAt}): ${observation.state}.${next}`,
+						candidate, undefined, `activity-${observation.state}`);
+				}
+				if (metadata.acknowledgedInterruptions?.length) add("activity-history", "info",
+					`${metadata.acknowledgedInterruptions.length} interruption acknowledgement(s) retained; these are not completion records.`, candidate);
 				if (!existsSync(metadata.worktreePath)) {
 					problem("worktree-missing", "Recorded worktree directory is missing. Check whether it was moved; preserve remaining local branches before considering stale-record cleanup.");
 					continue;

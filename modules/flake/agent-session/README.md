@@ -74,6 +74,52 @@ finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a fa
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
 
+## Interrupted activity recovery
+
+Managed launch/resume/run records start and normal completion. An abrupt stop may
+leave `activeOperations` entries whose recorded process is absent. Those entries
+remain uncertain activity, not proof that a job or its side effects completed.
+Cleanup refuses them; polling and `doctor` never silently erase them.
+
+```sh
+# From the primary checkout or another worktree, not inside my-task:
+as my-task doctor --json
+as my-task activity reconcile --dry-run --json  # inspect, no mutation
+as my-task activity reconcile                  # review, then confirm [y/N]
+```
+
+Reconciliation reviews all unsettled operations for the selected session and
+requires explicit terminal confirmation. It accepts only same-host recorded
+PIDs proven absent (`ESRCH`), with complete same-user cwd evidence and no process
+inside that worktree. Live PIDs (including possible PID reuse), foreign hosts,
+permission/unknown probe failures and incomplete process observations block it.
+Never kill a process merely because an old record mentions its PID.
+
+The record and native worktree must have verified same-user ownership, a unique
+binding, and unchanged metadata, filesystem identity and configuration. After
+confirmation, the CLI acquires the lifecycle lock and rechecks that scope and all
+activity evidence. New/changed operations or process evidence refuse the write.
+Empty input, No, EOF, or failed confirmation changes nothing. `--yes`, `--force`
+and automation apply receipts are not supported; `--json` is preview-only.
+
+Approved records move to the optional `acknowledgedInterruptions` array in the
+same session metadata, retaining their original ID/PID/host/start fields and
+adding `outcome = interrupted` and an actual `acknowledgedAt` timestamp. Existing
+acknowledgements are retained, `lastWorkAt` is unchanged, and no successful
+completion time is invented. This history shares the session metadata lifecycle;
+it is not a separate permanent log surviving approved session retirement.
+
+Reconciliation neither removes worktrees/branches nor alters their ownership.
+It does not waive dirty-state, artifact, lock, process or other cleanup guards,
+and cannot establish that detached work elsewhere finished. Retry cleanup as a
+separate reviewed action only after reconciliation. With no unsettled records,
+reconciliation is a no-op. `repair` restores missing records; it is not activity
+recovery and must not overwrite an existing record.
+
+`doctor` reports interrupted, foreign-host and unknown operations as errors with
+recovery/inspection guidance. A currently existing PID is reported as information,
+not proof of safe cleanup; acknowledgements are shown as history, not completion.
+
 ## Branches used in one worktree
 
 `as <slug> finish --branches` reviews one recorded worktree and the local branches

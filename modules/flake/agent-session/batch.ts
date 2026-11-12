@@ -1,13 +1,13 @@
 import { createHash } from "node:crypto";
+import { sessionCommand } from "./arguments.ts";
 import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
-import { hostname } from "node:os";
 import { join } from "node:path";
 import { assertPrimaryCheckout, commonGitDirectory, ensureClean, git, gitRaw } from "./git.ts";
 import { inspectExactResource, snapshotExactResources, type ExactInspectionContext } from "./inspection.ts";
 import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	assertConfiguredWorktreePath, discoverManagedWorktrees, loadConfig,
-	metadataPath, metadataSlugs, readMetadata, validateSlug, withOperationLock,
+	metadataPath, metadataSlugs, readMetadata, validateSlug, withOperationLock, inspectActiveOperation,
 } from "./sessions.ts";
 import { CliError, progressReporter, run, writeCommandResult } from "./runtime.ts";
 import type { BatchFinishOptions, ProgressReporter, SessionMetadata } from "./types.ts";
@@ -96,11 +96,6 @@ function processDirectories(): { pid: number; path: string }[] {
 	if (pid !== undefined && !hasCwd) throw new CliError("Incomplete process cwd evidence.");
 	if (!directories.length) throw new CliError("Process cwd evidence was empty or unrecognized.");
 	return directories;
-}
-
-function operationIsLive(pid: number): boolean {
-	try { process.kill(pid, 0); return true; }
-	catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; }
 }
 
 function latestObservedWork(metadata: SessionMetadata, branches: string[], now: number, inactiveMs: number): ActivityEvidence {
@@ -237,9 +232,9 @@ export function inspectCandidate(root: string, invocationRoot: string, slug: str
 			if (changes.length) block("dirty");
 		} catch (error) { candidate.inspectionComplete = false; block("unresolved-evidence", `Working-tree status unavailable: ${String(error)}`); }
 		const operations = (metadata.activeOperations ?? []).map((operation) => {
-			const state = operation.hostname !== hostname() ? "foreign-host" : operationIsLive(operation.pid) ? "live" : "interrupted";
-			block(state === "live" ? "live-operation" : "uncertain-operation", `Managed operation ${operation.id} (pid ${operation.pid}, ${operation.hostname}): ${state}`);
-			return { ...operation, state };
+			const observation = inspectActiveOperation(operation);
+			block(observation.state === "live" ? "live-operation" : "uncertain-operation", `Managed operation ${operation.id} (pid ${operation.pid}, ${operation.hostname}): ${observation.state}${observation.problem ? ` (${observation.problem})` : ""}${observation.state === "interrupted" ? `; review with ${sessionCommand(slug, "activity reconcile")}` : ""}`);
+			return { ...operation, ...observation };
 		});
 		candidate.activity = latestObservedWork(metadata, status.ownedBranches, now, options.inactiveMs);
 		if (!candidate.activity.complete) { candidate.inspectionComplete = false; block("unknown-activity", candidate.activity.problems.join("; ")); }

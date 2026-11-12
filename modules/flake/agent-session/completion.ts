@@ -11,6 +11,7 @@ import {
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
 const commandOptions: Record<string, string[]> = {
 	branch: ["create", "--json"],
+	activity: ["reconcile", "--dry-run", "--json"],
 	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
 	create: ["--dry-run", "--json", ...prOptions],
 	start: ["--no-agent", ...prOptions],

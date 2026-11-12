@@ -39,6 +39,11 @@ export interface ActiveOperation {
 	startedAt: string;
 }
 
+export interface AcknowledgedInterruption extends ActiveOperation {
+	outcome: "interrupted";
+	acknowledgedAt: string;
+}
+
 export interface BranchOwnership {
 	name: string;
 	id: string;
@@ -59,6 +64,7 @@ export interface SessionMetadata {
 	branches?: BranchOwnership[];
 	lastWorkAt?: string;
 	activeOperations?: ActiveOperation[];
+	acknowledgedInterruptions?: AcknowledgedInterruption[];
 	conversation: null;
 	preexistingBranches?: string[];
 	initialBranchOwned?: boolean;

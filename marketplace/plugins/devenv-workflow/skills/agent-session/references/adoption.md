@@ -136,6 +136,7 @@ agent-session __complete commands
 agent-session __complete targets
 agent-session __complete options:create
 agent-session __complete options:finish
+agent-session __complete options:activity
 agent-session __complete options:global-status
 agent-session __complete options:global-batch
 agent-session completion bash
@@ -149,6 +150,7 @@ candidates for the actual operations, for example:
 | Prepare and run work | Session commands `create`/`run`; creation `--json` when requested. |
 | Exact path inspection | Global `status` with `--worktree` in usage and `options:global-status`. |
 | Guarded branch-preserving finish | `finish` with `--keep-branch`, `--dry-run` and `--expected` in usage and session completion options. |
+| Interrupted activity acknowledgement | `activity reconcile [--dry-run [--json]]` in usage and `reconcile`/preview flags in `options:activity`; no acknowledgement apply during capability checks. |
 | Inactive batch retirement | Global `batch finish` plus requested window/exclusion/receipt/apply flags, including `--inactive-for`, `--expected` and `--yes`, in usage and `options:global-batch`. |
 
 An old version without these query scopes needs inspection of its own advertised
@@ -166,6 +168,8 @@ inputs. If approval is declined, report the gap and incomplete requested setup.
 After approval, evaluate the updated project environment and repeat launcher,
 source-revision, usage and shell-completion acceptance checks.
 
+Do not apply activity reconciliation to test capability availability; inspect
+usage and completion candidates instead. Recovery needs its own reviewed approval.
 Do not invoke retirement (`finish` or `batch finish`), even with `--dry-run`, to
 test installation or migration. Do not create/repair/prune workspaces, launch an
 agent or activate configuration for capability acceptance. These checks establish
