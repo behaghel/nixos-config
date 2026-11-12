@@ -8,6 +8,7 @@ import { doctor } from "./doctor.ts";
 import { finish, finishBulk, finishSessionTree } from "./finish.ts";
 import { finishWorktreeBranches } from "./finish-branches.ts";
 import { batchFinish } from "./batch.ts";
+import { reconcileActivity } from "./activity.ts";
 import { mapOwnership } from "./ownership.ts";
 import {
 	commandNames,
@@ -15,6 +16,7 @@ import {
 	didYouMean,
 	parseCreateArguments,
 	parseBranchArguments,
+	parseActivityArguments,
 	parseOwnershipArguments,
 	parseStartArguments,
 	parseFinishArguments,
@@ -41,6 +43,11 @@ export function main(args: string[]): number {
 			const target = rest.slice(1);
 			if (!target[0]) throw argumentError("Missing <command> for 'run'.");
 			return runInSession(primaryRoot(repositoryRoot()), resolveSessionTarget(slug), target);
+		}
+		if (command === "activity") {
+			const options = parseActivityArguments(rest);
+			const invocationRoot = repositoryRoot();
+			return reconcileActivity(primaryRoot(invocationRoot), resolveSessionTarget(options.slug, invocationRoot), options.dryRun, options.json);
 		}
 		if (command === "ownership") {
 			const options = parseOwnershipArguments(rest);

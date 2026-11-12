@@ -8,6 +8,7 @@ export const commandNames = [
 	"run",
 	"branch",
 	"ownership",
+	"activity",
 	"create",
 	"launch",
 	"start",
@@ -136,6 +137,15 @@ export function parseOwnershipArguments(args: string[]): OwnershipOptions {
 	if (dryRun && (expected || yes)) throw argumentError("Ownership preview does not accept approval flags.");
 	if (!dryRun && (!expected || !yes)) throw argumentError("Ownership mapping requires a reviewed --expected receipt and --yes.");
 	return { slug, parent, dryRun, json, yes, expected };
+}
+
+export function parseActivityArguments(args: string[]): { slug: string; dryRun: boolean; json: boolean } {
+	const [slug, action, ...options] = args;
+	if (!slug || action !== "reconcile" || options.some((option) => !["--dry-run", "--json"].includes(option)) ||
+		(options.includes("--json") && !options.includes("--dry-run"))) {
+		throw argumentError("Use: agent-session <slug> activity reconcile [--dry-run [--json]]. Applying requires terminal confirmation; --yes and --force are not supported.");
+	}
+	return { slug, dryRun: options.includes("--dry-run"), json: options.includes("--json") };
 }
 
 export function parseBranchArguments(args: string[]): { slug: string; name: string; json: boolean } {
@@ -405,13 +415,14 @@ function usage(): string {
 		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> resume",
 		"  agent-session <task-slug> status [--json] [--refresh]",
+		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session <task-slug> finish --branches [--keep-branch] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
 		"  agent-session <task-slug> finish --all [--keep-branch] (preview recorded descendants, choose eligible branch deletion and confirm)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
-		"  agent-session . <cd|run|branch|ownership|launch|resume|status|doctor|finish> (current managed worktree)",
+		"  agent-session . <cd|run|branch|ownership|activity|launch|resume|status|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",

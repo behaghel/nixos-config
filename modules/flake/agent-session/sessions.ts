@@ -24,6 +24,7 @@ import { CliError, run } from "./runtime.ts";
 import { validPullRequest } from "./github.ts";
 import type {
 	AgentSessionConfig,
+	ActiveOperation,
 	SessionMetadata,
 	OperationLock,
 	ManagedWorktree,
@@ -199,6 +200,22 @@ export function readMetadataInventory(root: string): SessionMetadata[] {
 		readSessionMetadata(root, slug, primary, join(directory, `${slug}.json`)));
 }
 
+function validActiveOperation(operation: ActiveOperation): boolean {
+	return Boolean(operation && typeof operation.id === "string" && Number.isSafeInteger(operation.pid) && operation.pid > 0 &&
+		typeof operation.hostname === "string" && typeof operation.startedAt === "string" && Number.isFinite(Date.parse(operation.startedAt)));
+}
+
+// ESRCH is evidence of absence. Foreign hosts, reused/live PIDs and all other
+// probe failures remain unsettled; none can be acknowledged as an interruption.
+export function inspectActiveOperation(operation: ActiveOperation): { state: "live" | "interrupted" | "foreign-host" | "unknown"; problem?: string } {
+	if (operation.hostname !== hostname()) return { state: "foreign-host" };
+	try { process.kill(operation.pid, 0); return { state: "live" }; }
+	catch (error) {
+		return (error as NodeJS.ErrnoException).code === "ESRCH" ? { state: "interrupted" }
+			: { state: "unknown", problem: String(error) };
+	}
+}
+
 function readSessionMetadata(root: string, slug: string, primary: string, path = metadataPath(root, slug)): SessionMetadata {
 	if (!existsSync(path)) throw new CliError(`No managed session: ${slug}`);
 	let value: unknown;
@@ -235,9 +252,10 @@ function readSessionMetadata(root: string, slug: string, primary: string, path =
 		typeof metadata.createdAt !== "string" ||
 		(metadata.lastWorkAt !== undefined && (typeof metadata.lastWorkAt !== "string" || !Number.isFinite(Date.parse(metadata.lastWorkAt)))) ||
 		(metadata.activeOperations !== undefined &&
-			(!Array.isArray(metadata.activeOperations) || metadata.activeOperations.some((operation) =>
-				!operation || typeof operation.id !== "string" || !Number.isSafeInteger(operation.pid) || operation.pid <= 0 ||
-				typeof operation.hostname !== "string" || typeof operation.startedAt !== "string" || !Number.isFinite(Date.parse(operation.startedAt))))) ||
+			(!Array.isArray(metadata.activeOperations) || metadata.activeOperations.some((operation) => !validActiveOperation(operation)))) ||
+		(metadata.acknowledgedInterruptions !== undefined &&
+			(!Array.isArray(metadata.acknowledgedInterruptions) || metadata.acknowledgedInterruptions.some((operation) =>
+				!validActiveOperation(operation) || operation.outcome !== "interrupted" || typeof operation.acknowledgedAt !== "string" || !Number.isFinite(Date.parse(operation.acknowledgedAt))))) ||
 		(metadata.initialBranchOwned !== undefined && typeof metadata.initialBranchOwned !== "boolean") ||
 		(metadata.preexistingBranches !== undefined &&
 			(!Array.isArray(metadata.preexistingBranches) ||

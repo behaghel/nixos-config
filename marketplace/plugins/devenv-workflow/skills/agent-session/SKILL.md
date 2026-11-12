@@ -179,6 +179,27 @@ on lookup, silently prune registrations or turn an unrecorded binding into a
 replacement session. Doctor findings are proposals for human review, not authority.
 Metadata repair does not recreate local configuration links.
 
+## Acknowledge interrupted activity explicitly
+
+On versions supporting `as <task-slug> activity reconcile`, use `doctor` and
+`activity reconcile --dry-run --json` to review unsettled operation records.
+An interrupted record is not successful completion. Only same-host PIDs proven
+absent, with complete same-user cwd evidence and no matching cwd observations, can
+be acknowledged. Live/reused PIDs, foreign hosts, unknown/permission failures and
+ambiguous bindings remain blocked; never kill a process based only on a saved PID.
+
+The human can run `as <task-slug> activity reconcile`, review the exact operations
+and confirm once (default No). The CLI locks and rechecks record/binding identity,
+policy and process evidence before writing. It retains the original operations
+in `acknowledgedInterruptions` with outcome `interrupted` and acknowledgement time,
+without inventing completion or changing `lastWorkAt`. That audit stays with the
+session metadata, not an independent permanent log. No worktree, branch or
+ownership is changed. `--yes`/`--force` are unsupported; agents must not synthesize
+terminal consent or manually erase activeOperations. Implementation approval is
+not permission to acknowledge actual sessions. Reconciliation is not retirement
+approval; inspect cleanup again and obtain separate approval of its exact scope.
+`repair` handles missing metadata, not existing interrupted records.
+
 ## Retire only by separate request
 
 Preview from another worktree, inspect the exact paths, actual branches,
