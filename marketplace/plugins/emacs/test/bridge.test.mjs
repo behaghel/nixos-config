@@ -8,18 +8,27 @@ const success = { code: 0, killed: false, truncated: false,
   stdout: wire({ ok: true, value: "3", truncated: false }), stderr: "" };
 const schema = new Proxy({}, { get: () => (...args) => ({ args }) });
 
-function fixture(result = success) {
+function fixture(result = success, entries = [], sessionId = "session-a") {
   const calls = [];
   const tools = new Map();
+  const commands = new Map();
+  const handlers = new Map();
   const pi = {
+    on: (name, handler) => handlers.set(name, handler),
+    registerCommand: (name, definition) => commands.set(name, definition),
+    appendEntry: (customType, data) => entries.push({ type: "custom", customType, data }),
     exec: async (...args) => { calls.push(args); return result; },
     registerTool: (definition) => tools.set(definition.name, definition),
   };
   registerEmacsTools(pi, schema);
-  return { calls, tools, bridge: createEmacsBridge(pi.exec) };
+  const context = (select, hasUI = true) => ({ ...ctx(select, hasUI),
+    sessionManager: { getSessionId: () => sessionId, getEntries: () => entries } });
+  return { calls, tools, commands, handlers, entries, context,
+    bridge: createEmacsBridge(pi.exec) };
 }
 
-const ctx = (confirm, hasUI = true) => ({ hasUI, cwd: "/tmp", ui: { confirm } });
+const ctx = (select, hasUI = true) => ({ hasUI, cwd: "/tmp",
+  ui: { select, notify() {}, setStatus() {} } });
 
 test("metadata inspection does not ask approval or launch an alternate editor", async () => {
   const { calls, tools } = fixture({ ...success, stdout: wire({ ok: true,
@@ -47,7 +56,7 @@ test("raw evaluation is denied without UI, including a claimed approval flag", a
 test("denying confirmation invokes no client", async () => {
   const { calls, tools } = fixture();
   const result = await tools.get("emacs_eval").execute("id", { expression: "(+ 1 2)" },
-    undefined, undefined, ctx(async () => false));
+    undefined, undefined, ctx(async () => "Deny"));
   assert.equal(result.details.status, "not-executed");
   assert.equal(calls.length, 0);
 });
@@ -55,12 +64,13 @@ test("denying confirmation invokes no client", async () => {
 test("approval is per call and displays the exact target and expression", async () => {
   const { calls, tools } = fixture();
   let confirmations = 0;
-  const context = ctx(async (_title, body) => {
+  const context = ctx(async (title, options) => {
     confirmations++;
-    assert(body.includes("scratch"));
-    assert(body.includes("test-server"));
-    assert(body.includes("(+ 1 2)"));
-    return true;
+    assert(title.includes("scratch"));
+    assert(title.includes("test-server"));
+    assert(title.includes("(+ 1 2)"));
+    assert.deepEqual(options, ["Deny", "Allow once", "Allow for this session"]);
+    return "Allow once";
   });
   const tool = tools.get("emacs_eval");
   for (let i = 0; i < 2; i++) {
@@ -79,9 +89,94 @@ test("aborting approval never evaluates", async () => {
   const { calls, tools } = fixture();
   const controller = new AbortController();
   const result = await tools.get("emacs_eval").execute("id", { expression: "(+ 1 2)" },
-    controller.signal, undefined, ctx(async () => { controller.abort(); return true; }));
+    controller.signal, undefined, ctx(async () => { controller.abort(); return "Allow for this session"; }));
   assert.equal(result.details.status, "not-executed");
   assert.equal(calls.length, 0);
+});
+
+test("session allowance applies to different Elisp and survives resume/reload", async () => {
+  const first = fixture();
+  const context = first.context(async () => "Allow for this session");
+  const statuses = [];
+  context.ui.setStatus = (...args) => statuses.push(args);
+  const evaluate = (f, expression, c) => f.tools.get("emacs_eval")
+    .execute("id", { expression }, undefined, undefined, c);
+  assert.equal((await evaluate(first, "(+ 1 2)", context)).details.status, "ok");
+  assert.equal(first.entries.length, 1);
+  assert(statuses.some(([, text]) => text?.includes("never")));
+  for (const reason of ["resume", "reload", "startup"]) {
+    const resumed = fixture(success, first.entries);
+    const c = resumed.context(() => { throw new Error("Unexpected prompt"); });
+    await resumed.handlers.get("session_start")({ reason }, c);
+    assert.equal((await evaluate(resumed, "(setq other t)", c)).details.status, "ok");
+  }
+});
+
+test("emacs-ask reports, changes and persistently revokes the session setting", async () => {
+  const f = fixture();
+  const c = f.context(async () => "Deny");
+  const notices = [];
+  c.ui.notify = (message) => notices.push(message);
+  const command = f.commands.get("emacs-ask");
+  await command.handler("", c);
+  assert.match(notices.at(-1), /always/);
+  assert.equal(f.entries.length, 0);
+  await command.handler("never", c);
+  assert.match(notices.at(-1), /never/);
+  await command.handler("invalid", c);
+  assert.equal(f.entries.length, 1);
+  await command.handler("always", c);
+  const resumed = fixture(success, f.entries);
+  const rc = resumed.context(async () => "Deny");
+  await resumed.handlers.get("session_start")({ reason: "resume" }, rc);
+  const result = await resumed.tools.get("emacs_eval").execute("id",
+    { expression: "(+ 1 2)" }, undefined, undefined, rc);
+  assert.equal(result.details.status, "not-executed");
+  assert.equal(resumed.calls.length, 0);
+});
+
+test("new and forked sessions never inherit allowance, even after resuming the fork", async () => {
+  const parent = fixture();
+  await parent.commands.get("emacs-ask").handler("never", parent.context());
+  for (const reason of ["new", "fork", "resume", "startup"]) {
+    const child = fixture(success, [...parent.entries], "session-child");
+    const c = child.context(async () => "Deny");
+    await child.handlers.get("session_start")({ reason }, c);
+    const result = await child.tools.get("emacs_eval").execute("id",
+      { expression: "(+ 1 2)" }, undefined, undefined, c);
+    assert.equal(result.details.status, "not-executed");
+    assert.equal(child.calls.length, 0);
+  }
+});
+
+test("dismissed, interrupted or cancelled approval cannot grant session allowance", async () => {
+  for (const choice of [undefined, "Deny", "unexpected", "throw", "abort"]) {
+    const f = fixture();
+    const controller = new AbortController();
+    const c = f.context(async () => {
+      if (choice === "throw") throw new Error("UI interrupted");
+      if (choice === "abort") { controller.abort(); return "Allow for this session"; }
+      return choice;
+    });
+    const result = await f.tools.get("emacs_eval").execute("id",
+      { expression: "(+ 1 2)" }, controller.signal, undefined, c);
+    assert.equal(result.details.status, "not-executed");
+    assert.equal(f.entries.length, 0);
+    assert.equal(f.calls.length, 0);
+  }
+});
+
+test("session allowance still respects no-UI and pre-aborted calls", async () => {
+  const f = fixture();
+  await f.commands.get("emacs-ask").handler("never", f.context());
+  const controller = new AbortController(); controller.abort();
+  for (const [c, signal] of [[f.context(undefined, false), undefined],
+    [f.context(), controller.signal]]) {
+    const result = await f.tools.get("emacs_eval").execute("id",
+      { expression: "(+ 1 2)" }, signal, undefined, c);
+    assert.equal(result.details.status, "not-executed");
+  }
+  assert.equal(f.calls.length, 0);
 });
 
 test("transport timeout, cancellation and overflow are ambiguous and never retried", async () => {
