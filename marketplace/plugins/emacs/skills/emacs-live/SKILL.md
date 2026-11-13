@@ -23,8 +23,12 @@ privileges of the connected Emacs process.
 
 ## Inspect narrowly, then fix tracked source
 
-- Arbitrary expressions always require confirmation, even if intended read-only.
-  Never label an expression read-only as a way to bypass approval.
+- Arbitrary expressions require confirmation unless the user enabled session
+  approval with **Allow for this session** or `/emacs-ask never`. That allows any
+  Elisp and survives resuming the same Pi session, not new or forked sessions.
+  `/emacs-ask` reports the setting; `/emacs-ask always` revokes allowance.
+  Never enable allowance yourself or label an expression read-only to bypass
+  approval. Session allowance does not replace authorization for the task.
 - Return only explicit, nonsensitive fields: selected model name, backend type,
   feature presence, function source location, flags, or cache-file permissions.
   Never print an entire backend object, token plist, credential cache, process

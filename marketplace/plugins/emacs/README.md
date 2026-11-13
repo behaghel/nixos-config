@@ -8,10 +8,12 @@ Emacs configuration, authentication, packages, or Pi installation.
 
 - `emacs_status` returns predefined session and buffer metadata, never buffer
   contents, variable values, backend records, tokens, or environment variables.
-- `emacs_eval` evaluates one Elisp expression only after **per-call human
-  confirmation**. No confirmation UI means no execution. An expression cannot
-  be classified reliably as read-only, so there is no model-asserted approval
-  flag or read-only exemption for arbitrary Elisp.
+- `emacs_eval` asks for human approval by default: **Deny**, **Allow once**, or
+  **Allow for this session**. Session approval permits **any Elisp**, not just
+  the displayed expression, with full Emacs privileges. It survives resuming
+  that same Pi session and reloading the extension; new and forked/cloned
+  sessions ask again. No confirmation UI means no execution, even with saved
+  approval. There is no model-asserted approval flag or read-only exemption.
 - Target buffers must already exist. A socket name/path can explicitly select
   another local server; otherwise Emacs's normal local socket selection applies.
 - The bridge invokes `emacsclient` without a shell and disables alternate-editor
@@ -26,10 +28,12 @@ Emacs configuration, authentication, packages, or Pi installation.
   Never automatically retry such an operation.
 - Lisp errors report the error symbol, not potentially sensitive error data.
   Arbitrary evaluation results are intentionally returned to Pi. Review the code
-  before approving: arguments/results can appear in session history. Never
+  before approving or enabling session approval: arguments/results can appear
+  in session history. Never
   return credentials, full authentication records, or entire backend objects.
 - No background processes, automatic probes, persistent logs, or credential
-  stores are created by the extension.
+  stores are created by the extension. The approval preference is stored as a
+  custom entry in Pi's existing session history, bound to that session's ID.
 
 ## Use
 
@@ -49,9 +53,21 @@ pi -e /absolute/path/to/nixos-config/marketplace/plugins/emacs/pi/extension.ts
 ```
 
 Then ask Pi to inspect Emacs or evaluate a small expression. Raw evaluation
-shows the exact server, buffer, context policy, and expression for approval.
-A denied/aborted approval never invokes the client. Print/JSON modes can inspect
-metadata but cannot evaluate; TUI or an approval-capable RPC host is required.
+shows the exact server, buffer, context policy, and expression for approval
+unless you have enabled session approval. A denied/aborted approval never invokes
+the client or enables session approval. Print/JSON modes can inspect metadata
+but cannot evaluate; TUI or an approval-capable RPC host is required.
+
+Control the current Pi session's approval preference directly:
+
+- `/emacs-ask`: show the current setting.
+- `/emacs-ask always`: ask before every evaluation (default); revoke allowance.
+- `/emacs-ask never`: allow any Elisp in this session, including after resume;
+  equivalent to choosing **Allow for this session** in the approval prompt.
+
+While allowance is active, the footer shows `Emacs ask: never`. This preference
+is session-wide: navigating `/tree` does not undo a grant or revocation. It does
+not grant task authorization for unrelated edits, network calls, or other effects.
 
 Examples:
 
@@ -82,4 +98,8 @@ runs the same behavioral suite with declared Node and Emacs dependencies.
 Manual acceptance: load the extension, inspect an existing server, deny an eval
 and observe no change, approve a harmless variable change in a scratch buffer,
 then selectively reload a test definition without losing editing context.
-Missing-server checks must fail without starting Emacs.
+Choose **Allow for this session**, evaluate a different harmless expression with
+no prompt, and resume the same session to verify allowance persists. Check the
+footer indicator and `/emacs-ask`; use `/emacs-ask always` to restore prompts.
+New and forked/cloned sessions must ask again. Missing-server checks must fail
+without starting Emacs.
