@@ -76,6 +76,7 @@ Repository-local skills in `.agents/skills/` remain separate from this catalogue
 |---|---|---|
 | `devenv-workflow` | Detection, tool monitoring, environment discovery, `/devenv-*` | `devenv-project`, `agent-session` |
 | `domain-tree` | Domain navigation, coverage enforcement, `/domain-tree:*` | `domain-navigator` |
+| `emacs` | Live metadata inspection and approval-gated Elisp evaluation | `emacs-live` |
 | `spec-driven` | Specification collection/verification, coverage tool | `spec-collector`, `spec-verifier` |
 | `spec-tdd` | Iterative delivery guidance, `/tdd-*` | `tdd-planner` |
 | `ux-stories` | Graphical UX workflow, `/story-*` | `story-writer` |
