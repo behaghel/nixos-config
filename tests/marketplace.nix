@@ -121,6 +121,14 @@ let
     echo ok > "$out"
   '';
 
+  emacsBehaviorCheck = pkgs.runCommand "pi-emacs-behavior-tests"
+    { nativeBuildInputs = [ pkgs.nodejs_24 pkgs.emacs-nox ]; } ''
+    export HOME="$TMPDIR/home"
+    mkdir -p "$HOME"
+    node --test ${marketplaceDir}/plugins/emacs/test/*.test.mjs
+    echo ok > "$out"
+  '';
+
   piPublishCheck = pkgs.runCommand "pi-publish-tests"
     { nativeBuildInputs = [ pkgs.python3 pkgs.git pkgs.ruff ]; } ''
     ruff check --isolated --no-cache ${../scripts/pi_publish.py} ${./test-pi-publish.py}
@@ -170,6 +178,7 @@ pkgs.runCommand "marketplace-tests" { } ''
   ${templateChecks}
   RESULTS
   test -f ${piSyntaxCheck}
+  test -f ${emacsBehaviorCheck}
   test -f ${domainTreeBehaviorCheck}
   test -f ${piPublishCheck}
   echo "All Pi marketplace checks passed."

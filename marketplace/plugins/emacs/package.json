@@ -1,0 +1,17 @@
+{
+  "name": "@behaghel/pi-emacs",
+  "version": "0.1.0",
+  "description": "Approval-gated live Emacs inspection and selective Elisp evaluation for Pi.",
+  "type": "module",
+  "keywords": ["pi-package", "emacs", "emacsclient"],
+  "files": ["README.md", "pi", "skills", "test"],
+  "scripts": { "test": "node --test test/*.test.mjs" },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": ["./pi/extension.ts"],
+    "skills": ["./skills"]
+  }
+}
