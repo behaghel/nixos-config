@@ -44,11 +44,13 @@ import {
 	CliError,
 	confirm,
 	progressReporter,
+	withPreparation,
+	styleText,
 	runPhase,
 	writeCommandResult,
 	run,
 } from "./runtime.ts";
-import type { AgentSessionConfig, SessionMetadata, BranchOwnership, ProgressReporter, PullRequestSelection, PullRequestMetadata } from "./types.ts";
+import type { AgentSessionConfig, SessionMetadata, BranchOwnership, ProgressReporter, PullRequestSelection, PullRequestMetadata, PresentationOptions } from "./types.ts";
 
 function linkLocalFiles(root: string, worktree: string, paths: string[]): void {
 	for (const relativePath of paths) {
@@ -82,14 +84,14 @@ function executeConfigured(
 	command: string[],
 	cwd: string,
 	environment: NodeJS.ProcessEnv = process.env,
-	stdio: "pipe" | "inherit" = "inherit",
+	stdio: "pipe" | "inherit" | "capture" = "inherit",
 ): number {
 	if (command.length === 0) return 0;
 	const [executable, ...args] = command;
 	if (!executable) return 0;
 	const result = run(executable, args, cwd, stdio, environment);
-	if (stdio === "pipe" && result.status !== 0) {
-		const diagnostic = result.stderr || result.stdout;
+	if (stdio !== "inherit" && result.status !== 0) {
+		const diagnostic = [result.stdout, result.stderr].filter(Boolean).join("\n");
 		throw new CliError(`Configured command exited with status ${result.status}.${diagnostic ? `\n${diagnostic}` : ""}`);
 	}
 	return result.status;
@@ -384,6 +386,7 @@ function createSession(
 	json = false,
 	selection?: PullRequestSelection,
 	trustPr = false,
+	verbose = false,
 ): { config: AgentSessionConfig; metadata: SessionMetadata } {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -398,8 +401,9 @@ function createSession(
 		throw new CliError("Primary checkout must be on a branch.");
 	const remote = upstreamRemote(root, currentBranch);
 	if (selection?.repository) assertPullRequestTarget(root, remote, selection);
+	const stdio = json ? "pipe" : verbose ? "inherit" : "capture";
 	const defaultBranch = runPhase(report, "remote-sync", () => {
-		const fetch = run("git", ["fetch", "--prune", remote], root, json ? "pipe" : "inherit");
+		const fetch = run("git", ["fetch", "--prune", remote], root, stdio);
 		if (fetch.status !== 0) {
 			const diagnostic = fetch.stderr || fetch.stdout;
 			throw new CliError(`Failed to fetch remote ${remote}.${diagnostic ? `\n${diagnostic}` : ""}`);
@@ -451,6 +455,7 @@ function createSession(
 		runPhase(report, "pr-fetch", () => fetchPullRequestHead(root, remote, pr));
 		if (!trustPr) runPhase(report, "pr-trust", () => {
 			if (!process.stdin.isTTY) throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
+			report.flush?.();
 			const accepted = confirm(`Trust ${pullRequestSummary(pr)} at commit ${pr.headCommit}? Its environment and preparation can execute code. [y/N]`);
 			process.stderr.write("\n");
 			if (!accepted) throw new CliError("PR creation cancelled; no PR code was executed.");
@@ -512,7 +517,7 @@ function createSession(
 					worktreePath, branch,
 				],
 				root,
-				json ? "pipe" : "inherit",
+				stdio,
 			);
 			if (added.status !== 0) {
 				const diagnostic = added.stderr || added.stdout;
@@ -535,8 +540,11 @@ function createSession(
 		});
 		runPhase(report, "worktree-prepare", () => {
 			linkLocalFiles(root, worktreePath, config.local_links);
-			if (executeConfigured(config.prepare_command, worktreePath, process.env, json ? "pipe" : "inherit") !== 0) {
-				throw new CliError("Worktree preparation failed.");
+			try {
+				const status = executeConfigured(config.prepare_command, worktreePath, process.env, stdio);
+				if (status !== 0) throw new CliError(`Configured command exited with status ${status}.`);
+			} catch (error) {
+				throw new CliError(`Worktree preparation failed.\n${error instanceof Error ? error.message : String(error)}`);
 			}
 		});
 
@@ -561,31 +569,35 @@ function createSession(
 		recorded = true;
 	} finally {
 		if (created && !recorded) {
-			run(
+			const removed = run(
 				"git",
 				["worktree", "remove", "--force", worktreePath],
 				root,
-				json ? "pipe" : "inherit",
+				stdio,
 			);
+			if (!json && removed.status !== 0) {
+				report.flush?.();
+				process.stderr.write(`Worktree cleanup could not be confirmed at ${worktreePath}; inspect it before retrying.\n${[removed.stdout, removed.stderr].filter(Boolean).join("\n")}\n`);
+			}
 		}
 		if (createdBranch && !recorded && initialOwnership) {
 			const head = run("git", ["rev-parse", "--verify", `refs/heads/${branch}`], root);
 			// Keep native branch-deletion safeguards: update-ref -d would bypass
 			// protection for a branch still checked out after failed removal.
 			if (head.status === 0 && head.stdout === initialOwnership.creationCommit) {
-				run("git", ["branch", "-D", branch], root, json ? "pipe" : "inherit");
+				const deleted = run("git", ["branch", "-D", branch], root, stdio);
+				if (!json && deleted.status !== 0) process.stderr.write(`Branch cleanup could not be confirmed for ${branch}; inspect it before retrying.\n${[deleted.stdout, deleted.stderr].filter(Boolean).join("\n")}\n`);
 			} else process.stderr.write(`Branch ${branch} changed during preparation; preserved for review.\n`);
 		}
 		if (!recorded && createdSourceRemote) git(root, ["remote", "remove", createdSourceRemote]);
 	}
 
-	if (!json) process.stderr.write(`Agent worktree ready: ${branch}\n`);
 	return { config, metadata: readMetadata(root, slug) };
 }
 
 function prepareSession(
 	root: string, slug: string, report: ProgressReporter, json: boolean,
-	selection?: PullRequestSelection, trustPr = false,
+	selection?: PullRequestSelection, trustPr = false, verbose = false,
 ): { config: AgentSessionConfig; metadata: SessionMetadata; reused: boolean } {
 	if (selection && sessionRecordExists(root, slug)) {
 		return runPhase(report, "session-reuse", () => {
@@ -606,14 +618,14 @@ function prepareSession(
 	if (selection && !trustPr && !process.stdin.isTTY) {
 		throw new CliError("PR execution requires explicit trust. Inspect the PR and re-run with --trust-pr.");
 	}
-	return { ...createSession(root, slug, report, json, selection, trustPr), reused: false };
+	return { ...createSession(root, slug, report, json, selection, trustPr, verbose), reused: false };
 }
 
-function reportCreated(metadata: SessionMetadata, json = false, reused = false): void {
+function reportCreated(metadata: SessionMetadata, json = false, reused = false, options: PresentationOptions = {}): void {
 	writeCommandResult(
 		{ version: 1, command: "create", dryRun: false, session: metadata },
 		json,
-		`Session ${reused ? "reused" : "created"} without launching the configured agent.\nWorktree: ${metadata.worktreePath}\n${metadata.pr ? `PR: ${pullRequestSummary(metadata.pr)}; base: ${metadata.pr.baseBranch}\n` : ""}`,
+		`${styleText(`Ready · ${metadata.slug}${reused ? " (reused)" : ""}`, 32, options.color)}\n  Branch: ${metadata.branch}\n  Worktree: ${metadata.worktreePath}\n${metadata.pr ? `  PR: ${pullRequestSummary(metadata.pr)}; base: ${metadata.pr.baseBranch}\n` : ""}`,
 	);
 }
 
@@ -624,10 +636,10 @@ export function create(
 	json: boolean,
 	selection?: PullRequestSelection,
 	trustPr = false,
+	options: PresentationOptions = {},
 ): number {
-	const report = progressReporter("create", json);
 	if (dryRun) {
-		const plan = previewCreate(root, slug, report, selection);
+		const plan = withPreparation("create", slug, json, options, (report) => previewCreate(root, slug, report, selection));
 		writeCommandResult(
 			{ version: 1, command: "create", dryRun: true, plan },
 			json,
@@ -637,10 +649,10 @@ export function create(
 		);
 		return 0;
 	}
-	const prepared = withOperationLock(root, "create", () =>
-		prepareSession(root, slug, report, json, selection, trustPr),
-	);
-	reportCreated(prepared.metadata, json, prepared.reused);
+	const prepared = withPreparation("create", slug, json, options, (report) => withOperationLock(root, "create", () =>
+		prepareSession(root, slug, report, json, selection, trustPr, options.verbose),
+	));
+	reportCreated(prepared.metadata, json, prepared.reused, options);
 	return 0;
 }
 
@@ -650,13 +662,14 @@ export function start(
 	launchConfiguredAgent: boolean,
 	selection?: PullRequestSelection,
 	trustPr = false,
+	options: PresentationOptions = {},
 ): number {
-	const prepared = withOperationLock(root, "start", () =>
-		prepareSession(root, slug, progressReporter("start", false), false, selection, trustPr),
-	);
+	const prepared = withPreparation("start", slug, false, options, (report) => withOperationLock(root, "start", () =>
+		prepareSession(root, slug, report, false, selection, trustPr, options.verbose),
+	));
 	if (launchConfiguredAgent) {
 		return launchAgent(root, prepared.config, prepared.metadata);
 	}
-	reportCreated(prepared.metadata, false, prepared.reused);
+	reportCreated(prepared.metadata, false, prepared.reused, options);
 	return 0;
 }

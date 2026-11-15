@@ -886,12 +886,20 @@ describe("explicit session branch ownership", () => {
 			const bin = join(fixture.root, "guard-bin");
 			mkdirSync(bin);
 			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
-			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
-			const result = runCli(fixture.checkout, ["owner", "create", "--json"], { PATH: `${bin}:${process.env.PATH}` });
-			expect(result.status).toBe(1);
-			expect(existsSync(join(fixture.worktrees, "owner"))).toBe(true);
-			expect(git(fixture.checkout, "rev-parse", "--verify", "refs/heads/agent/owner").length > 0).toBe(true);
-			expect(existsSync(sessionMetadataPath(fixture.checkout, "owner"))).toBe(false);
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then printf 'fixture native rollback refused\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			for (const json of [true, false]) {
+				const slug = json ? "owner" : "human-owner";
+				const result = runCli(fixture.checkout, [slug, "create", ...(json ? ["--json"] : [])], { PATH: `${bin}:${process.env.PATH}` });
+				expect(result.status).toBe(1);
+				expect(existsSync(join(fixture.worktrees, slug))).toBe(true);
+				expect(git(fixture.checkout, "rev-parse", "--verify", `refs/heads/agent/${slug}`).length > 0).toBe(true);
+				expect(existsSync(sessionMetadataPath(fixture.checkout, slug))).toBe(false);
+				if (!json) {
+					expect(result.stderr).toContain("fixture native rollback refused");
+					expect(result.stderr).toContain("cleanup could not be confirmed");
+					expect(result.stdout.includes("Ready")).toBe(false);
+				}
+			}
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 
@@ -5145,11 +5153,9 @@ describe("agent-session create and start", () => {
 			const worktree = join(realpathSync(fixture.worktrees), "git-hygiene");
 
 			expect(result.status).toBe(0);
-			expect(result.stderr).toContain("[agent-session] STARTED remote-sync");
-			expect(result.stderr).toContain(
-				"[agent-session] COMPLETED metadata-record",
-			);
-			expect(result.stderr).toContain("Agent worktree ready");
+			expect(result.stderr.includes("STARTED")).toBe(false);
+			expect(result.stderr.includes("COMPLETED")).toBe(false);
+			expect(result.stderr).toContain("Launching agent in");
 			expect(readFileSync(agentCwd, "utf8").trim()).toBe(worktree);
 			expect(git(worktree, "branch", "--show-current")).toBe(
 				"agent/git-hygiene",
@@ -5184,10 +5190,8 @@ describe("agent-session create and start", () => {
 
 			expect(result.status).toBe(0);
 			const worktree = join(realpathSync(fixture.worktrees), "agent-friendly");
-			expect(result.stderr).toContain("Agent worktree ready");
-			expect(result.stdout).toContain(
-				"Session created without launching the configured agent",
-			);
+			expect(result.stderr.includes("Agent worktree ready")).toBe(false);
+			expect(result.stdout).toContain("Ready · agent-friendly");
 			expect(existsSync(agentCwd)).toBe(false);
 			expect(existsSync(worktree)).toBe(true);
 			expect(git(worktree, "branch", "--show-current")).toBe(
@@ -5201,6 +5205,138 @@ describe("agent-session create and start", () => {
 		}
 	});
 
+	it("keeps human create and start preparation quiet with one durable result", () => {
+		const fixture = createRepositoryFixture("agent-quiet-creation-");
+		try {
+			writeConfig(fixture.checkout, "true", ["sh", "-c", "printf 'preparation stdout noise\\n'; printf 'preparation stderr noise\\n' >&2"]);
+			const terminal = join(fixture.root, "creation-terminal.mjs");
+			writeFileSync(terminal, 'for (const stream of [process.stdout, process.stderr]) Object.defineProperties(stream, { isTTY: { value: true }, columns: { value: 90 } });\n');
+			for (const command of ["create", "start"]) {
+				const slug = `quiet-${command}`;
+				const args = [slug, command, ...(command === "start" ? ["--no-agent"] : []), "--color=never"];
+				const result = runCli(fixture.checkout, args, { TERM: "xterm-256color", NODE_OPTIONS: `--import=${terminal}` });
+				expect(result.status).toBe(0);
+				expect(result.stdout).toContain(`Ready · ${slug}`);
+				expect(result.stdout).toContain(`agent/${slug}`);
+				expect(result.stdout).toContain(join(realpathSync(fixture.worktrees), slug));
+				expect(result.stdout.split("Ready ·").length).toBe(2);
+				const all = result.stdout + result.stderr;
+				for (const noise of ["preparation stdout noise", "preparation stderr noise", "Preparing worktree", "HEAD is now", "STARTED", "COMPLETED", "Agent worktree ready"]) expect(all.includes(noise)).toBe(false);
+				expect(result.stderr).toContain("Preparing environment");
+				expect(result.stderr).toContain("\r\u001b[2K");
+				expect(/\u001b\[[0-9;]*m/.test(all)).toBe(false);
+			}
+			const verbose = runCli(fixture.checkout, ["verbose-create", "create", "--verbose", "--color=never"]);
+			expect(verbose.status).toBe(0);
+			expect(verbose.stdout + verbose.stderr).toContain("preparation stdout noise");
+			expect(verbose.stdout + verbose.stderr).toContain("preparation stderr noise");
+			expect(verbose.stdout).toContain("Ready · verbose-create");
+			const piped = runCli(fixture.checkout, ["piped-create", "create", "--color=never"]);
+			expect(piped.status).toBe(0);
+			expect(piped.stderr.trim().split("\n").length).toBe(1);
+			expect((piped.stdout + piped.stderr).includes("\u001b")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("controls human creation colour and completes presentation flags without affecting machine output", () => {
+		const fixture = createRepositoryFixture("agent-creation-colour-");
+		try {
+			writeConfig(fixture.checkout, "true");
+			const terminal = join(fixture.root, "colour-terminal.mjs");
+			writeFileSync(terminal, 'for (const stream of [process.stdout, process.stderr]) Object.defineProperties(stream, { isTTY: { value: true }, columns: { value: 90 } });\n');
+			const cases = [
+				{ flag: "--color=auto", tty: true, noColor: "", colour: true },
+				{ flag: "--color=auto", tty: true, noColor: "1", colour: false },
+				{ flag: "--color=never", tty: true, noColor: "", colour: false },
+				{ flag: "--color=always", tty: false, noColor: "1", colour: true },
+			];
+			for (const [index, item] of cases.entries()) {
+				const result = runCli(fixture.checkout, [`colour-${index}`, "create", item.flag], { NODE_OPTIONS: item.tty ? `--import=${terminal}` : "", TERM: "xterm-256color", NO_COLOR: item.noColor });
+				expect(result.status).toBe(0);
+				expect(/\u001b\[[0-9;]*m/.test(result.stdout)).toBe(item.colour);
+			}
+			for (const command of ["create", "start"]) {
+				const completion = runCli(fixture.checkout, ["__complete", `options:${command}`]);
+				for (const flag of ["--color=auto", "--color=always", "--color=never", "--verbose"]) expect(completion.stdout).toContain(flag);
+				expect(runCli(fixture.checkout, ["bad-colour", command, "--color=rainbow"]).status).toBe(64);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves preparation stdin while capturing successful output", () => {
+		const fixture = createRepositoryFixture("agent-preparation-input-");
+		try {
+			const answer = join(fixture.root, "answer");
+			writeConfig(fixture.checkout, "true", ["node", "-e", `const fs = require('node:fs'); fs.writeFileSync(${tomlString(answer)}, fs.readFileSync(0, 'utf8')); console.log('hidden successful output');`]);
+			const result = spawnSync("node", [cliScript, "stdin-create", "create"], {
+				cwd: fixture.checkout, encoding: "utf8", input: "fixture input\n",
+				env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout), PI_SESSION_FILE: "", PI_SESSION_ID: "" },
+			});
+			expect(result.status).toBe(0);
+			expect(readFileSync(answer, "utf8")).toBe("fixture input\n");
+			expect(result.stdout).toContain("Ready · stdin-create");
+			expect((result.stdout + result.stderr).includes("hidden successful output")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("retains original human preparation failure evidence without noisy rollback logs or false readiness", () => {
+		const fixture = createRepositoryFixture("agent-quiet-failure-");
+		try {
+			writeConfig(fixture.checkout, "true", ["sh", "-c", "printf 'fixture context on stdout\\n'; printf 'fixture preparation error\\n' >&2; exit 7"]);
+			const result = runCli(fixture.checkout, ["failed-prepare", "create"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toBe("");
+			expect(result.stderr).toContain("fixture context on stdout");
+			expect(result.stderr).toContain("fixture preparation error");
+			expect(result.stderr).toContain("status 7");
+			for (const noise of ["Ready ·", "STARTED", "COMPLETED", "Deleted branch", "HEAD is now"]) expect(result.stderr.includes(noise)).toBe(false);
+			expect(existsSync(join(fixture.worktrees, "failed-prepare"))).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "failed-prepare"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/failed-prepare")).toBe("");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("colours only the human preparation failure headline and honours colour overrides", () => {
+		const fixture = createRepositoryFixture("agent-failure-colour-");
+		try {
+			writeConfig(fixture.checkout, "true", ["sh", "-c", "printf 'original stdout context\\n'; printf 'original stderr detail\\n' >&2; exit 7"]);
+			const terminal = join(fixture.root, "failure-terminal.mjs");
+			writeFileSync(terminal, 'for (const stream of [process.stdout, process.stderr]) Object.defineProperties(stream, { isTTY: { value: true }, columns: { value: 90 } });\n');
+			const cases = [
+				{ flags: [], tty: true, noColor: "", red: true },
+				{ flags: ["--color=never"], tty: true, noColor: "", red: false },
+				{ flags: [], tty: true, noColor: "1", red: false },
+				{ flags: [], tty: false, noColor: "", red: false },
+				{ flags: ["--color=always"], tty: false, noColor: "1", red: true },
+				{ flags: ["--json", "--color=always"], tty: true, noColor: "", red: false },
+			];
+			for (const item of cases) {
+				const result = runCli(fixture.checkout, ["failed", "create", ...item.flags], { TERM: "xterm-256color", NO_COLOR: item.noColor, NODE_OPTIONS: item.tty ? `--import=${terminal}` : "" });
+				expect(result.status).toBe(1);
+				expect(result.stdout).toBe("");
+				expect(result.stderr.includes("\u001b[31mWorktree preparation failed.\u001b[0m\n")).toBe(item.red);
+				expect(result.stderr).toContain("Configured command exited with status 7.\noriginal stdout context\noriginal stderr detail\n");
+				expect(result.stderr.split("\u001b[31m").length).toBe(item.red ? 2 : 1);
+				if (item.flags.includes("--json")) expect(result.stderr.includes("\u001b")).toBe(false);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves launched agent output and exit status after quiet start preparation", () => {
+		const fixture = createRepositoryFixture("agent-quiet-handoff-");
+		try {
+			const agent = join(fixture.root, "speaking-agent");
+			writeFileSync(agent, "#!/bin/sh\nprintf 'agent stdout stays visible\\n'\nprintf 'agent stderr stays visible\\n' >&2\nexit 7\n", { mode: 0o755 });
+			writeConfig(fixture.checkout, agent, ["sh", "-c", "printf 'hidden preparation noise\\n'"]);
+			const result = runCli(fixture.checkout, ["handoff", "start"]);
+			expect(result.status).toBe(7);
+			expect(result.stdout).toContain("agent stdout stays visible");
+			expect(result.stderr).toContain("agent stderr stays visible");
+			expect((result.stdout + result.stderr).includes("hidden preparation noise")).toBe(false);
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "handoff"))).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
 	it("returns one persisted creation receipt with JSON progress despite subprocess output", () => {
 		const fixture = createRepositoryFixture();
 		try {
@@ -5209,7 +5345,7 @@ describe("agent-session create and start", () => {
 			writeConfig(fixture.checkout, createFakeAgent(fixture.root, launched), [
 				"bash", "-c", `printf 'preparation stdout\\n'; printf 'preparation stderr\\n' >&2; printf '%s' "$PWD" > ${tomlString(prepared)}`,
 			]);
-			const result = runCli(fixture.checkout, ["json-created", "create", "--json"]);
+			const result = runCli(fixture.checkout, ["json-created", "create", "--json", "--color=always", "--verbose"]);
 			expect(result.status).toBe(0);
 			const payload = JSON.parse(result.stdout);
 			expect(payload.version).toBe(1);
@@ -5390,9 +5526,7 @@ child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); proce
 			const result = runCli(callerWorktree, ["sibling", "start", "--no-agent"]);
 
 			expect(result.status).toBe(0);
-			expect(result.stdout).toContain(
-				"Session created without launching the configured agent",
-			);
+			expect(result.stdout).toContain("Ready · sibling");
 			expect(existsSync(join(realpathSync(fixture.worktrees), "sibling"))).toBe(
 				true,
 			);

@@ -681,8 +681,8 @@ requires a capable terminal and respects nonempty `NO_COLOR`; explicit `always`
 opts in even for redirected output or when `NO_COLOR` is set. Colour supplements
 state words, never replaces them. `--color=never` disables colour, not in-place
 terminal updates. JSON results and progress events are never styled. These colour
-controls and `--verbose` currently apply to batch previews, not other commands
-or batch execution.
+controls and `--verbose` currently apply to batch previews and create/start
+preparation, not other commands or batch execution.
 
 The raw approval receipt is not printed in human mode. Add `--json` for the full
 receipt and structured inspection evidence. This performs a fresh preview, so review that selection
@@ -993,6 +993,28 @@ to repair or remove anything. Use `status` for dirtiness, freshness, publication
 and branch-ownership diagnostics; doctor is not a replacement for cleanup guards.
 There are no `--fix`, `--repair`, or `--refresh` options.
 
+## Human creation and preparation
+
+`create` and `start` show one updating preparation line on capable terminals.
+Redirected output has one plain preparation notice. Successful Git/worktree and
+configured preparation output stays hidden by default; `create` and
+`start --no-agent` finish with one `Ready` summary showing the session, branch
+and worktree. `start` clears preparation progress before handing input, output
+and the exit status to the configured agent.
+
+Both commands accept `--color=auto|always|never` and `--verbose`. Colour uses the
+same rules as batch previews. Verbose preparation retains successful command
+output and phase diagnostics; it also leaves interactive preparation output
+visible. Normal quiet preparation inherits stdin while capturing stdout/stderr.
+Use verbose mode when a custom preparation command needs visible prompts.
+
+Failed quiet preparation shows a red headline when colour is enabled, followed
+by the original captured stdout and stderr without added styling. It does not
+print successful worktree creation/deletion chatter or a false readiness message. If local rollback cannot be confirmed, its native diagnostics and a
+request to inspect the remaining resources are shown. This does not relax
+rollback's existing branch-deletion safeguards or claim uncertain effects
+succeeded. PR trust still requires its existing explicit approval.
+
 ## JSON creation receipts
 
 ```sh
@@ -1025,8 +1047,7 @@ creation receipt and rolls back only the worktree and branch created by that
 attempt. Creation still prepares without launching the configured agent.
 
 Preview output is unchanged: `dryRun` is `true`, and `plan` describes the proposed
-creation without fetching or modifying Git. Human-readable creation and agent
-startup output are unchanged. The entrypoint drains pending stdout/stderr writes
+creation without fetching or modifying Git. The entrypoint drains pending stdout/stderr writes
 before exiting, including JSON responses larger than a pipe buffer.
 
 ## Reviewing a GitHub PR

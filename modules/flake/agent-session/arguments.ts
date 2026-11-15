@@ -1,7 +1,7 @@
 import { CliError } from "./runtime.ts";
 import { validateSlug } from "./sessions.ts";
 import { parsePullRequestSelection } from "./github.ts";
-import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions } from "./types.ts";
+import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions, PresentationOptions } from "./types.ts";
 
 export const commandNames = [
 	"cd",
@@ -157,7 +157,21 @@ export function parseBranchArguments(args: string[]): { slug: string; name: stri
 	return { slug, name, json: options.includes("--json") };
 }
 
-export function parseCreateArguments(args: string[]): {
+function presentationArguments(input: string[]): PresentationOptions & { args: string[] } {
+	let color: PresentationOptions["color"] = "auto";
+	let verbose = false;
+	const args = input.filter((argument) => {
+		if (argument === "--verbose") { verbose = true; return false; }
+		if (!argument.startsWith("--color=")) return true;
+		const value = argument.slice("--color=".length);
+		if (!["auto", "always", "never"].includes(value)) throw argumentError("--color requires auto|always|never.");
+		color = value as PresentationOptions["color"];
+		return false;
+	});
+	return { args, color, verbose };
+}
+
+export function parseCreateArguments(input: string[]): PresentationOptions & {
 	slug: string;
 	dryRun: boolean;
 	json: boolean;
@@ -165,6 +179,7 @@ export function parseCreateArguments(args: string[]): {
 	trustPr: boolean;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let dryRun = false;
 	let json = false;
 	let pr: PullRequestSelection | undefined;
@@ -193,16 +208,17 @@ export function parseCreateArguments(args: string[]): {
 	if (trustPr && pr === undefined) throw argumentError("--trust-pr requires --pr.");
 	if (createBranch && pr === undefined) throw argumentError("--create-branch (-c) requires --pr.");
 	if (createBranch && pr) pr = { ...pr, mode: "independent" };
-	return { slug, dryRun, json, pr, trustPr };
+	return { slug, dryRun, json, pr, trustPr, color, verbose };
 }
 
-export function parseStartArguments(args: string[]): {
+export function parseStartArguments(input: string[]): PresentationOptions & {
 	slug: string;
 	launchConfiguredAgent: boolean;
 	pr?: PullRequestSelection;
 	trustPr: boolean;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let launchConfiguredAgent = true;
 	let pr: PullRequestSelection | undefined;
 	let trustPr = false;
@@ -228,7 +244,7 @@ export function parseStartArguments(args: string[]): {
 	if (trustPr && !pr) throw argumentError("--trust-pr requires --pr.");
 	if (createBranch && !pr) throw argumentError("--create-branch (-c) requires --pr.");
 	if (createBranch && pr) pr = { ...pr, mode: "independent" };
-	return { slug, launchConfiguredAgent, pr, trustPr };
+	return { slug, launchConfiguredAgent, pr, trustPr, color, verbose };
 }
 
 export function parseFinishArguments(args: string[]): {
@@ -418,9 +434,9 @@ function usage(): string {
 		"  agent-session <task-slug> run <command> [args...]",
 		"  agent-session <task-slug> branch create <name> [--json] (create and record ownership without switching)",
 		"  agent-session <task-slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json] (explicitly reviewed legacy mapping)",
-		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
+		"  agent-session <task-slug> create [--dry-run] [--json] [--color=auto|always|never] [--verbose] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
-		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
+		"  agent-session <task-slug> start [--no-agent] [--color=auto|always|never] [--verbose] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> resume (recorded creator conversation in parent, otherwise latest own conversation)",
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",

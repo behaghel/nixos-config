@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError } from "./runtime.ts";
+import { CliError, styleText } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, createBranch, runInSession, launch, resume, start, repair } from "./lifecycle.ts";
@@ -70,6 +70,7 @@ export function main(args: string[]): number {
 				options.json,
 				options.pr,
 				options.trustPr,
+				{ color: options.color, verbose: options.verbose },
 			);
 		}
 		if (command === "completion") {
@@ -99,7 +100,7 @@ export function main(args: string[]): number {
 		if (command === "start") {
 			const options = parseStartArguments(rest);
 			const root = primaryRoot(repositoryRoot());
-			return start(root, options.slug, options.launchConfiguredAgent, options.pr, options.trustPr);
+			return start(root, options.slug, options.launchConfiguredAgent, options.pr, options.trustPr, { color: options.color, verbose: options.verbose });
 		}
 		if (command === "resume") {
 			const slug = resolveSessionTarget(parseRequiredSlug("resume", rest));
@@ -183,7 +184,10 @@ export function main(args: string[]): number {
 		);
 	} catch (error) {
 		if (error instanceof CliError) {
-			process.stderr.write(`${error.message}\n`);
+			const [headline, ...details] = error.message.split("\n");
+			const message = error.color === undefined ? error.message
+				: [styleText(headline, 31, error.color, process.stderr.isTTY), ...details].join("\n");
+			process.stderr.write(`${message}\n`);
 			return error.exitCode;
 		}
 		process.stderr.write(`${String(error)}\n`);

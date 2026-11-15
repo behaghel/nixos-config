@@ -1,8 +1,10 @@
 import { spawnSync } from "node:child_process";
-import type { ProgressReporter } from "./types.ts";
+import type { ColorMode, PresentationOptions, ProgressReporter } from "./types.ts";
 
 export class CliError extends Error {
 	readonly exitCode: number;
+	// Presentation metadata only; never embedded in the original diagnostic.
+	color?: ColorMode;
 
 	constructor(message: string, exitCode = 1) {
 		super(message);
@@ -122,6 +124,57 @@ export function progressReporter(command: string, json: boolean, compactInspecti
 	return report;
 }
 
+export function styleText(text: string, code: number, color: ColorMode = "auto", terminal = process.stdout.isTTY): string {
+	const enabled = color === "always" || (color === "auto" && terminal && process.env.TERM !== "dumb" && !process.env.NO_COLOR);
+	return enabled ? `\x1b[${code}m${text}\x1b[0m` : text;
+}
+
+/** Compact preparation only; callers retain the existing machine reporter. */
+export function preparationReporter(command: string, slug: string, json: boolean, options: PresentationOptions): ProgressReporter {
+	if (json) return progressReporter(command, true);
+	if (options.verbose) return progressReporter(command, false);
+	const terminal = process.stdout.isTTY && process.stderr.isTTY && process.env.TERM !== "dumb";
+	const phases: Record<string, string> = {
+		preparing: "Preparing session", "inspect-create": "Checking creation plan", "remote-sync": "Fetching remote",
+		"pr-resolve": "Resolving pull request", "pr-fetch": "Fetching pull request", "pr-trust": "Awaiting trust approval",
+		"pr-source": "Preparing source remote", "pr-track": "Configuring branch", "worktree-create": "Creating worktree",
+		"worktree-prepare": "Preparing environment", "metadata-record": "Recording session", "session-reuse": "Checking existing session",
+	};
+	let transient = false, announced = false;
+	const flush = () => {
+		if (transient) process.stderr.write("\r\x1b[2K");
+		transient = false;
+	};
+	const report: ProgressReporter = (phase, status) => {
+		if (status === "failed") { flush(); return; }
+		if (status !== "started") return;
+		if (terminal) {
+			const text = `${phases[phase] ?? "Preparing session"} · ${slug}`;
+			const width = Math.max(1, (process.stderr.columns || 80) - 1);
+			process.stderr.write(`\r\x1b[2K${styleText([...text].slice(0, width).join(""), 36, options.color)}`);
+			transient = true;
+		} else if (!announced) {
+			process.stderr.write(`Preparing ${slug}...\n`);
+			announced = true;
+		}
+	};
+	report.flush = flush;
+	return report;
+}
+
+export function withPreparation<T>(command: string, slug: string, json: boolean, options: PresentationOptions,
+	operation: (report: ProgressReporter) => T): T {
+	const report = preparationReporter(command, slug, json, options);
+	if (!json) report("preparing", "started");
+	try { return operation(report); }
+	catch (error) {
+		if (json) throw error;
+		const failure = error instanceof CliError ? error : new CliError(String(error));
+		failure.color = options.color ?? "auto";
+		throw failure;
+	} finally { report.flush?.(); }
+}
+
 export function runPhase<T>(
 	report: ProgressReporter,
 	phase: string,
@@ -150,13 +203,13 @@ export function run(
 	command: string,
 	args: string[],
 	cwd: string,
-	stdio: "pipe" | "inherit" = "pipe",
+	stdio: "pipe" | "inherit" | "capture" = "pipe",
 	environment: NodeJS.ProcessEnv = process.env,
 ): { status: number; stdout: string; stderr: string; errorCode?: string } {
 	const result = spawnSync(command, args, {
 		cwd,
 		encoding: "utf8",
-		stdio,
+		stdio: stdio === "capture" ? ["inherit", "pipe", "pipe"] : stdio,
 		env: environment,
 	});
 	return {

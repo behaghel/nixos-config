@@ -9,19 +9,20 @@ import {
 } from "./arguments.ts";
 
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
+const presentationOptions = ["--color=auto", "--color=always", "--color=never", "--verbose"];
 const commandOptions: Record<string, string[]> = {
 	branch: ["create", "--json"],
 	activity: ["touch", "reconcile", "--dry-run", "--json"],
 	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
-	create: ["--dry-run", "--json", ...prOptions],
-	start: ["--no-agent", ...prOptions],
+	create: ["--dry-run", "--json", ...prOptions, ...presentationOptions],
+	start: ["--no-agent", ...prOptions, ...presentationOptions],
 	status: ["--json", "--refresh"],
 	doctor: ["--json"],
 	"global-doctor": ["--json"],
 	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
 	"global-status": ["--json", "--refresh", "--worktree"],
 	"global-list": ["--json"],
-	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", "--color=auto", "--color=always", "--color=never", "--verbose"],
+	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", ...presentationOptions],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],
 };
 

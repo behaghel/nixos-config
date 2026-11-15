@@ -90,9 +90,12 @@ export interface OwnershipOptions {
 
 export type ColorMode = "auto" | "always" | "never";
 
-export interface BatchFinishOptions {
+export interface PresentationOptions {
 	color?: ColorMode;
 	verbose?: boolean;
+}
+
+export interface BatchFinishOptions extends PresentationOptions {
 	inactiveFor: string;
 	inactiveMs: number;
 	exclusions: string[];
