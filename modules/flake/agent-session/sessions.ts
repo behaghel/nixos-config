@@ -231,6 +231,13 @@ function readSessionMetadata(root: string, slug: string, primary: string, path =
 		(metadata.version !== 1 && metadata.version !== 2 && metadata.version !== 3) ||
 		(metadata.version === 3 && (!validSessionId(metadata.sessionId) || !Array.isArray(metadata.branches) || typeof metadata.initialBranchOwned !== "boolean")) ||
 		(metadata.version !== 3 && metadata.branches !== undefined) ||
+		(metadata.creatorConversation !== undefined &&
+			(metadata.version !== 3 || !metadata.creatorConversation ||
+				!validSessionId(metadata.creatorConversation.parentSessionId) ||
+				metadata.creatorConversation.parentSessionId === metadata.sessionId ||
+				typeof metadata.creatorConversation.piSessionId !== "string" || !metadata.creatorConversation.piSessionId ||
+				typeof metadata.creatorConversation.sessionFile !== "string" || !isAbsolute(metadata.creatorConversation.sessionFile) ||
+				metadata.creatorConversation.sessionFile.includes("\u0000"))) ||
 		((metadata.sessionId !== undefined || metadata.parentSessionId !== undefined) &&
 			(!validSessionId(metadata.sessionId) ||
 				(metadata.parentSessionId !== null && !validSessionId(metadata.parentSessionId)) ||

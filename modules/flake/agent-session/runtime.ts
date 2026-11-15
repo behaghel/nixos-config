@@ -39,11 +39,48 @@ process.stdin.on('error', () => answer(false));
 	return result.status === 0 && result.stdout === "yes";
 }
 
-export function progressReporter(command: string, json: boolean): ProgressReporter {
+export function formatActivityTime(timestamp: number, now: number): string {
+	if (!Number.isFinite(timestamp)) return "unknown";
+	const age = Math.max(0, now - timestamp);
+	if (age < 60_000) return "just now";
+	if (age < 3_600_000) return `${Math.floor(age / 60_000)}m ago`;
+	if (age < 86_400_000) return `${Math.floor(age / 3_600_000)}h ago`;
+	if (age < 7 * 86_400_000) return `${Math.floor(age / 86_400_000)}d ago`;
+	const date = new Date(timestamp);
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export function formatTable(rows: string[][], shortenColumn?: number): string {
+	if (!rows.length) return "";
+	const width = (value: string) => [...value].length;
+	const widths = rows[0].map((_, index) => Math.max(...rows.map((row) => width(row[index]))));
+	if (shortenColumn !== undefined && process.stdout.isTTY && process.stdout.columns) {
+		const otherWidth = widths.reduce((total, value, index) => total + (index === shortenColumn ? 0 : value), 0);
+		const available = process.stdout.columns - otherWidth - 2 * (widths.length - 1);
+		widths[shortenColumn] = Math.min(widths[shortenColumn], Math.max(1, width(rows[0][shortenColumn]), available));
+	}
+	return rows.map((row) => row.map((value, index) => {
+		if (index === shortenColumn && width(value) > widths[index]) value = [...value].slice(0, widths[index] - 1).join("") + "…";
+		return index === widths.length - 1 ? value : value + " ".repeat(widths[index] - width(value));
+	}).join("  ") + "\n").join("");
+}
+
+export function progressReporter(command: string, json: boolean, compactInspection = false): ProgressReporter {
 	let transient = false, lastMetadataUpdate: number | undefined;
 	const flush = () => {
 		if (transient) process.stderr.write("\r\x1b[2K");
 		transient = false;
+	};
+	let announced = false;
+	const inspection = (text: string) => {
+		if (process.stderr.isTTY) {
+			const width = Math.max(1, (process.stderr.columns || 80) - 1);
+			process.stderr.write(`\r\x1b[2K${Array.from(text).slice(0, width).join("")}`);
+			transient = true;
+		} else if (!announced) {
+			process.stderr.write("Inspecting worktrees...\n");
+			announced = true;
+		}
 	};
 	const report: ProgressReporter = (phase, status, detail) => {
 		if (json) {
@@ -51,6 +88,17 @@ export function progressReporter(command: string, json: boolean): ProgressReport
 				`${JSON.stringify({ version: 1, type: "progress", command, phase, status, ...(detail ? { detail } : {}) })}\n`,
 			);
 			return;
+		}
+		if (compactInspection && status !== "failed") {
+			if (phase === "preview-process-snapshot") {
+				if (status === "started") inspection("Inspecting worktrees · checking processes");
+				return;
+			}
+			if (phase.startsWith("inspect:")) {
+				if (status === "started") inspection(`Inspecting ${detail ?? ""} · ${phase.slice("inspect:".length)}`);
+				return;
+			}
+			if (phase.startsWith("inspect-metadata-chunk:")) return;
 		}
 		if (phase.startsWith("inspect-metadata-chunk:") && status === "completed") {
 			const now = Date.now(), terminal = process.stderr.isTTY;

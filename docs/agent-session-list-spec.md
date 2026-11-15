@@ -1,5 +1,11 @@
 # Spec: Tidy, recent-first agent-session inventory
 
+Tree grouping, subtree activity rollup and creator-conversation resume are defined
+in the [creator-session tree spec](agent-session-tree-spec.md). Its traversal and
+ordering contract supersedes global flat ordering below; its shared inactivity
+clock also governs `batch finish --inactive-for`. The activity signals, columns,
+time labels, read-only behavior and JSON fields remain unchanged.
+
 ## Problem
 
 When returning to a project after time away, the user needs to see where they
@@ -126,8 +132,8 @@ column does not promise live checkout state. Example times are illustrative.
   fields and concurrent managed-operation tracking.
 - Session enumeration does not start inspecting each checkout's working files
   or invoke Git namespace discovery once per record.
-- Existing inactivity/retirement safety rules are not weakened or replaced by
-  the narrower ordering rules.
+- Inactivity age selection shares the list clock as specified in the tree spec.
+  Non-age retirement safety checks and approval authority remain independent.
 - No activation, package installation, pin upgrade, automatic retirement, or
   copying of Pi conversations/runtime state is part of this change.
 
@@ -141,7 +147,7 @@ list behavior.
 
 **Must not modify:** unrelated packages/configuration, credentials, Pi history,
 PR/network behavior, session ownership, branch creation authority, cleanup
-approval, and retirement eligibility algorithms.
+approval, and non-age retirement safety algorithms.
 
 ## Verification Plan
 
@@ -175,9 +181,9 @@ These are evidence and design constraints, not additional agreed product feature
   Do not invent historical activity from an inherited branch tip; retain the
   available recorded engagement/creation fallback. The exact bounded reader and
   branch/worktree attribution need an implementation spike and fixture tests.
-- Existing batch inactivity inspection counts all checkout/owned-branch reflog
-  events and working-file mtimes. Reusing that result would violate the agreed
-  ordering semantics; its cleanup-safety policy must remain intact.
+- Checkout/owned-branch reflogs and working-file mtimes are not engagement clocks
+  for listing or inactivity age selection. Non-age cleanup inspection can retain
+  its conservative evidence checks without introducing a second age cutoff.
 - Existing inventory scale tests require Git subprocess count not to grow with
   record count. The implementation must preserve cheap listing rather than
   replacing it with per-session status or one Git subprocess per worktree.

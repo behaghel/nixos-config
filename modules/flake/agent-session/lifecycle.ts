@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { captureCreatorConversation, creatorConversationMatches } from "./creator.ts";
 import { resolvePullRequest, fetchPullRequestHead, assertPullRequestTarget, prepareReviewSource, borrowedReviewSource, pullRequestSummary } from "./github.ts";
 import { existsSync, lstatSync, mkdirSync, realpathSync, symlinkSync } from "node:fs";
 import { constants } from "node:os";
@@ -13,11 +14,13 @@ import {
 	upstreamRemote,
 	remoteDefaultBranch,
 	cachedRemoteDefaultBranch,
+	repositoryRoot,
 } from "./git.ts";
 import {
 	loadConfig,
 	validateSlug,
 	readMetadata,
+	readMetadataInventory,
 	assertConfiguredWorktreePath,
 	sessionDirectory,
 	withOperationLock,
@@ -152,6 +155,32 @@ export function launch(
 		prepareLaunch(root, slug),
 	);
 	return launchAgent(root, prepared.config, prepared.metadata, additionalArguments);
+}
+
+export function resume(root: string, slug: string): number {
+	const prepared = withOperationLock(root, "resume", () => {
+		const creator = readMetadata(root, slug).creatorConversation;
+		if (!creator) return { ...prepareLaunch(root, slug), args: ["--continue"] };
+		const parents = readMetadataInventory(root).filter((record) => record.sessionId === creator.parentSessionId);
+		if (parents.length !== 1) throw new CliError("Creator worktree is missing or ambiguous; no substitute conversation was launched.");
+		const parent = parents[0];
+		try { sessionDirectory(root, parent.slug); }
+		catch { throw new CliError(`Creator worktree ${parent.slug} is unavailable; no substitute conversation was launched.`); }
+		if (!creatorConversationMatches(creator, parent.worktreePath)) {
+			throw new CliError("Creator conversation is unavailable or no longer matches its recorded identity/worktree; no substitute conversation was launched.");
+		}
+		const target = prepareLaunch(root, parent.slug);
+		if (target.metadata.sessionId !== creator.parentSessionId || target.metadata.worktreePath !== parent.worktreePath) {
+			throw new CliError("Creator worktree identity changed; no substitute conversation was launched.");
+		}
+		// Preparation can refresh remotes; the origin may disappear or change
+		// while that runs. Never let an exact-session launch create a substitute.
+		if (!creatorConversationMatches(creator, target.metadata.worktreePath)) {
+			throw new CliError("Creator conversation changed during resume preparation; no substitute conversation was launched.");
+		}
+		return { ...target, args: ["--session", creator.sessionFile] };
+	});
+	return launchAgent(root, prepared.config, prepared.metadata, prepared.args);
 }
 
 export function runInSession(root: string, slug: string, command: string[]): number {
@@ -361,6 +390,7 @@ function createSession(
 	const config = loadConfig(root);
 	ensureClean(root);
 	const parentSessionId = creationParentSessionId(root);
+	const creatorConversation = captureCreatorConversation(parentSessionId, repositoryRoot());
 	const preexistingBranches = [...localBranches(root)].sort();
 
 	const currentBranch = git(root, ["branch", "--show-current"]);
@@ -522,6 +552,7 @@ function createSession(
 			defaultBranch,
 			createdAt: new Date().toISOString(),
 			conversation: null,
+			...(creatorConversation ? { creatorConversation } : {}),
 			preexistingBranches,
 			initialBranchOwned: !borrowed,
 			...(pr ? { pr } : {}),

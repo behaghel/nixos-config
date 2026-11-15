@@ -2,7 +2,7 @@
 import { CliError } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
-import { create, createBranch, runInSession, launch, start, repair } from "./lifecycle.ts";
+import { create, createBranch, runInSession, launch, resume, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
 import { finish, finishBulk, finishSessionTree } from "./finish.ts";
@@ -103,9 +103,7 @@ export function main(args: string[]): number {
 		}
 		if (command === "resume") {
 			const slug = resolveSessionTarget(parseRequiredSlug("resume", rest));
-			return launch(primaryRoot(repositoryRoot()), slug, "resume", [
-				"--continue",
-			]);
+			return resume(primaryRoot(repositoryRoot()), slug);
 		}
 		if (command === "batch") {
 			const options = parseBatchArguments(rest);

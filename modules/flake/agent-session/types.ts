@@ -50,6 +50,12 @@ export interface BranchOwnership {
 	creationCommit: string;
 }
 
+export interface CreatorConversation {
+	parentSessionId: string;
+	piSessionId: string;
+	sessionFile: string;
+}
+
 export interface SessionMetadata {
 	version: 1 | 2 | 3;
 	slug: string;
@@ -66,6 +72,8 @@ export interface SessionMetadata {
 	activeOperations?: ActiveOperation[];
 	acknowledgedInterruptions?: AcknowledgedInterruption[];
 	conversation: null;
+	// Pi navigation provenance only; never substitutes for resource ancestry.
+	creatorConversation?: CreatorConversation;
 	preexistingBranches?: string[];
 	initialBranchOwned?: boolean;
 	pr?: PullRequestMetadata;

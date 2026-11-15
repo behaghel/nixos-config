@@ -30,12 +30,12 @@ The default agent is `pi`, which must be available in your environment.
 ```sh
 as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
-as list                             # recent-first session table
+as list                             # recent-first creator-session tree
 as list --json                      # cheap recorded-binding inventory
 as status                           # reconcile all sessions
 as my-task status                   # inspect one session
 as my-task launch                   # launch in an existing worktree
-as my-task resume                   # launch with --continue
+as my-task resume                   # creator conversation, or latest own conversation for roots
 as my-task cd                       # change the current shell's directory
 as my-task run bun test             # run devenv -q shell -- bun test there
 as my-task branch create feat/work  # create and record ownership; no checkout
@@ -391,8 +391,11 @@ assembler completions for the installed `as` alias.
 
 `as list [--json]` reads recorded session bindings without inspecting checkout
 Git state, refreshing remotes, or running preparation or agent commands. Text
-output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table, newest activity
-first, with session names breaking ties. Activity reflects locally recorded
+output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table with `tree`-style
+connectors for recorded Pi creator relationships. Parents precede their children.
+Each node displays the newest activity in its subtree; roots and sibling sets
+sort by that time, newest first, with session names breaking ties. Activity
+reflects locally recorded
 creation and managed start/launch/resume/run start and completion, including
 failed commands; listing and status polling never advance it. With the
 `devenv-workflow` Pi extension loaded and a supporting launcher, Pi session entry,
@@ -407,7 +410,8 @@ session names and activity. At widths too small for the minimum row, preserving
 those values takes priority over fitting the terminal. Piped output retains the
 aligned table with full names and no colour or truncation.
 
-JSON uses the same activity ordering, with no added activity fields. It remains
+JSON uses the same parent-first traversal, with unprefixed slugs, no nesting,
+and no added relationship or activity fields. It remains
 one document with `version: 1`, `command: "list"`, and `sessions`, each containing
 only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
 branch, not an observation of the current branch, ownership, or clean state.
@@ -422,6 +426,45 @@ output rather than silently omitting potential bindings. A dangling metadata
 store is not reported as an empty inventory. Listing does not repair records,
 prune registrations, or remove files. It accepts only `--json`, not `--refresh`,
 and is repository-wide rather than a session action.
+
+## Creator conversations and resume
+
+When Pi creates a worktree from a managed parent, the CLI can record an optional
+`creatorConversation` containing the parent's stable session ID and the exact Pi
+conversation ID/file. Pi's agent-run Bash/PowerShell commands supply
+`PI_SESSION_ID` and `PI_SESSION_FILE`; the CLI checks only the bounded JSONL
+header against the verified invoking worktree. It never scans conversation
+entries or guesses a creator from the most recent file. Custom session storage
+locations work through the explicit locator.
+
+```text
+SESSION       BRANCH        LAST ACTIVE
+parent        agent/parent  2m ago
+└── child     agent/child   2m ago
+```
+
+`as child resume` reopens that exact creator conversation in the parent's
+worktree, using Pi's `--session` argument rather than the child's `--continue`.
+A newer conversation in the parent does not replace the recorded creator.
+Missing/replaced conversations, unavailable parent worktrees, and changed parent
+identity are errors; no substitute conversation is launched. `as child launch`
+still launches inside the child.
+
+Without creator information, listing treats a binding as a root and `resume`
+keeps its own-worktree `--continue` behavior. This covers legacy records and shell
+`create`/`start`, even from another managed worktree. Pi's user-entered `!`/`!!`
+commands do not receive its shell-tool session variables and use that same
+shell fallback. A stale/inherited context whose header names a different
+worktree cannot establish a creator association.
+
+Creator provenance is separate from `parentSessionId`, which continues to govern
+resource ancestry and guarded recursive cleanup. Shell-created or legacy entries
+can be roots in this listing while remaining resource descendants for cleanup.
+Rollup changes no stored timestamps. `batch finish --inactive-for` uses that same
+rolled-up activity for its age cutoff, including excluded descendants. Missing
+creator parents do not hide their
+children from inventory or erase known provenance; resume still refuses the
+unavailable origin. Slug reuse never adopts an earlier parent's conversation.
 
 ## Exact-resource inspection
 
@@ -613,8 +656,20 @@ there is no automatic force fallback.
 ## Inactive-session retirement
 
 ```sh
-as batch finish --inactive-for 7d --exclude retained-task --dry-run --json
+as batch finish --inactive-for 7d --exclude retained-task --dry-run
 ```
+
+Human preview is a compact creator-tree table with `SESSION`, `LAST ACTIVE`,
+`PLAN` and `REASON`, followed by eligible/retained counts. Every candidate stays
+visible, including excluded/unknown names; `would remove` appears only for the
+exact eligible selection. Other rows say `keep`, with a readable primary reason
+and `(+N)` for additional blockers. Full slugs remain visible. Terminal reason
+text can shorten with `…`; piped output keeps full text.
+
+The raw approval receipt is not printed in human mode. Add `--json` for the full
+receipt and diagnostics. This performs a fresh preview, so review that selection
+before authorizing its receipt; human output itself does not authorize removal.
+No shortened receipt alias or saved preview state is introduced.
 
 `--dry-run` is a **read-only preview**. `--inactive-for` is required;
 positive integer durations use `s`, `m`, `h`, `d` or `w`. Repeat `--exclude <slug>`
@@ -645,10 +700,19 @@ catches corruption; it is **not a signature or ownership authorization**. The
 caller remains responsible for retained-work exclusions and consumer authority.
 Treat it as opaque and obtain a fresh preview when it no longer matches.
 
+Batch age selection uses the same own/subtree engagement clock shown by
+`LAST ACTIVE`. Recent descendant engagement protects its ancestors, including when
+that descendant is excluded from removal. Checkout events and file mtimes do not
+supply a hidden alternative age clock.
+
 Apply holds the provider operation lock and freshly checks each selected target's
 identity, inactivity, cleanliness, ignored data and live/process evidence before
 non-forced native removal. Managed work starting through `as` uses the same lock
 when recording activity. Native worktree locks and submodules are also refused.
+Selected creator ancestors precede selected descendants in this independent
+batch, so an approved descendant removal cannot invalidate an ancestor's clock
+before its recheck. This neither adds descendants to the receipt nor changes the
+descendants-first order of explicit recursive `finish --all`.
 There is no branch deletion, force fallback, remote/PR mutation or consumer case
 bookkeeping. Local checks do not reserve the filesystem against arbitrary
 unmanaged processes; ownership fences and exclusions remain necessary.
@@ -669,9 +733,10 @@ condition. Resources with verified physical checkout identity include:
 - `resource`: native/filesystem/binding evidence and logical identity state.
 - `git`: actual cleanliness, porcelain changes, current branch and owned branches.
   A detached/identity-conflicting checkout may also be dirty; both are reported.
-- `activity`: `lastWorkAt`, `limitingEvidence`, latest timestamp observations for
-  creation, managed work, each inspected reflog and the most recent non-ignored
-  file, plus `filesChecked`, `problems`, `complete` and `inactive`.
+- `activity`: the shared effective `lastWorkAt`, `limitingEvidence`, creation and
+  recorded-engagement observations, and the latest contributing
+  `descendant:<slug>` when relevant. It retains `filesChecked` (zero for this
+  metadata-only clock), `problems`, `complete` and `inactive`.
 - `ignoredData`: configured-link evidence, ignored path types/classifications,
   local symlink destinations and size observations, with all data-inspection
   blockers. Paths remain `unapproved` unless verified configured links, structural
@@ -681,7 +746,8 @@ condition. Resources with verified physical checkout identity include:
 - `blockers` and `inspectionComplete`: all observable safety refusals and whether
   the applicable evidence could be established, rather than just the first one.
 
-Explicitly excluded resources are not deeply inspected. Invalid or ambiguous
+Explicitly excluded resources are not deeply inspected, but their recorded
+engagement still contributes to their ancestors' clock. Invalid or ambiguous
 bindings/native topology are not permission to traverse an unverified checkout;
 those resources report incomplete inspection rather than fabricated evidence.
 If activity evidence is partial, its timestamp is only the latest *observed*
@@ -714,11 +780,15 @@ information; apply captures fresh process evidence after the target's metadata
 inspection, before removal. A preview snapshot is not a reservation against
 unmanaged activity.
 
-Progress is emitted on stderr. Human terminals get one updating metadata-scan
-indicator, cleared before summaries/prompts; redirected text gets throttled scan
-updates instead of one line per chunk. With `--json`, per-resource and every
-metadata-scan chunk event remain versioned progress records; stdout remains one
-result document. Progress completion means
+Progress is emitted on stderr. Human batch previews use one updating inspection
+line, cleared before the final table. Redirected human preview progress is a
+bounded plain line without terminal escapes; routine STARTED/COMPLETED pairs and
+metadata chunks do not bury the review. Failures remain visible. Devenv shell/task
+startup messages belong to the outer launcher and are unaffected.
+
+Other cleanup commands/apply paths retain their progress behavior. With `--json`,
+per-resource and every metadata-scan chunk event remain versioned progress
+records; stdout remains one unchanged result document. Progress completion means
 a scan/chunk completed, not that a workspace was removed—only the final explicit
 outcome confirms that. Observation remains read-only and does not advance managed
 activity clocks, repair metadata, prune registrations or create an intent journal.
@@ -754,10 +824,12 @@ Activity evidence:
 - Live managed operation records block eligibility. An interrupted owner leaves
   an unresolved activity record; polling neither clears it nor invents a completion time.
   A record belonging to another host also blocks eligibility.
-- Outside `as`, checkout and session-owned branch **reflog event times** and
-  current non-ignored working-file mtimes contribute to the latest observed work.
-  Commit author dates and Git-index mtimes are not inactivity clocks: checking
-  out an old commit is recent work, while status can refresh the index.
+- Pi activity recorded through `activity touch` contributes to the same clock as
+  managed work. Creator-descendant activity rolls up exactly as in `list`.
+- Checkout/rebase events, working-file mtimes and index refreshes do not advance
+  the inactivity clock independently. Dirty/ignored work and live/unknown process
+  evidence still block disposal. Explicit non-age cleanup retains its existing
+  conservative inspection evidence without adding an inactivity cutoff.
 - Same-user processes whose cwd is the worktree or a subdirectory block
   eligibility. The packaged `lsof` supplies this evidence; unavailable,
   unrecognized or failed process inspection blocks eligibility.
@@ -767,8 +839,8 @@ Preview does not fetch, repair metadata, prune registrations, remove resources o
 start an agent. Git status inspection disables optional index writes.
 
 **Observed inactivity is not proof of disposability.** These checks cannot see
-editors with cwd elsewhere, all other-user/remote processes, restored timestamps,
-or events removed by reflog expiry. Explicitly exclude retained or otherwise active
+editors with cwd elsewhere, all other-user/remote processes, or unrecorded
+engagement outside managed commands/Pi messages. Explicitly exclude retained or otherwise active
 work. Dirty resources, unapproved ignored local data, foreign-owned directories, the invoking
 worktree and unresolved resource evidence are refused. Ignored files can contain
 important local work; age alone never authorizes their removal. A clean workspace
@@ -1203,12 +1275,13 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `sessions.ts` | Configuration, session records, locks, discovery, and path validation |
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
 | `github.ts` | GitHub PR resolution, source-head verification, and review push safeguards |
-| `inspection.ts` | Local session state, branch ownership, and status reporting |
+| `inspection.ts` | Local session state, creator-tree inventory, branch ownership, and status reporting |
+| `creator.ts` | Bounded Pi header validation and creator-context capture |
 | `ownership.ts` | Explicitly reviewed legacy identity and ancestry mapping |
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
 | `finish.ts` | Cleanup previews, receipts, confirmations, and guarded removal |
-| `runtime.ts` | Shared command errors, subprocess execution, and progress output |
+| `runtime.ts` | Shared command errors, subprocess execution, table/time formatting, and progress output |
 | `types.ts` | Shared configuration, metadata, and status types |
 
 The Nix wrapper packages this source directory as a unit so Node can resolve the
