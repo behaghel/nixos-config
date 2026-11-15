@@ -139,13 +139,14 @@ export function parseOwnershipArguments(args: string[]): OwnershipOptions {
 	return { slug, parent, dryRun, json, yes, expected };
 }
 
-export function parseActivityArguments(args: string[]): { slug: string; dryRun: boolean; json: boolean } {
+export function parseActivityArguments(args: string[]): { slug: string; action: "touch" | "reconcile"; dryRun: boolean; json: boolean } {
 	const [slug, action, ...options] = args;
+	if (slug && action === "touch" && options.length === 0) return { slug, action, dryRun: false, json: false };
 	if (!slug || action !== "reconcile" || options.some((option) => !["--dry-run", "--json"].includes(option)) ||
 		(options.includes("--json") && !options.includes("--dry-run"))) {
-		throw argumentError("Use: agent-session <slug> activity reconcile [--dry-run [--json]]. Applying requires terminal confirmation; --yes and --force are not supported.");
+		throw argumentError("Use: agent-session <slug> activity touch, or agent-session <slug> activity reconcile [--dry-run [--json]]. Reconciliation requires terminal confirmation; --yes and --force are not supported.");
 	}
-	return { slug, dryRun: options.includes("--dry-run"), json: options.includes("--json") };
+	return { slug, action, dryRun: options.includes("--dry-run"), json: options.includes("--json") };
 }
 
 export function parseBranchArguments(args: string[]): { slug: string; name: string; json: boolean } {
@@ -415,6 +416,7 @@ function usage(): string {
 		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> resume",
 		"  agent-session <task-slug> status [--json] [--refresh]",
+		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",
 		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",

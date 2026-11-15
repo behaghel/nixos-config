@@ -20,6 +20,7 @@ import { existsSync } from "fs";
 import { readFile, access } from "fs/promises";
 import { join, resolve, basename, dirname } from "path";
 import { Type } from "typebox";
+import { registerSessionActivity } from "./session-activity.ts";
 
 // ─── Helpers ────────────────────────────────────────────────
 
@@ -619,6 +620,9 @@ Remember:
 			pi.sendUserMessage(msg);
 		},
 	});
+
+	// Register after project detection so session_start sees the current context.
+	registerSessionActivity(pi, () => isActive);
 
 	// ─── Init-time notification ────────────────────────────────
 

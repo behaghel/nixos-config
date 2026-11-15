@@ -118,6 +118,7 @@ let
     '') piExtensionPaths}
     node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
     node ${lib.escapeShellArg (toString ./agent-session-skill.test.mjs)} ${lib.escapeShellArg (toString ../.)}
+    node --test ${marketplaceDir}/plugins/devenv-workflow/test/session-activity.test.mjs
     echo ok > "$out"
   '';
 

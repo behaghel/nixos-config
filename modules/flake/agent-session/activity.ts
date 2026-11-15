@@ -5,6 +5,16 @@ import { assertPrimaryCheckout, git } from "./git.ts";
 import { inspectActiveOperation, metadataPath, readMetadata, readMetadataInventory, sessionDirectory, withOperationLock, writeMetadata } from "./sessions.ts";
 import { CliError, confirm, writeCommandResult } from "./runtime.ts";
 
+// A local engagement signal, not an operation lease or cleanup acknowledgement.
+export function touchActivity(root: string, slug: string): number {
+	return withOperationLock(root, "activity-touch", () => {
+		sessionDirectory(root, slug);
+		const metadata = readMetadata(root, slug);
+		writeMetadata(root, { ...metadata, lastWorkAt: new Date().toISOString() });
+		return 0;
+	});
+}
+
 function identity(path: string): string[] {
 	const stat = lstatSync(path, { bigint: true });
 	return [stat.dev.toString(), stat.ino.toString()];

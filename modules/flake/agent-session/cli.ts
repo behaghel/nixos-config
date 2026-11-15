@@ -8,7 +8,7 @@ import { doctor } from "./doctor.ts";
 import { finish, finishBulk, finishSessionTree } from "./finish.ts";
 import { finishWorktreeBranches } from "./finish-branches.ts";
 import { batchFinish } from "./batch.ts";
-import { reconcileActivity } from "./activity.ts";
+import { reconcileActivity, touchActivity } from "./activity.ts";
 import { mapOwnership } from "./ownership.ts";
 import {
 	commandNames,
@@ -47,7 +47,9 @@ export function main(args: string[]): number {
 		if (command === "activity") {
 			const options = parseActivityArguments(rest);
 			const invocationRoot = repositoryRoot();
-			return reconcileActivity(primaryRoot(invocationRoot), resolveSessionTarget(options.slug, invocationRoot), options.dryRun, options.json);
+			const root = primaryRoot(invocationRoot), slug = resolveSessionTarget(options.slug, invocationRoot);
+			return options.action === "touch" ? touchActivity(root, slug)
+				: reconcileActivity(root, slug, options.dryRun, options.json);
 		}
 		if (command === "ownership") {
 			const options = parseOwnershipArguments(rest);

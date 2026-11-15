@@ -1047,6 +1047,128 @@ describe("worktree branch history finish", () => {
 	});
 });
 
+describe("local activity touch", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-session-touch-");
+		const { worktree } = startManagedSession(fixture, "human");
+		const record = sessionMetadataPath(fixture.checkout, "human");
+		const metadata = JSON.parse(readFileSync(record, "utf8"));
+		metadata.lastWorkAt = "2000-01-01T00:00:00.000Z";
+		metadata.activeOperations = [{ id: "existing-operation", pid: process.pid, hostname: hostname(), startedAt: metadata.lastWorkAt }];
+		metadata.acknowledgedInterruptions = [{ ...metadata.activeOperations[0], id: "old-interruption", outcome: "interrupted", acknowledgedAt: "2001-01-01T00:00:00.000Z" }];
+		writeFileSync(record, JSON.stringify(metadata));
+		return { ...fixture, worktree, record, metadata };
+	}
+
+	it("records current engagement from a nested worktree without changing work, identity or operation evidence", () => {
+		const fixture = setup();
+		try {
+			const nested = join(fixture.worktree, "nested"); mkdirSync(nested);
+			writeFileSync(join(nested, "dirty"), "keep this work\n");
+			const refs = git(fixture.checkout, "show-ref");
+			const registrations = git(fixture.checkout, "worktree", "list", "--porcelain");
+			const before = Date.now();
+			const touched = runCli(nested, [".", "activity", "touch"]);
+			expect(touched.status).toBe(0);
+			expect(touched.stdout).toBe("");
+			const saved = JSON.parse(readFileSync(fixture.record, "utf8"));
+			expect(Date.parse(saved.lastWorkAt) >= before).toBe(true);
+			expect(Date.parse(saved.lastWorkAt) <= Date.now()).toBe(true);
+			expect(JSON.stringify({ ...saved, lastWorkAt: fixture.metadata.lastWorkAt })).toBe(JSON.stringify(fixture.metadata));
+			expect(git(fixture.checkout, "show-ref")).toBe(refs);
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain")).toBe(registrations);
+			expect(readFileSync(join(nested, "dirty"), "utf8")).toBe("keep this work\n");
+			const text = runCli(fixture.checkout, ["list"]);
+			expect(text.status).toBe(0);
+			expect(text.stdout).toContain("just now");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses primary/unmanaged contexts and missing worktrees without repairing records", () => {
+		const fixture = setup();
+		try {
+			const before = readFileSync(fixture.record, "utf8");
+			expect(runCli(fixture.checkout, [".", "activity", "touch"]).status).toBe(1);
+			git(fixture.checkout, "worktree", "add", "-b", "unmanaged", join(fixture.root, "unmanaged"));
+			expect(runCli(join(fixture.root, "unmanaged"), [".", "activity", "touch"]).status).toBe(1);
+			rmSync(fixture.worktree, { recursive: true, force: true });
+			expect(runCli(fixture.checkout, ["human", "activity", "touch"]).status).toBe(1);
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("honours the lifecycle lock and rejects timestamp/approval arguments without changing evidence", () => {
+		const fixture = setup();
+		try {
+			const before = readFileSync(fixture.record, "utf8");
+			for (const extra of ["--yes", "--force", "--json", "--dry-run", "2000-01-01T00:00:00Z"]) {
+				expect(runCli(fixture.worktree, [".", "activity", "touch", extra]).status).toBe(64);
+			}
+			const lock = join(fixture.checkout, ".git/agent-session/operation.lock");
+			mkdirSync(lock);
+			writeFileSync(join(lock, "owner.json"), JSON.stringify({ pid: process.pid, command: "fixture busy", createdAt: new Date().toISOString() }));
+			const result = runCli(fixture.worktree, [".", "activity", "touch"]);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Another agent-session operation is active");
+			expect(readFileSync(fixture.record, "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("moves the session first through a Pi message handler before the runtime exits", () => {
+		const fixture = setup();
+		try {
+			expect(runCli(fixture.checkout, ["other", "create"]).status).toBe(0);
+			for (const [slug, date] of [["human", "2000-01-01"], ["other", "2001-01-01"]]) {
+				const path = sessionMetadataPath(fixture.checkout, slug);
+				const metadata = JSON.parse(readFileSync(path, "utf8"));
+				writeFileSync(path, JSON.stringify({ ...metadata, createdAt: `${date}T00:00:00Z`, lastWorkAt: `${date}T00:00:00Z` }));
+			}
+			const script = `
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+const { registerSessionActivity } = await import(process.argv[1]);
+const handlers = new Map();
+registerSessionActivity({
+  on: (name, handler) => handlers.set(name, handler),
+  exec: async (command, args, options) => {
+    if (command !== "agent-session") throw new Error("unexpected command");
+    const result = spawnSync("node", [process.argv[2], ...args], { cwd: options.cwd, env: process.env, encoding: "utf8" });
+    return { code: result.status, stdout: result.stdout, stderr: result.stderr };
+  },
+}, () => true);
+const context = { cwd: process.cwd(), hasUI: true, ui: { notify: (message) => { throw new Error(message); } } };
+const list = () => JSON.parse(spawnSync("node", [process.argv[2], "list", "--json"], { encoding: "utf8", env: process.env }).stdout).sessions.map(s => s.slug).join(",");
+if (list() !== "other,human") throw new Error("unexpected initial order");
+const record = () => readFileSync(process.argv[3], "utf8");
+const before = record();
+await handlers.get("message_end")({ message: { role: "assistant", content: [{ type: "toolCall", name: "read" }] } }, context);
+if (record() !== before) throw new Error("tool-only message counted");
+await handlers.get("message_end")({ message: { role: "user", content: "pick this up" } }, context);
+if (list() !== "human,other") throw new Error("Pi message did not update order");
+const after = record();
+await handlers.get("message_end")({ message: { role: "toolResult", content: [] } }, context);
+if (record() !== after) throw new Error("tool result counted");
+process.stdout.write("human,other; runtime still open");
+`;
+			const result = spawnSync("node", ["--input-type=module", "-e", script,
+				resolve("marketplace/plugins/devenv-workflow/pi/session-activity.ts"), cliScript, fixture.record], {
+				cwd: fixture.worktree, encoding: "utf8",
+				env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
+			});
+			if (result.status !== 0) throw new Error(`Pi activity fixture failed: ${result.stderr}`);
+			expect(result.stdout).toBe("human,other; runtime still open");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("advertises the recording command independently of interruption reconciliation", () => {
+		const fixture = setup();
+		try {
+			expect(runCli(fixture.checkout, []).stderr).toContain("activity touch");
+			expect(runCli(fixture.checkout, ["__complete", "options:activity"]).stdout).toContain("touch");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("interrupted activity reconciliation", () => {
 	function setup() {
 		const fixture = createRepositoryFixture("agent-session-activity-");

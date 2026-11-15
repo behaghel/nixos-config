@@ -75,6 +75,28 @@ finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a fa
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
 
+## Recording local engagement
+
+`as <slug> activity touch` records the current time as local engagement for an
+existing, verified managed worktree. `as . activity touch` selects the current
+managed binding, including from nested directories. Success is silent. There are
+no timestamp, force, approval, or JSON arguments, and no network requests.
+
+The command takes the lifecycle lock, revalidates the worktree, and updates only
+`lastWorkAt`. Existing operation leases, interruption history, identity, branches,
+and work are preserved. Missing or unregistered worktrees are refused, not
+repaired. This records engagement, not successful operation completion, and does
+not acknowledge interrupted work or authorize retirement.
+
+The `devenv-workflow` Pi extension calls this command on session entry and
+qualifying completed messages. It passes only the current working directory;
+conversation contents and Pi history are never copied into session metadata.
+Older launchers or failed writes produce a warning without stopping the Pi
+conversation or automatically upgrading tools. Retry a later message after
+fixing the launcher/environment; ordinary primary or unmanaged contexts stay
+quiet. The extension must be loaded from the intended package source; changing a
+project pin alone does not update personal Pi resources.
+
 ## Interrupted activity recovery
 
 Managed launch/resume/run records start and normal completion. An abrupt stop may
@@ -372,8 +394,12 @@ Git state, refreshing remotes, or running preparation or agent commands. Text
 output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table, newest activity
 first, with session names breaking ties. Activity reflects locally recorded
 creation and managed start/launch/resume/run start and completion, including
-failed commands; listing and status polling never advance it. It does not yet
-observe individual Pi messages or commits made outside managed commands.
+failed commands; listing and status polling never advance it. With the
+`devenv-workflow` Pi extension loaded and a supporting launcher, Pi session entry,
+user messages and visible assistant responses also record local engagement while
+Pi stays open. Tool-only and thinking-only messages, streaming updates, tool
+results, and idle time do not independently advance it. Commits made outside
+managed commands are not yet observed.
 
 Activity is shown as a relative age below seven days and a local `YYYY-MM-DD`
 date thereafter. Terminals shorten long branch names with `…` while preserving
