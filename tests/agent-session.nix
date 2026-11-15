@@ -51,6 +51,8 @@ pkgs.runCommand "agent-session-tests"
     cp ${../modules/flake/agent-session}/* modules/flake/agent-session/
     cp ${./agent-session.test.ts} tests/agent-session.test.ts
     cp ${./agent-session-templates.test.ts} tests/agent-session-templates.test.ts
+    cp ${./agent-session-runner.mjs} tests/agent-session-runner.mjs
+    cp ${./agent-session-runner.test.mjs} tests/agent-session-runner.test.mjs
     mkdir -p marketplace/plugins/devenv-workflow/pi
     cp ${../marketplace/plugins/devenv-workflow/pi/session-activity.ts} marketplace/plugins/devenv-workflow/pi/session-activity.ts
     cp -R ${../templates} templates
@@ -72,8 +74,9 @@ pkgs.runCommand "agent-session-tests"
           JSON.stringify(config.generated_links) !== JSON.stringify(expectedLinks)) throw new Error("Artifact defaults module wiring failed: " + variable);
     }
     JS
-    # Recursive fixtures run many real Git/Node subprocesses; leave headroom
-    # for loaded builders without relaxing any cleanup assertions.
-    bun test ./tests/agent-session.test.ts ./tests/agent-session-templates.test.ts --timeout 90000
+    # Parallelize independent suites, not the safety checks within each test.
+    # The runner preserves the per-test timeout and respects NIX_BUILD_CORES.
+    node --test tests/agent-session-runner.test.mjs
+    node tests/agent-session-runner.mjs
     touch "$out"
   ''
