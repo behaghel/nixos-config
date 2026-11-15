@@ -1,5 +1,9 @@
 # Spec: Tidy, recent-first agent-session inventory
 
+The [state-first output spec](agent-session-output-spec.md) supersedes the
+presentation rules below for colour controls and narrow-terminal layout. Activity,
+identity, ordering and JSON contracts remain unchanged.
+
 Tree grouping, subtree activity rollup and creator-conversation resume are defined
 in the [creator-session tree spec](agent-session-tree-spec.md). Its traversal and
 ordering contract supersedes global flat ordering below; its shared inactivity

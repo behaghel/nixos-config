@@ -316,6 +316,8 @@ export function parseBatchArguments(args: string[]): BatchFinishOptions {
 	let yes = false;
 	let expected: string | undefined;
 	const exclusions: string[] = [];
+	let color: BatchFinishOptions["color"] = "auto";
+	let verbose = false;
 	for (let index = 1; index < args.length; index++) {
 		const argument = args[index] ?? "";
 		if (argument === "--inactive-for") {
@@ -334,16 +336,21 @@ export function parseBatchArguments(args: string[]): BatchFinishOptions {
 			const value = args[++index] ?? "";
 			if (expected || !/^batch-v1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$/.test(value)) throw argumentError("--expected requires one batch preview receipt.");
 			expected = value;
+		} else if (argument.startsWith("--color=")) {
+			const value = argument.slice("--color=".length);
+			if (!["auto", "always", "never"].includes(value)) throw argumentError("--color requires auto|always|never.");
+			color = value as BatchFinishOptions["color"];
 		} else if (argument === "--dry-run") dryRun = true;
 		else if (argument === "--yes") yes = true;
 		else if (argument === "--json") json = true;
 		else if (argument === "--keep-branch") { /* Always preserve branches. */ }
-		else throw unknownOption("batch finish", argument, ["--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json"]);
+		else if (argument === "--verbose") verbose = true;
+		else throw unknownOption("batch finish", argument, ["--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", "--color=auto", "--color=always", "--color=never", "--verbose"]);
 	}
 	if (!inactiveFor) throw argumentError("batch finish requires --inactive-for.");
 	if (dryRun && (expected || yes)) throw argumentError("Batch preview does not accept --expected or --yes.");
 	if (!dryRun && (!expected || !yes)) throw argumentError("Batch apply requires --expected <preview-receipt> and --yes.");
-	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json, dryRun, yes, expected };
+	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json, dryRun, yes, expected, color, verbose };
 }
 
 export function parseStatusArguments(args: string[]): {
@@ -428,7 +435,7 @@ function usage(): string {
 		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
 		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",
-		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] (--dry-run | --expected <receipt> --yes) [--json]",
+		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] (--dry-run | --expected <receipt> --yes) [--json] [--color=auto|always|never] [--verbose] (presentation flags apply to previews)",
 		"  agent-session status [--json] [--refresh]",
 		"  agent-session status --worktree <path> [--json] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",

@@ -659,15 +659,33 @@ there is no automatic force fallback.
 as batch finish --inactive-for 7d --exclude retained-task --dry-run
 ```
 
-Human preview is a compact creator-tree table with `SESSION`, `LAST ACTIVE`,
-`PLAN` and `REASON`, followed by eligible/retained counts. Every candidate stays
-visible, including excluded/unknown names; `would remove` appears only for the
-exact eligible selection. Other rows say `keep`, with a readable primary reason
-and `(+N)` for additional blockers. Full slugs remain visible. Terminal reason
-text can shorten with `…`; piped output keeps full text.
+Human preview announces `Discovering sessions` before collecting the namespace
+and activity snapshots, then shows a creator-tree table with `SESSION`,
+`LAST ACTIVE`, `PLAN` and `REASON`. On capable terminals, rows update in place from `Waiting` to `Checking`
+and then `Would remove` or `Would preserve`. Identity and row order stay stable;
+inspection order remains independent of creator-tree display order. The final
+summary retains every candidate, including excluded/unknown names, and gives
+eligible/retained counts followed by `Nothing changed`.
+
+A short primary reason and `(+N)` identify retained resources. Default output ends
+with the table and counts, without a diagnostic appendix or receipt hint. Add
+`--verbose` for dirty paths and process/recovery details below the summary; JSON
+is not required to inspect blockers. Narrow terminals use stacked entries
+with wrapped text and full identities. Oversized live displays stay within the
+viewport and show the current inspection/count; the final output includes all
+results. Resizing starts a fresh display block rather than risking unrelated
+scrollback. Piped output is append-only with full text and no cursor controls.
+
+Preview colour uses `--color=auto|always|never` (default `auto`). Automatic colour
+requires a capable terminal and respects nonempty `NO_COLOR`; explicit `always`
+opts in even for redirected output or when `NO_COLOR` is set. Colour supplements
+state words, never replaces them. `--color=never` disables colour, not in-place
+terminal updates. JSON results and progress events are never styled. These colour
+controls and `--verbose` currently apply to batch previews, not other commands
+or batch execution.
 
 The raw approval receipt is not printed in human mode. Add `--json` for the full
-receipt and diagnostics. This performs a fresh preview, so review that selection
+receipt and structured inspection evidence. This performs a fresh preview, so review that selection
 before authorizing its receipt; human output itself does not authorize removal.
 No shortened receipt alias or saved preview state is introduced.
 

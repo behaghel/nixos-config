@@ -88,7 +88,11 @@ export interface OwnershipOptions {
 	expected?: string;
 }
 
+export type ColorMode = "auto" | "always" | "never";
+
 export interface BatchFinishOptions {
+	color?: ColorMode;
+	verbose?: boolean;
 	inactiveFor: string;
 	inactiveMs: number;
 	exclusions: string[];

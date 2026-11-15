@@ -534,12 +534,13 @@ describe("creator conversation trees", () => {
 			expect(child?.endsWith("Inactive; checks passed")).toBe(true);
 			expect(absent?.includes("unknown")).toBe(true);
 			expect(absent?.endsWith("Excluded")).toBe(true);
-			expect(parent?.indexOf("keep")).toBe(header?.indexOf("PLAN"));
-			expect(child?.indexOf("would remove")).toBe(header?.indexOf("PLAN"));
+			expect(parent?.indexOf("Would preserve")).toBe(header?.indexOf("PLAN"));
+			expect(child?.indexOf("Would remove")).toBe(header?.indexOf("PLAN"));
 			expect(parent?.indexOf("Current worktree")).toBe(header?.indexOf("REASON"));
 			expect(lines.indexOf(parent!) < lines.indexOf(child!) && lines.indexOf(child!) < lines.indexOf(other!) && lines.indexOf(other!) < lines.indexOf(absent!)).toBe(true);
 			expect(text.stdout).toContain("2 eligible for removal · 2 kept · Nothing changed");
-			expect(text.stdout).toContain("--json");
+			expect(text.stdout.includes("--json")).toBe(false);
+			expect(text.stdout.trimEnd().endsWith("Nothing changed")).toBe(true);
 			expect(text.stdout.includes("batch-v1.")).toBe(false);
 			expect(text.stderr.includes("STARTED")).toBe(false);
 			expect(text.stderr.includes("COMPLETED")).toBe(false);
@@ -549,10 +550,11 @@ describe("creator conversation trees", () => {
 			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 50 } });\n');
 			const tty = runCli(fixture.parent.worktree, args, { ...env, NODE_OPTIONS: `--import=${terminal}` });
 			expect(tty.status).toBe(0);
-			const table = tty.stdout.split("\n").filter((line) => ["SESSION", "parent", "└── child", "other", "absent"].some((slug) => line.startsWith(`${slug} `)));
-			expect(table.length).toBe(5);
-			expect(table.every((line) => [...line].length <= 50)).toBe(true);
-			expect(tty.stdout).toContain("…");
+			const narrow = tty.stdout.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").replace(/\r/g, "");
+			expect(narrow).toContain("└── child");
+			expect(narrow).toContain("Would remove");
+			expect(narrow.split("\n").every((line) => [...line].length <= 50)).toBe(true);
+			expect(narrow.includes("…")).toBe(false);
 			const json = runCli(fixture.parent.worktree, [...args, "--json"], env);
 			expect(json.status).toBe(0);
 			const preview = JSON.parse(json.stdout);
@@ -565,6 +567,171 @@ describe("creator conversation trees", () => {
 			expect(readFileSync(join(fixture.parent.worktree, "WIP"), "utf8")).toBe("preserve this work\n");
 			expect(existsSync(join(fixture.worktrees, "absent"))).toBe(false);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("updates batch preview rows in place and keeps actionable results without mutation", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			for (const slug of ["parent", "child"]) backdateSession(fixture, slug);
+			writeFileSync(join(fixture.parent.worktree, "WIP"), "keep this work\n");
+			const before = ["parent", "child"].map((slug) => readFileSync(fixture.record(slug), "utf8")).join("\n");
+			const bin = join(fixture.root, "live-bin"); mkdirSync(bin);
+			writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+			const terminal = join(fixture.root, "live-terminal.mjs");
+			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { get: () => Number(process.env.TEST_COLUMNS || 110) }, rows: { value: 24 } });\n');
+			const env = { PATH: `${bin}:${process.env.PATH}`, TERM: "xterm-256color", NODE_OPTIONS: `--import=${terminal}` };
+			const args = ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--color=never"];
+			const live = runCli(fixture.checkout, args, env);
+			expect(live.status).toBe(0);
+			const plain = live.stdout.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "");
+			expect(plain).toContain("Waiting");
+			expect(plain).toContain("Checking");
+			expect(plain).toContain("Would remove");
+			expect(plain).toContain("Would preserve");
+			expect(/\u001b\[\d+A/.test(live.stdout)).toBe(true);
+			expect(/\u001b\[[0-9;]*m/.test(live.stdout)).toBe(false);
+			expect(live.stderr).toBe("");
+			// Every table frame retains the creator ordering, even though inspection
+			// and approved cleanup have separate ordering contracts.
+			for (const frame of plain.split("SESSION").slice(1)) {
+				expect(frame.indexOf("parent") < frame.indexOf("└── child")).toBe(true);
+			}
+			expect(plain).toContain("Uncommitted changes");
+			expect(plain.includes("WIP")).toBe(false);
+			expect(plain.includes("Managed operation")).toBe(false);
+			expect(plain.trimEnd().endsWith("Nothing changed")).toBe(true);
+			expect(plain).toContain("1 eligible for removal · 1 kept · Nothing changed");
+			expect(plain.includes("batch-v1.")).toBe(false);
+			const narrow = runCli(fixture.checkout, args, { ...env, TEST_COLUMNS: "36" });
+			expect(narrow.status).toBe(0);
+			const narrowText = narrow.stdout.replace(/\u001b\[[0-9;]*[A-Za-z]/g, "").replace(/\r/g, "");
+			expect(narrowText).toContain("└── child");
+			expect(narrowText).toContain("Would remove");
+			const childPositions = narrowText.split("Preview · inactive").filter((frame) => frame.includes("└── child")).map((frame) => frame.split("\n").indexOf("└── child"));
+			expect(new Set(childPositions).size).toBe(1);
+			expect(narrowText.includes("…")).toBe(false);
+			expect(narrowText.split("\n").every((line) => [...line].length <= 36)).toBe(true);
+			const piped = runCli(fixture.checkout, args, { ...env, NODE_OPTIONS: "" });
+			expect(piped.status).toBe(0);
+			expect(piped.stdout.includes("\u001b")).toBe(false);
+			expect(piped.stdout.includes("Waiting")).toBe(false);
+			expect(piped.stdout.includes("WIP")).toBe(false);
+			expect(piped.stdout.trimEnd().endsWith("Nothing changed")).toBe(true);
+			const verbose = runCli(fixture.checkout, [...args, "--verbose"], { ...env, NODE_OPTIONS: "" });
+			expect(verbose.status).toBe(0);
+			expect(verbose.stdout).toContain("WIP");
+			expect(verbose.stdout).toContain("Commit or save this work before cleanup.");
+			expect(verbose.stdout.includes("Approval receipt:")).toBe(false);
+			expect(["parent", "child"].map((slug) => readFileSync(fixture.record(slug), "utf8")).join("\n")).toBe(before);
+			expect(readFileSync(join(fixture.parent.worktree, "WIP"), "utf8")).toBe("keep this work\n");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("controls batch preview colour without styling machine protocols or changing approval scope", () => {
+		const fixture = setup();
+		try {
+			backdateSession(fixture, "parent");
+			const bin = join(fixture.root, "colour-bin"); mkdirSync(bin);
+			writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+			const terminal = join(fixture.root, "colour-terminal.mjs");
+			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 110 }, rows: { value: 24 } });\n');
+			const args = ["batch", "finish", "--inactive-for", "7d", "--dry-run"];
+			const env = { PATH: `${bin}:${process.env.PATH}`, TERM: "xterm-256color", NO_COLOR: "", NODE_OPTIONS: "" };
+			const cases = [
+				{ flags: [], tty: true, noColor: "", colour: true },
+				{ flags: [], tty: false, noColor: "", colour: false },
+				{ flags: ["--color=auto"], tty: true, noColor: "1", colour: false },
+				{ flags: ["--color=never"], tty: true, noColor: "", colour: false },
+				{ flags: ["--color=always"], tty: false, noColor: "1", colour: true },
+			];
+			for (const item of cases) {
+				const result = runCli(fixture.checkout, [...args, ...item.flags], { ...env, NO_COLOR: item.noColor, NODE_OPTIONS: item.tty ? `--import=${terminal}` : "" });
+				expect(result.status).toBe(0);
+				expect(/\u001b\[[0-9;]*m/.test(result.stdout)).toBe(item.colour);
+				expect(result.stdout).toContain("Nothing changed");
+				if (!item.tty) expect(/\u001b\[[0-9;]*[AK]/.test(result.stdout)).toBe(false);
+			}
+			const json = runCli(fixture.checkout, [...args, "--json", "--color=always"], env);
+			expect(json.status).toBe(0);
+			expect(json.stdout.includes("\u001b")).toBe(false);
+			expect(json.stderr.includes("\u001b")).toBe(false);
+			const preview = JSON.parse(json.stdout);
+			expect(preview.receipt.startsWith("batch-v1.")).toBe(true);
+			expect(preview.keepBranch).toBe(true);
+			expect(preview.resources[0].reason).toBe("eligible");
+			expect(json.stderr.trim().split("\n").every((line) => JSON.parse(line).type === "progress")).toBe(true);
+			const invalid = runCli(fixture.checkout, [...args, "--color=rainbow"], env);
+			expect(invalid.status).toBe(64);
+			expect(invalid.stderr).toContain("auto|always|never");
+			for (const flag of ["--color=auto", "--color=always", "--color=never", "--verbose"]) {
+				expect(runCli(fixture.checkout, ["__complete", "options:global-batch"]).stdout).toContain(flag);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("shows batch startup activity before slow worktree discovery", async () => {
+		const fixture = setup();
+		try {
+			const bin = join(fixture.root, "slow-discovery-bin"); mkdirSync(bin);
+			const marker = join(fixture.root, "discovery-started");
+			const release = join(fixture.root, "release-discovery");
+			const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8", env: process.env }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$*" in\n  *'worktree list --porcelain -z'*)\n    touch ${tomlString(marker)}\n    while [ ! -f ${tomlString(release)} ]; do sleep 0.02; done ;;\nesac\nexec ${tomlString(realGit)} "$@"\n`, { mode: 0o755 });
+			const terminal = join(fixture.root, "startup-terminal.mjs");
+			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 110 }, rows: { value: 24 } });\n');
+			const child = spawn("node", [cliScript, "batch", "finish", "--inactive-for", "7d", "--dry-run", "--color=never"], {
+				cwd: fixture.checkout, env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout), PATH: `${bin}:${process.env.PATH}`, TERM: "xterm-256color", NODE_OPTIONS: `--import=${terminal}` }, stdio: ["ignore", "pipe", "pipe"],
+			});
+			let output = "";
+			child.stdout.on("data", (chunk) => { output += chunk.toString(); });
+			child.stderr.resume();
+			const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+			try {
+				const deadline = Date.now() + 10000;
+				while (!existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+				expect(existsSync(marker)).toBe(true);
+				// The Git process is held here: an end-of-command snapshot cannot
+				// satisfy this assertion by displaying progress after the wait.
+				expect(output).toContain("Discovering sessions");
+				expect(output.includes("0/0")).toBe(false);
+			} finally {
+				writeFileSync(release, "continue\n");
+				expect(await closed).toBe(0);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("bounds live preview redraws to the viewport and retains every result after a resize", () => {
+		const renderer = resolve("modules/flake/agent-session/batch-preview.ts");
+		const script = `import { BatchPreview } from ${tomlString(renderer)};
+let columns = 110;
+Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { get: () => columns }, rows: { value: 8 } });
+const write = process.stdout.write.bind(process.stdout), chunks = [];
+process.stdout.write = (text) => { chunks.push(String(text)); return true; };
+const entries = Array.from({ length: 40 }, (_, i) => ({ slug: 'session' + i, label: 'session' + i, activity: 0 }));
+const view = new BatchPreview(entries, '7d', Date.now(), 'never');
+view.start();
+columns = 36;
+const resizeStart = chunks.length;
+view.checkingSession('session0');
+const resize = chunks.slice(resizeStart).join('');
+for (const entry of entries) {
+ view.checkingSession(entry.slug);
+ view.complete({ slug: entry.slug, reason: 'eligible', blockers: [], snapshot: {} });
+}
+const final = view.finish();
+write(JSON.stringify({ output: chunks.join(''), resize, final }));`;
+		const result = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8", env: { ...process.env, TERM: "xterm-256color" } });
+		expect(result.status).toBe(0);
+		const captured = JSON.parse(result.stdout);
+		expect(/\u001b\[\d+A/.test(captured.resize)).toBe(false);
+		const moves = [...captured.output.matchAll(/\u001b\[(\d+)A/g)].map((match) => Number(match[1]));
+		expect(moves.every((height) => height <= 6)).toBe(true);
+		expect(captured.output).toContain("Checking session39");
+		for (let i = 0; i < 40; i++) expect(captured.final).toContain(`session${i}\n`);
+		expect(captured.final).toContain("40 eligible for removal");
+		expect(captured.final.includes("\u001b")).toBe(false);
 	});
 
 	it("renders an empty preview without inventing rows or printing a receipt", () => {

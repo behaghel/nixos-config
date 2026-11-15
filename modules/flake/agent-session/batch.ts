@@ -9,7 +9,8 @@ import {
 	assertConfiguredWorktreePath, discoverManagedWorktrees, loadConfig,
 	metadataPath, metadataSlugs, readMetadata, validateSlug, withOperationLock, inspectActiveOperation,
 } from "./sessions.ts";
-import { CliError, progressReporter, run, writeCommandResult, formatActivityTime, formatTable } from "./runtime.ts";
+import { CliError, progressReporter, run, writeCommandResult } from "./runtime.ts";
+import { BatchPreview } from "./batch-preview.ts";
 import type { BatchFinishOptions, ProgressReporter, SessionMetadata } from "./types.ts";
 
 export interface Target {
@@ -47,7 +48,7 @@ interface ProcessSnapshot {
 	problem?: string;
 }
 
-interface Candidate {
+export interface Candidate {
 	slug: string;
 	worktreePath?: string;
 	reason: string;
@@ -411,53 +412,46 @@ export function completeRemoval(root: string, target: Target, reconciled: boolea
 		: { ...base, outcome: "uncertain", reason: "removal-not-confirmed", problem: confirmed.problem };
 }
 
-function previewTable(candidates: Candidate[], targets: Target[], projection: ActivityProjection, inactiveFor: string, now: number): string {
-	const selected = new Set(targets.map((target) => target.slug));
-	const reasons: Record<string, string> = {
-		excluded: "Excluded", "invoking-worktree": "Current worktree", "unresolved-resource": "Worktree needs inspection",
-		dirty: "Uncommitted changes", "uncertain-operation": "Operation state needs review", "live-operation": "Recorded process present",
-		"unknown-process-evidence": "Cannot verify processes", "live-cwd": "Process using worktree", "other-owner": "Different worktree owner",
-		"ignored-local-data": "Ignored data needs review", "unknown-activity": "Activity incomplete", "recent-activity": "Recent activity",
-		"worktree-locked": "Worktree locked", submodules: "Submodules need review", "unresolved-evidence": "Inspection incomplete",
-	};
-	const rows = [["SESSION", "LAST ACTIVE", "PLAN", "REASON"]];
-	const append = (candidate: Candidate, prefix: string, activity: number) => {
-		const remove = selected.has(candidate.slug);
-		const extra = candidate.blockers.length - 1;
-		const reason = remove ? "Inactive; checks passed" : (reasons[candidate.reason] ?? candidate.reason) + (extra > 0 ? ` (+${extra})` : "");
-		rows.push([prefix + candidate.slug, formatActivityTime(activity, now), remove ? "would remove" : "keep", reason]);
-	};
-	const remaining = new Map(candidates.map((candidate) => [candidate.slug, candidate]));
-	for (const node of projection.nodes.values()) {
-		const candidate = remaining.get(node.metadata.slug);
-		if (!candidate) continue;
-		append(candidate, node.prefix, node.activity);
-		remaining.delete(candidate.slug);
-	}
-	// Unrecorded or explicitly excluded unknown slugs must not disappear just
-	// because their creator-tree position/activity cannot be established.
-	for (const candidate of remaining.values()) append(candidate, "", Date.parse(candidate.activity?.lastWorkAt ?? ""));
-	return `Preview · inactive ≥${inactiveFor} · branches preserved\n\n` + formatTable(rows, 3) +
-		`\n${selected.size} eligible for removal · ${candidates.length - selected.size} kept · Nothing changed\n` +
-		"Full diagnostics and approval receipt: add --json.\n";
-}
-
 export function batchFinish(root: string, invocationRoot: string, options: BatchFinishOptions): number {
 	const report = progressReporter("batch finish", options.json, options.dryRun);
 	if (options.dryRun) {
-		const config = loadConfig(root);
 		const observedAt = new Date().toISOString();
-		const slugs = [...new Set([...metadataSlugs(root), ...discoverManagedWorktrees(root, config).keys(), ...options.exclusions])].sort();
-		const context = snapshotExactResources(root);
-		report("preview-process-snapshot", "started");
-		const processes = captureProcesses();
-		report("preview-process-snapshot", processes.problem ? "failed" : "completed", processes.problem);
-		const candidates = slugs.map((slug, index) => {
-			report(`inspect:${slug}`, "started", `${index + 1}/${slugs.length}`);
-			const candidate = inspectCandidate(root, invocationRoot, slug, options, Date.parse(observedAt), processes, report, context);
-			report(`inspect:${slug}`, "completed", `${candidate.reason}; ${candidate.blockers.length} blocker(s)`);
-			return candidate;
-		});
+		const display = options.json ? undefined : new BatchPreview([], options.inactiveFor, Date.parse(observedAt), options.color, options.verbose);
+		// Announce before discovery, not after the shared namespace and activity
+		// snapshots have already been collected. JSON event sequences stay intact.
+		if (display && !display.live) process.stderr.write("Inspecting worktrees...\n");
+		const { slugs, context, entries } = (() => {
+			display?.discover();
+			try {
+				const config = loadConfig(root);
+				const slugs = [...new Set([...metadataSlugs(root), ...discoverManagedWorktrees(root, config).keys(), ...options.exclusions])].sort();
+				const context = snapshotExactResources(root);
+				const projection = activityProjection(context);
+				const entries = [...projection.nodes.values()].map((node) => ({ slug: node.metadata.slug, label: node.prefix + node.metadata.slug, activity: node.activity }));
+				const displayed = new Set(entries.map((entry) => entry.slug));
+				for (const slug of slugs) if (!displayed.has(slug)) entries.push({ slug, label: slug, activity: NaN });
+				return { slugs, context, entries };
+			} catch (error) { display?.abort(); throw error; }
+		})();
+		const previewReport: ProgressReporter = options.json ? report : (phase, status, detail) => {
+			if (!display?.live && status === "failed") report(phase, status, detail);
+		};
+		let processes: ProcessSnapshot;
+		let candidates: Candidate[];
+		try {
+			display?.sessions(entries);
+			previewReport("preview-process-snapshot", "started");
+			processes = captureProcesses();
+			previewReport("preview-process-snapshot", processes.problem ? "failed" : "completed", processes.problem);
+			candidates = slugs.map((slug, index) => {
+				display?.checkingSession(slug);
+				previewReport(`inspect:${slug}`, "started", `${index + 1}/${slugs.length}`);
+				const candidate = inspectCandidate(root, invocationRoot, slug, options, Date.parse(observedAt), processes, previewReport, context);
+				previewReport(`inspect:${slug}`, "completed", `${candidate.reason}; ${candidate.blockers.length} blocker(s)`);
+				display?.complete(candidate);
+				return candidate;
+			});
+		} catch (error) { display?.abort(); throw error; }
 		report.flush?.();
 		// This independent batch is not recursive finish. Ancestors precede
 		// selected descendants so our own approved removals cannot change an
@@ -481,7 +475,7 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 				"Ignored sizes are metadata-only footprint observations, not reclaimable-space guarantees. Symlink targets and filesystem boundaries are not traversed.",
 				"Byte totals count unique inodes within each reported path, not across separate paths/worktrees. Incomplete scans are explicit and block eligibility.",
 			],
-		}, options.json, options.json ? "" : previewTable(candidates, targets, activityProjection(context), options.inactiveFor, Date.parse(observedAt)));
+		}, options.json, display?.finish() ?? "");
 		return 0;
 	}
 	const receipt = decodeReceipt(root, options);
