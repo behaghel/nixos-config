@@ -330,7 +330,15 @@ Repository-wide `as finish --all` remains a different, broader selection.
 
 On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.
-Batch receipts are top-level `receipt`, not `plan.receipt`. Apply with the same
+On creator-tree versions, `--inactive-for` uses the same rolled-up engagement as
+`list`'s `LAST ACTIVE`, including excluded descendants. A fresh recheck protects
+ancestors from new descendant activity; unknown subtree activity blocks age
+eligibility. This changes age selection, not cleanup scope or other safety guards.
+Human previews show a compact tree/table and selection counts, not the raw
+receipt. Use `--json` for the full receipt, blockers and structured progress;
+review that fresh preview before authorizing its exact selection. Never use a
+truncated display token as approval. Batch receipts are top-level `receipt`, not
+`plan.receipt`. Apply with the same
 window/exclusions, `--expected <receipt> --yes --json`, only after approval.
 Age alone is not disposability; preserve live, dirty, unapproved ignored-data and
 unresolved resources. Do not infer eligibility from a case/PR label or update consumer history.

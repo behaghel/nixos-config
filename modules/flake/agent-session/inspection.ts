@@ -23,7 +23,7 @@ import {
 	validateSlug,
 	branchCreationMessage,
 } from "./sessions.ts";
-import { CliError, run } from "./runtime.ts";
+import { CliError, run, formatActivityTime, formatTable } from "./runtime.ts";
 import type { AgentSessionConfig, SessionMetadata, SessionStatus, ManagedWorktree } from "./types.ts";
 
 function brokenStatus(slug: string, problem: string): SessionStatus {
@@ -279,20 +279,12 @@ function inventoryActivityTime(metadata: SessionMetadata): number {
 		.map((timestamp) => Date.parse(timestamp)).filter(Number.isFinite));
 }
 
-function inventoryActivityLabel(timestamp: number, now: number): string {
-	if (!Number.isFinite(timestamp)) return "unknown";
-	const age = Math.max(0, now - timestamp);
-	if (age < 60_000) return "just now";
-	if (age < 3_600_000) return `${Math.floor(age / 60_000)}m ago`;
-	if (age < 86_400_000) return `${Math.floor(age / 3_600_000)}h ago`;
-	if (age < 7 * 86_400_000) return `${Math.floor(age / 86_400_000)}d ago`;
-	const date = new Date(timestamp);
-	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function inventoryTree(metadata: SessionMetadata[]) {
-	type Node = { metadata: SessionMetadata; activity: number; prefix: string; children: Node[] };
-	const nodes: Node[] = metadata.map((record) => ({ metadata: record, activity: inventoryActivityTime(record), prefix: "", children: [] }));
+// One local engagement projection for list ordering/labels and inactivity age.
+export function sessionActivityTree(metadata: SessionMetadata[]) {
+	type Node = { metadata: SessionMetadata; activity: number; complete: boolean; limitingSlug: string; prefix: string; children: Node[] };
+	const nodes: Node[] = metadata.map((record) => ({ metadata: record, activity: inventoryActivityTime(record),
+		complete: Number.isFinite(Date.parse(record.createdAt)) && (record.lastWorkAt === undefined || Number.isFinite(Date.parse(record.lastWorkAt))),
+		limitingSlug: record.slug, prefix: "", children: [] }));
 	const byId = new Map<string, Node>();
 	for (const node of nodes) {
 		const id = node.metadata.sessionId;
@@ -312,7 +304,11 @@ function inventoryTree(metadata: SessionMetadata[]) {
 		if (visiting.has(node)) throw new CliError("Cycle in creator tree; no inventory emitted.");
 		if (visited.has(node)) return node.activity;
 		visiting.add(node);
-		for (const child of node.children) node.activity = Math.max(node.activity, rollup(child));
+		for (const child of node.children) {
+			const activity = rollup(child);
+			node.complete = node.complete && child.complete;
+			if (activity > node.activity) { node.activity = activity; node.limitingSlug = child.limitingSlug; }
+		}
 		visiting.delete(node); visited.add(node);
 		return node.activity;
 	}
@@ -335,7 +331,7 @@ function inventoryTree(metadata: SessionMetadata[]) {
 // Binding inventory, not a claim about live Git state or cleanup eligibility.
 // Read every record before output: an unreadable record cannot prove absence.
 export function showInventory(root: string, json: boolean): void {
-	const records = inventoryTree(readMetadataInventory(root));
+	const records = sessionActivityTree(readMetadataInventory(root));
 	const sessions = records.map(({ metadata: { slug, branch, worktreePath } }) =>
 		({ slug, branch, worktreePath }));
 	if (json) {
@@ -348,19 +344,8 @@ export function showInventory(root: string, json: boolean): void {
 	}
 	const now = Date.now();
 	const rows = [["SESSION", "BRANCH", "LAST ACTIVE"], ...records.map(({ metadata, activity, prefix }) =>
-		[prefix + metadata.slug, metadata.branch, inventoryActivityLabel(activity, now)])];
-	const width = (value: string) => [...value].length;
-	const columnWidth = (column: number) => Math.max(...rows.map((row) => width(row[column])));
-	const sessionWidth = columnWidth(0), activityWidth = columnWidth(2);
-	const available = process.stdout.isTTY && process.stdout.columns
-		? process.stdout.columns - sessionWidth - activityWidth - 4 : Infinity;
-	// Preserve names and activity even if the terminal cannot fit the minimum row.
-	const branchWidth = Math.min(columnWidth(1), Math.max("BRANCH".length, available));
-	const output = rows.map(([slug, branch, activity]) => {
-		if (width(branch) > branchWidth) branch = [...branch].slice(0, branchWidth - 1).join("") + "…";
-		return `${slug}${" ".repeat(sessionWidth - width(slug))}  ${branch}${" ".repeat(branchWidth - width(branch))}  ${activity}\n`;
-	}).join("");
-	process.stdout.write(output);
+		[prefix + metadata.slug, metadata.branch, formatActivityTime(activity, now)])];
+	process.stdout.write(formatTable(rows, 1));
 }
 
 // Resolve aliases even when the final component is missing, without treating

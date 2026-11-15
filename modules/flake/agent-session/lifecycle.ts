@@ -173,6 +173,11 @@ export function resume(root: string, slug: string): number {
 		if (target.metadata.sessionId !== creator.parentSessionId || target.metadata.worktreePath !== parent.worktreePath) {
 			throw new CliError("Creator worktree identity changed; no substitute conversation was launched.");
 		}
+		// Preparation can refresh remotes; the origin may disappear or change
+		// while that runs. Never let an exact-session launch create a substitute.
+		if (!creatorConversationMatches(creator, target.metadata.worktreePath)) {
+			throw new CliError("Creator conversation changed during resume preparation; no substitute conversation was launched.");
+		}
 		return { ...target, args: ["--session", creator.sessionFile] };
 	});
 	return launchAgent(root, prepared.config, prepared.metadata, prepared.args);

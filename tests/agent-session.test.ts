@@ -184,7 +184,7 @@ function startManagedSession(
 	};
 }
 
-describe("creator conversation tree happy path", () => {
+describe("creator conversation trees", () => {
 	function setup() {
 		const fixture = createRepositoryFixture("agent-creator-tree-");
 		const parent = startManagedSession(fixture, "parent");
@@ -296,6 +296,323 @@ describe("creator conversation tree happy path", () => {
 			expect(fixture.metadata("child").creatorConversation).toBe(undefined);
 			expect(runCli(fixture.checkout, ["list"]).stdout.includes("└──")).toBe(false);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	function createGrandchild(fixture: ReturnType<typeof setup>): string {
+		const origin = join(fixture.root, "child conversation.jsonl");
+		writeFileSync(origin, `${JSON.stringify({ ...fixture.header, id: "child-conversation", cwd: fixture.metadata("child").worktreePath })}\n`);
+		const created = runCli(fixture.metadata("child").worktreePath, ["grandchild", "create"], { PI_SESSION_FILE: origin, PI_SESSION_ID: "child-conversation" });
+		if (created.status !== 0) throw new Error(created.stderr);
+		return realpathSync(origin);
+	}
+
+	it("keeps nested groups contiguous, rolls up grandchild activity, breaks sibling ties and preserves connectors in narrow/piped output", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			createGrandchild(fixture);
+			expect(runCli(fixture.parent.worktree, ["child-b", "create"], fixture.environment).status).toBe(0);
+			expect(runCli(fixture.checkout, ["other", "create"]).status).toBe(0);
+			for (const [slug, year] of [["parent", "2000"], ["child", "2000"], ["other", "2001"], ["grandchild", "2003"], ["child-b", "2003"]]) {
+				writeFileSync(fixture.record(slug), JSON.stringify({ ...fixture.metadata(slug), createdAt: `${year}-01-01T12:00:00Z`, lastWorkAt: `${year}-01-01T12:00:00Z` }));
+			}
+			const list = runCli(fixture.checkout, ["list"], { TZ: "UTC" });
+			expect(list.status).toBe(0);
+			const lines = list.stdout.trimEnd().split("\n");
+			expect(lines[1].startsWith("parent ")).toBe(true);
+			expect(lines[1].endsWith("2003-01-01")).toBe(true);
+			expect(lines[2].startsWith("├── child ")).toBe(true);
+			expect(lines[2].endsWith("2003-01-01")).toBe(true);
+			expect(lines[3].startsWith("│   └── grandchild ")).toBe(true);
+			expect(lines[4].startsWith("└── child-b ")).toBe(true);
+			expect(lines[5].startsWith("other ")).toBe(true);
+			for (const line of lines.slice(1)) expect(line.indexOf("agent/")).toBe(lines[0].indexOf("BRANCH"));
+			const slugs = () => JSON.parse(runCli(fixture.checkout, ["list", "--json"]).stdout).sessions.map((item: { slug: string }) => item.slug).join(",");
+			expect(slugs()).toBe("parent,child,grandchild,child-b,other");
+			const terminal = join(fixture.root, "narrow-terminal.mjs");
+			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 42 } });\n');
+			const tty = runCli(fixture.checkout, ["list"], { NODE_OPTIONS: `--import=${terminal}` });
+			expect(tty.status).toBe(0);
+			expect(tty.stdout).toContain("│   └── grandchild");
+			expect(tty.stdout).toContain("…");
+			expect(tty.stdout.trimEnd().split("\n").every((line) => [...line].length <= 42)).toBe(true);
+			const piped = runCli(fixture.checkout, ["list"], { COLUMNS: "42" });
+			expect(piped.status).toBe(0);
+			expect(piped.stdout).toContain("agent/grandchild");
+			expect(piped.stdout.includes("…")).toBe(false);
+			const sibling = fixture.metadata("child-b");
+			writeFileSync(fixture.record("child-b"), JSON.stringify({ ...sibling, lastWorkAt: "2004-01-01T12:00:00Z" }));
+			expect(slugs()).toBe("parent,child-b,child,grandchild,other");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("resumes a grandchild's immediate creator rather than the conversation at the top root", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			const origin = createGrandchild(fixture);
+			const resumed = runCli(fixture.checkout, ["grandchild", "resume"]);
+			expect(resumed.status).toBe(0);
+			expect(readFileSync(fixture.parent.agentLog, "utf8").trim().split("\n").at(-1)).toBe(fixture.metadata("child").worktreePath);
+			expect(readFileSync(`${fixture.parent.agentLog}.args`, "utf8").trim().split("\n").at(-1)).toBe(`--session ${origin}`);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const invalid of ["cycle", "duplicate"]) {
+		it(`refuses a ${invalid} identity graph before emitting a partial tree`, () => {
+			const fixture = setup();
+			try {
+				expect(fixture.createChild().status).toBe(0);
+				const parent = fixture.metadata("parent"), child = fixture.metadata("child");
+				if (invalid === "cycle") {
+					writeFileSync(fixture.record("parent"), JSON.stringify({ ...parent, creatorConversation: { parentSessionId: child.sessionId, piSessionId: "fixture-child", sessionFile: fixture.origin } }));
+				} else {
+					delete child.creatorConversation;
+					writeFileSync(fixture.record("child"), JSON.stringify({ ...child, sessionId: parent.sessionId, parentSessionId: null }));
+				}
+				const list = runCli(fixture.checkout, ["list", "--json"]);
+				expect(list.status).toBe(1);
+				expect(list.stdout).toBe("");
+				expect(list.stderr).toContain("creator tree");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	for (const change of ["remove", "replace"]) {
+		it(`refuses an origin ${change} during resume preparation, before any agent starts`, () => {
+			const fixture = setup();
+			try {
+				expect(fixture.createChild().status).toBe(0);
+				const before = readFileSync(fixture.parent.agentLog, "utf8");
+				const bin = join(fixture.root, "git-race"); mkdirSync(bin);
+				const marker = join(fixture.root, "origin-changed");
+				const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+				const mutation = change === "remove" ? `rm -f ${tomlString(fixture.origin)}`
+					: `printf '%s\\n' ${tomlString(JSON.stringify({ ...fixture.header, id: "replacement-conversation" }))} > ${tomlString(fixture.origin)}`;
+				writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then\n${mutation}\nprintf changed > ${tomlString(marker)}\nfi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+				const result = runCli(fixture.checkout, ["child", "resume"], { PATH: `${bin}:${process.env.PATH}` });
+				expect(existsSync(marker)).toBe(true);
+				expect(result.status).toBe(1);
+				expect(result.stderr.toLowerCase()).toContain("creator");
+				expect(readFileSync(fixture.parent.agentLog, "utf8")).toBe(before);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	function batchCommands(fixture: ReturnType<typeof setup>, exclusions: string[] = []) {
+		const bin = join(fixture.root, "clock-processes"); mkdirSync(bin);
+		writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+		const env = { PATH: `${bin}:${process.env.PATH}` };
+		const args = ["batch", "finish", "--inactive-for", "7d", ...exclusions.flatMap((slug) => ["--exclude", slug])];
+		return {
+			preview: () => {
+				const result = runCli(fixture.checkout, [...args, "--dry-run", "--json"], env);
+				if (result.status !== 0) throw new Error(result.stderr);
+				return JSON.parse(result.stdout);
+			},
+			apply: (receipt: string) => runCli(fixture.checkout, [...args, "--expected", receipt, "--yes", "--json"], env),
+		};
+	}
+
+	it("uses the list's subtree clock for inactivity, including excluded recent descendants", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			createGrandchild(fixture);
+			for (const slug of ["parent", "child", "grandchild"]) backdateSession(fixture, slug);
+			const recent = new Date().toISOString();
+			writeFileSync(fixture.record("grandchild"), JSON.stringify({ ...fixture.metadata("grandchild"), lastWorkAt: recent }));
+			const preview = batchCommands(fixture, ["grandchild"]).preview();
+			for (const slug of ["parent", "child"]) {
+				const resource = preview.resources.find((item: { slug: string }) => item.slug === slug);
+				expect(resource.reason).toBe("recent-activity");
+				expect(resource.activity.lastWorkAt).toBe(recent);
+				expect(resource.activity.limitingEvidence).toBe("descendant:grandchild");
+			}
+			expect(preview.resources.find((item: { slug: string }) => item.slug === "grandchild").reason).toBe("excluded");
+			const list = runCli(fixture.checkout, ["list"]);
+			expect(list.status).toBe(0);
+			for (const line of list.stdout.trimEnd().split("\n").slice(1)) expect(line.endsWith("just now")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses a previously eligible ancestor when an excluded child becomes active before apply", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			for (const slug of ["parent", "child"]) backdateSession(fixture, slug);
+			const batch = batchCommands(fixture, ["child"]);
+			const preview = batch.preview();
+			expect(preview.resources.find((item: { slug: string }) => item.slug === "parent").reason).toBe("eligible");
+			writeFileSync(fixture.record("child"), JSON.stringify({ ...fixture.metadata("child"), lastWorkAt: new Date().toISOString() }));
+			const applied = batch.apply(preview.receipt);
+			expect(applied.status).toBe(1);
+			expect(JSON.parse(applied.stdout).resources[0].reason).toBe("recent-activity");
+			expect(existsSync(fixture.parent.worktree)).toBe(true);
+			expect(existsSync(fixture.metadata("child").worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses ancestor removal when a new child is created after the approved preview", () => {
+		const fixture = setup();
+		try {
+			backdateSession(fixture, "parent");
+			const batch = batchCommands(fixture);
+			const preview = batch.preview();
+			expect(preview.resources[0].reason).toBe("eligible");
+			expect(fixture.createChild().status).toBe(0);
+			const applied = batch.apply(preview.receipt);
+			expect(applied.status).toBe(1);
+			const outcomes = JSON.parse(applied.stdout).resources;
+			expect(outcomes.length).toBe(1);
+			expect(outcomes[0].slug).toBe("parent");
+			expect(outcomes[0].reason).toBe("recent-activity");
+			expect(existsSync(fixture.parent.worktree)).toBe(true);
+			expect(existsSync(fixture.metadata("child").worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not treat an excluded descendant's incomplete activity as proof of ancestor inactivity", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			for (const slug of ["parent", "child"]) backdateSession(fixture, slug);
+			writeFileSync(fixture.record("child"), JSON.stringify({ ...fixture.metadata("child"), createdAt: "unknown" }));
+			const preview = batchCommands(fixture, ["child"]).preview();
+			const parent = preview.resources.find((item: { slug: string }) => item.slug === "parent");
+			expect(parent.reason).toBe("unknown-activity");
+			expect(parent.activity.complete).toBe(false);
+			expect(parent.activity.inactive).toBe(null);
+			expect(existsSync(fixture.parent.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("finishes an exact inactive parent/child batch without invalidating its own approved activity observations", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			for (const slug of ["parent", "child"]) backdateSession(fixture, slug);
+			writeFileSync(fixture.record("child"), JSON.stringify({ ...fixture.metadata("child"), lastWorkAt: "2001-01-01T00:00:00.000Z" }));
+			const childPath = fixture.metadata("child").worktreePath;
+			const batch = batchCommands(fixture);
+			const preview = batch.preview();
+			const applied = batch.apply(preview.receipt);
+			expect(applied.status).toBe(0);
+			expect(JSON.parse(applied.stdout).resources.every((item: { outcome: string }) => item.outcome === "finished")).toBe(true);
+			expect(existsSync(fixture.parent.worktree)).toBe(false);
+			expect(existsSync(childPath)).toBe(false);
+			for (const slug of ["parent", "child"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("renders every preview candidate in a readable tree with exact plans, counts and blocker cues, without a receipt wall", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			expect(runCli(fixture.checkout, ["other", "create"]).status).toBe(0);
+			for (const slug of ["parent", "child", "other"]) backdateSession(fixture, slug);
+			writeFileSync(fixture.record("other"), JSON.stringify({ ...fixture.metadata("other"), createdAt: "1999-01-01T12:00:00Z", lastWorkAt: "1999-01-01T12:00:00Z" }));
+			writeFileSync(join(fixture.parent.worktree, "WIP"), "preserve this work\n");
+			const bin = join(fixture.root, "preview-processes"); mkdirSync(bin);
+			writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+			const env = { PATH: `${bin}:${process.env.PATH}`, TZ: "UTC" };
+			const args = ["batch", "finish", "--inactive-for", "7d", "--exclude", "absent", "--dry-run"];
+			const before = ["parent", "child", "other"].map((slug) => readFileSync(fixture.record(slug), "utf8")).join("\n");
+			const text = runCli(fixture.parent.worktree, args, env);
+			expect(text.status).toBe(0);
+			expect(text.stdout).toContain("Preview · inactive ≥7d · branches preserved");
+			const lines = text.stdout.split("\n");
+			const header = lines.find((line) => line.startsWith("SESSION"));
+			expect(header?.includes("LAST ACTIVE")).toBe(true);
+			expect(header?.includes("PLAN")).toBe(true);
+			expect(header?.includes("REASON")).toBe(true);
+			const parent = lines.find((line) => line.startsWith("parent "));
+			const child = lines.find((line) => line.startsWith("└── child "));
+			const other = lines.find((line) => line.startsWith("other "));
+			const absent = lines.find((line) => line.startsWith("absent "));
+			expect(parent?.endsWith("Current worktree (+1)")).toBe(true);
+			expect(child?.endsWith("Inactive; checks passed")).toBe(true);
+			expect(absent?.includes("unknown")).toBe(true);
+			expect(absent?.endsWith("Excluded")).toBe(true);
+			expect(parent?.indexOf("keep")).toBe(header?.indexOf("PLAN"));
+			expect(child?.indexOf("would remove")).toBe(header?.indexOf("PLAN"));
+			expect(parent?.indexOf("Current worktree")).toBe(header?.indexOf("REASON"));
+			expect(lines.indexOf(parent!) < lines.indexOf(child!) && lines.indexOf(child!) < lines.indexOf(other!) && lines.indexOf(other!) < lines.indexOf(absent!)).toBe(true);
+			expect(text.stdout).toContain("2 eligible for removal · 2 kept · Nothing changed");
+			expect(text.stdout).toContain("--json");
+			expect(text.stdout.includes("batch-v1.")).toBe(false);
+			expect(text.stderr.includes("STARTED")).toBe(false);
+			expect(text.stderr.includes("COMPLETED")).toBe(false);
+			expect(text.stderr.includes("\u001b")).toBe(false);
+			expect(text.stderr.trim().split("\n").length).toBe(1);
+			const terminal = join(fixture.root, "preview-terminal.mjs");
+			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 50 } });\n');
+			const tty = runCli(fixture.parent.worktree, args, { ...env, NODE_OPTIONS: `--import=${terminal}` });
+			expect(tty.status).toBe(0);
+			const table = tty.stdout.split("\n").filter((line) => ["SESSION", "parent", "└── child", "other", "absent"].some((slug) => line.startsWith(`${slug} `)));
+			expect(table.length).toBe(5);
+			expect(table.every((line) => [...line].length <= 50)).toBe(true);
+			expect(tty.stdout).toContain("…");
+			const json = runCli(fixture.parent.worktree, [...args, "--json"], env);
+			expect(json.status).toBe(0);
+			const preview = JSON.parse(json.stdout);
+			expect(preview.receipt.startsWith("batch-v1.")).toBe(true);
+			expect(preview.resources.length).toBe(4);
+			expect(preview.resources.find((item: { slug: string }) => item.slug === "parent").blockers.length).toBe(2);
+			const events = json.stderr.trim().split("\n").map((line) => JSON.parse(line));
+			expect(events.some((event) => event.phase === "inspect:parent" && event.status === "completed")).toBe(true);
+			expect(["parent", "child", "other"].map((slug) => readFileSync(fixture.record(slug), "utf8")).join("\n")).toBe(before);
+			expect(readFileSync(join(fixture.parent.worktree, "WIP"), "utf8")).toBe("preserve this work\n");
+			expect(existsSync(join(fixture.worktrees, "absent"))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("renders an empty preview without inventing rows or printing a receipt", () => {
+		const fixture = createRepositoryFixture("agent-empty-preview-");
+		try {
+			writeConfig(fixture.checkout, "/unused");
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("SESSION");
+			expect(result.stdout).toContain("0 eligible for removal · 0 kept · Nothing changed");
+			expect(result.stdout.includes("batch-v1.")).toBe(false);
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain").split("worktree ").length).toBe(2);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps batch preview progress compact without dropping machine events or failures", () => {
+		const reporter = resolve("modules/flake/agent-session/runtime.ts");
+		const script = `import { progressReporter } from ${tomlString(reporter)};
+const mode = process.argv[1];
+Object.defineProperties(process.stderr, { isTTY: { value: mode === "tty" }, columns: { value: 60 } });
+const report = progressReporter("batch finish", mode === "json", true);
+report("preview-process-snapshot", "started");
+if (mode === "failure") report("preview-process-snapshot", "failed", "fixture process probe failed");
+else {
+ report("preview-process-snapshot", "completed");
+ report("inspect:parent", "started", "1/1");
+ for (let i = 0; i < 100; i++) report("inspect-metadata-chunk:parent", "completed", "cache: " + i + " metadata entries");
+ report("inspect:parent", "completed", "eligible; 0 blocker(s)");
+}
+report.flush();`;
+		const probe = (mode: string) => spawnSync("node", ["--input-type=module", "-e", script, mode], { encoding: "utf8", env: process.env });
+		const text = probe("text");
+		expect(text.status).toBe(0);
+		expect(text.stderr.trim().split("\n").length).toBe(1);
+		expect(text.stderr.includes("\u001b")).toBe(false);
+		const tty = probe("tty");
+		expect(tty.status).toBe(0);
+		expect(tty.stderr).toContain("Inspecting 1/1 · parent");
+		expect(tty.stderr.includes("STARTED")).toBe(false);
+		expect(tty.stderr.trimEnd().endsWith("\r\u001b[2K")).toBe(true);
+		const json = probe("json");
+		expect(json.status).toBe(0);
+		expect(json.stderr.trim().split("\n").length).toBe(104);
+		const failure = probe("failure");
+		expect(failure.status).toBe(0);
+		expect(failure.stderr).toContain("FAILED preview-process-snapshot: fixture process probe failed");
 	});
 
 	it("rejects malformed creator records instead of silently reverting to root behavior", () => {
@@ -2579,14 +2896,14 @@ describe("batch inspection evidence and scaling", () => {
 			expect(result.status).toBe(0);
 			const resource = JSON.parse(result.stdout).resources[0];
 			const blockers = resource.blockers.map((blocker: { reason: string }) => blocker.reason);
-			for (const reason of ["unresolved-resource", "dirty", "live-operation", "ignored-local-data", "recent-activity", "worktree-locked"]) expect(blockers.includes(reason)).toBe(true);
+			for (const reason of ["unresolved-resource", "dirty", "live-operation", "ignored-local-data", "worktree-locked"]) expect(blockers.includes(reason)).toBe(true);
 			expect(resource.git.clean).toBe(false);
 			expect(resource.git.currentBranch).toBe(null);
 			expect(resource.git.changes.find((change: { path: string }) => change.path === "README.md").status).toBe(" M");
 			expect(resource.activity.complete).toBe(true);
-			expect(resource.activity.inactive).toBe(false);
-			expect(resource.activity.limitingEvidence).toBe("file:README.md");
-			expect(resource.activity.observations.some((item: { source: string }) => item.source === "reflog:HEAD")).toBe(true);
+			expect(resource.activity.inactive).toBe(true);
+			expect(resource.activity.limitingEvidence).toBe("creation");
+			expect(resource.activity.observations.some((item: { source: string }) => item.source.startsWith("reflog:") || item.source.startsWith("file:"))).toBe(false);
 			const ignored = resource.ignoredData.ignoredPaths.find((entry: { path: string }) => entry.path === ".cache");
 			expect(ignored.type).toBe("directory");
 			expect(ignored.classification).toBe("unapproved");
@@ -2601,7 +2918,7 @@ describe("batch inspection evidence and scaling", () => {
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	}, 60000);
 
-	it("keeps incomplete activity/process evidence explicit while reporting other blockers", () => {
+	it("keeps incomplete process and timestamp evidence explicit while reporting other blockers", () => {
 		const fixture = createLocalLinkFixture();
 		try {
 			expect(runCli(fixture.checkout, ["partial", "create"]).status).toBe(0);
@@ -2626,12 +2943,18 @@ describe("batch inspection evidence and scaling", () => {
 			writeFileSync(join(cache, "evidence.sqlite"), "retain\n");
 			const partial = inspect();
 			const reasons = partial.blockers.map((blocker: { reason: string }) => blocker.reason);
-			for (const reason of ["dirty", "unknown-process-evidence", "unknown-activity", "ignored-local-data"]) expect(reasons.includes(reason)).toBe(true);
-			expect(partial.activity.complete).toBe(false);
-			expect(partial.activity.inactive).toBe(null);
+			for (const reason of ["dirty", "unknown-process-evidence", "ignored-local-data"]) expect(reasons.includes(reason)).toBe(true);
+			expect(partial.activity.complete).toBe(true);
+			expect(partial.activity.inactive).toBe(true);
 			expect(partial.activity.lastWorkAt).toBe("2000-01-01T00:00:00.000Z");
 			expect(partial.ignoredData.ignoredPaths.find((entry: { path: string }) => entry.path === ".cache").size.complete).toBe(true);
 			expect(readFileSync(join(cache, "evidence.sqlite"), "utf8")).toBe("retain\n");
+			const record = sessionMetadataPath(fixture.checkout, "partial");
+			writeFileSync(record, JSON.stringify({ ...JSON.parse(readFileSync(record, "utf8")), createdAt: "invalid-timestamp" }));
+			const unknown = inspect();
+			expect(unknown.activity.complete).toBe(false);
+			expect(unknown.activity.inactive).toBe(null);
+			expect(unknown.blockers.some((blocker: { reason: string }) => blocker.reason === "unknown-activity")).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	}, 60000);
 
@@ -2829,7 +3152,7 @@ describe("inactive-session batch preview", () => {
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	}, 60000);
 
-	it("observes unmanaged file and checkout activity and refuses ignored or uncertain evidence", () => {
+	it("matches listed engagement despite fresh file/checkout timestamps and refuses ignored or uncertain evidence", () => {
 		const fixture = createRepositoryFixture();
 		try {
 			const { worktree } = startManagedSession(fixture, "external");
@@ -2843,11 +3166,11 @@ describe("inactive-session batch preview", () => {
 			expect(reason()).toBe("eligible");
 			const now = new Date();
 			utimesSync(join(worktree, "README.md"), now, now);
-			expect(reason()).toBe("recent-activity");
+			expect(reason()).toBe("eligible");
 			backdateSession(fixture, "external");
 			git(worktree, "checkout", "--detach", "HEAD");
 			git(worktree, "checkout", "agent/external");
-			expect(reason()).toBe("recent-activity");
+			expect(reason()).toBe("eligible");
 			mkdirSync(join(worktree, ".worktrees"));
 			writeFileSync(join(worktree, ".worktrees", "ignored-notes"), "retain\n");
 			expect(reason()).toBe("ignored-local-data");

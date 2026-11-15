@@ -3,13 +3,13 @@ import { sessionCommand } from "./arguments.ts";
 import { closeSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { assertPrimaryCheckout, commonGitDirectory, ensureClean, git, gitRaw } from "./git.ts";
-import { inspectExactResource, snapshotExactResources, type ExactInspectionContext } from "./inspection.ts";
+import { inspectExactResource, snapshotExactResources, sessionActivityTree, type ExactInspectionContext } from "./inspection.ts";
 import { inspectIgnoredData, ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	assertConfiguredWorktreePath, discoverManagedWorktrees, loadConfig,
 	metadataPath, metadataSlugs, readMetadata, validateSlug, withOperationLock, inspectActiveOperation,
 } from "./sessions.ts";
-import { CliError, progressReporter, run, writeCommandResult } from "./runtime.ts";
+import { CliError, progressReporter, run, writeCommandResult, formatActivityTime, formatTable } from "./runtime.ts";
 import type { BatchFinishOptions, ProgressReporter, SessionMetadata } from "./types.ts";
 
 export interface Target {
@@ -98,6 +98,57 @@ function processDirectories(): { pid: number; path: string }[] {
 	return directories;
 }
 
+function completeActivity(evidence: ActivityEvidence, now: number, inactiveMs: number): ActivityEvidence {
+	for (const observation of evidence.observations) {
+		if (!evidence.lastWorkAt || Date.parse(observation.timestamp) > Date.parse(evidence.lastWorkAt)) {
+			evidence.lastWorkAt = observation.timestamp; evidence.limitingEvidence = observation.source;
+		}
+	}
+	evidence.complete = evidence.problems.length === 0 && evidence.lastWorkAt !== null;
+	evidence.inactive = evidence.complete ? Date.parse(evidence.lastWorkAt!) <= now - inactiveMs : null;
+	return evidence;
+}
+
+interface ActivityProjection {
+	nodes: Map<string, ReturnType<typeof sessionActivityTree>[number]>;
+	problem?: string;
+}
+
+// A preview shares one immutable catalogue; each apply target gets a fresh one.
+// Cache only on that snapshot, never across lifecycle effects or invocations.
+const activityProjections = new WeakMap<ExactInspectionContext, ActivityProjection>();
+function activityProjection(context: ExactInspectionContext): ActivityProjection {
+	const cached = activityProjections.get(context);
+	if (cached) return cached;
+	const projection: ActivityProjection = { nodes: new Map() };
+	try {
+		if (context.problem) throw new CliError(context.problem);
+		for (const node of sessionActivityTree([...context.recordsBySlug.values()])) projection.nodes.set(node.metadata.slug, node);
+	} catch (error) { projection.problem = String(error); }
+	activityProjections.set(context, projection);
+	return projection;
+}
+
+function listedActivity(root: string, metadata: SessionMetadata, now: number, inactiveMs: number, context?: ExactInspectionContext): ActivityEvidence {
+	const projection = activityProjection(context ?? snapshotExactResources(root));
+	const node = projection.nodes.get(metadata.slug), own = node?.metadata ?? metadata;
+	const evidence: ActivityEvidence = {
+		lastWorkAt: null, limitingEvidence: null, filesChecked: 0, complete: true, inactive: null, problems: [], observations: [],
+		sources: ["creation", ...(own.lastWorkAt ? ["managed-work"] : []), "creator-subtree"],
+	};
+	const observe = (source: string, timestamp: number) => {
+		if (!Number.isFinite(timestamp)) { evidence.problems.push(`Invalid timestamp: ${source}`); return; }
+		evidence.observations.push({ source, timestamp: new Date(timestamp).toISOString() });
+	};
+	observe("creation", Date.parse(own.createdAt));
+	if (own.lastWorkAt) observe("managed-work", Date.parse(own.lastWorkAt));
+	if (projection.problem) evidence.problems.push(projection.problem);
+	else if (!node?.complete) evidence.problems.push(`Incomplete activity in creator subtree of ${metadata.slug}.`);
+	if (node && node.limitingSlug !== metadata.slug) observe(`descendant:${node.limitingSlug}`, node.activity);
+	return completeActivity(evidence, now, inactiveMs);
+}
+
+// Explicit non-age cleanup retains its existing conservative inspection evidence.
 function latestObservedWork(metadata: SessionMetadata, branches: string[], now: number, inactiveMs: number): ActivityEvidence {
 	const evidence: ActivityEvidence = {
 		lastWorkAt: null, limitingEvidence: null, filesChecked: 0, complete: true, inactive: null, problems: [], observations: [],
@@ -135,14 +186,7 @@ function latestObservedWork(metadata: SessionMetadata, branches: string[], now: 
 		}
 		if (latestFile) observe(`file:${latestFile.path}`, latestFile.timestamp);
 	} catch (error) { evidence.problems.push(`working-file-mtimes: ${String(error)}`); }
-	for (const observation of evidence.observations) {
-		if (!evidence.lastWorkAt || Date.parse(observation.timestamp) > Date.parse(evidence.lastWorkAt)) {
-			evidence.lastWorkAt = observation.timestamp; evidence.limitingEvidence = observation.source;
-		}
-	}
-	evidence.complete = evidence.problems.length === 0 && evidence.lastWorkAt !== null;
-	evidence.inactive = evidence.complete ? Date.parse(evidence.lastWorkAt!) <= now - inactiveMs : null;
-	return evidence;
+	return completeActivity(evidence, now, inactiveMs);
 }
 
 export function captureProcesses(): ProcessSnapshot {
@@ -236,7 +280,8 @@ export function inspectCandidate(root: string, invocationRoot: string, slug: str
 			block(observation.state === "live" ? "live-operation" : "uncertain-operation", `Managed operation ${operation.id} (pid ${operation.pid}, ${operation.hostname}): ${observation.state}${observation.problem ? ` (${observation.problem})` : ""}${observation.state === "interrupted" ? `; review with ${sessionCommand(slug, "activity reconcile")}` : ""}`);
 			return { ...operation, ...observation };
 		});
-		candidate.activity = latestObservedWork(metadata, status.ownedBranches, now, options.inactiveMs);
+		candidate.activity = requireInactivity ? listedActivity(root, metadata, now, options.inactiveMs, sharedContext)
+			: latestObservedWork(metadata, status.ownedBranches, now, options.inactiveMs);
 		if (!candidate.activity.complete) { candidate.inspectionComplete = false; block("unknown-activity", candidate.activity.problems.join("; ")); }
 		else if (requireInactivity && !candidate.activity.inactive) block("recent-activity");
 		candidate.ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
@@ -366,8 +411,39 @@ export function completeRemoval(root: string, target: Target, reconciled: boolea
 		: { ...base, outcome: "uncertain", reason: "removal-not-confirmed", problem: confirmed.problem };
 }
 
+function previewTable(candidates: Candidate[], targets: Target[], projection: ActivityProjection, inactiveFor: string, now: number): string {
+	const selected = new Set(targets.map((target) => target.slug));
+	const reasons: Record<string, string> = {
+		excluded: "Excluded", "invoking-worktree": "Current worktree", "unresolved-resource": "Worktree needs inspection",
+		dirty: "Uncommitted changes", "uncertain-operation": "Operation state needs review", "live-operation": "Recorded process present",
+		"unknown-process-evidence": "Cannot verify processes", "live-cwd": "Process using worktree", "other-owner": "Different worktree owner",
+		"ignored-local-data": "Ignored data needs review", "unknown-activity": "Activity incomplete", "recent-activity": "Recent activity",
+		"worktree-locked": "Worktree locked", submodules: "Submodules need review", "unresolved-evidence": "Inspection incomplete",
+	};
+	const rows = [["SESSION", "LAST ACTIVE", "PLAN", "REASON"]];
+	const append = (candidate: Candidate, prefix: string, activity: number) => {
+		const remove = selected.has(candidate.slug);
+		const extra = candidate.blockers.length - 1;
+		const reason = remove ? "Inactive; checks passed" : (reasons[candidate.reason] ?? candidate.reason) + (extra > 0 ? ` (+${extra})` : "");
+		rows.push([prefix + candidate.slug, formatActivityTime(activity, now), remove ? "would remove" : "keep", reason]);
+	};
+	const remaining = new Map(candidates.map((candidate) => [candidate.slug, candidate]));
+	for (const node of projection.nodes.values()) {
+		const candidate = remaining.get(node.metadata.slug);
+		if (!candidate) continue;
+		append(candidate, node.prefix, node.activity);
+		remaining.delete(candidate.slug);
+	}
+	// Unrecorded or explicitly excluded unknown slugs must not disappear just
+	// because their creator-tree position/activity cannot be established.
+	for (const candidate of remaining.values()) append(candidate, "", Date.parse(candidate.activity?.lastWorkAt ?? ""));
+	return `Preview · inactive ≥${inactiveFor} · branches preserved\n\n` + formatTable(rows, 3) +
+		`\n${selected.size} eligible for removal · ${candidates.length - selected.size} kept · Nothing changed\n` +
+		"Full diagnostics and approval receipt: add --json.\n";
+}
+
 export function batchFinish(root: string, invocationRoot: string, options: BatchFinishOptions): number {
-	const report = progressReporter("batch finish", options.json);
+	const report = progressReporter("batch finish", options.json, options.dryRun);
 	if (options.dryRun) {
 		const config = loadConfig(root);
 		const observedAt = new Date().toISOString();
@@ -382,8 +458,15 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 			report(`inspect:${slug}`, "completed", `${candidate.reason}; ${candidate.blockers.length} blocker(s)`);
 			return candidate;
 		});
+		report.flush?.();
+		// This independent batch is not recursive finish. Ancestors precede
+		// selected descendants so our own approved removals cannot change an
+		// ancestor's activity fingerprint before its apply recheck.
+		const ranks = new Map([...activityProjection(context).nodes.keys()].map((slug, index) => [slug, index]));
+		const targets = candidates.flatMap((candidate) => candidate.snapshot ? [candidate.snapshot] : [])
+			.sort((a, b) => (ranks.get(a.slug) ?? Infinity) - (ranks.get(b.slug) ?? Infinity));
 		const receipt = encodeReceipt({ version: 1, rootKey: rootKey(root), observedAt, inactiveMs: options.inactiveMs,
-			exclusions: options.exclusions, keepBranch: true, targets: candidates.flatMap((candidate) => candidate.snapshot ? [candidate.snapshot] : []) });
+			exclusions: options.exclusions, keepBranch: true, targets });
 		const resources = candidates.map(({ snapshot, ...candidate }) => ({ ...candidate, keepBranch: true, allBranchesPreserved: true, ...(snapshot ? { fingerprint: snapshot.fingerprint } : {}) }));
 		writeCommandResult({ version: 1, command: "batch finish", dryRun: true, inactiveFor: options.inactiveFor,
 			observedAt, cutoff: new Date(Date.parse(observedAt) - options.inactiveMs).toISOString(),
@@ -392,13 +475,13 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 			limitations: [
 				"Observed inactivity is not proof of disposability; explicitly exclude retained or otherwise active work.",
 				"Managed launch/resume/run record start and completion; interrupted activity records refuse eligibility.",
-				"Unmanaged evidence covers checkout/owned-branch reflogs and current non-ignored file mtimes, not a complete history.",
+				"The inactivity clock matches list: creation/managed engagement rolled up through the recorded creator subtree, including excluded descendants.",
 				"Process evidence covers same-user cwd, not editors elsewhere, other users or remote processes.",
-				"Restored timestamps and expired reflogs can hide activity; unapproved ignored local data is refused.",
+				"Unrecorded edits and checkout events do not advance this clock; dirty work and unapproved ignored local data are independently refused.",
 				"Ignored sizes are metadata-only footprint observations, not reclaimable-space guarantees. Symlink targets and filesystem boundaries are not traversed.",
 				"Byte totals count unique inodes within each reported path, not across separate paths/worktrees. Incomplete scans are explicit and block eligibility.",
 			],
-		}, options.json, `Inactive-session preview; no resources changed.\n${resources.map((resource) => `  ${resource.slug}: ${resource.reason}`).join("\n")}\nReceipt: ${receipt}\n`);
+		}, options.json, options.json ? "" : previewTable(candidates, targets, activityProjection(context), options.inactiveFor, Date.parse(observedAt)));
 		return 0;
 	}
 	const receipt = decodeReceipt(root, options);

@@ -43,7 +43,11 @@ gave birth to a child, in that conversation's parent worktree.
 | Explicit child work | `as child launch` still launches inside the child worktree | Starting work in the child remains a separate, explicit action. |
 | Missing known origin | Fail clearly if the recorded conversation or parent worktree is unavailable | Never silently substitute another conversation or convert a known child into a root-resume fallback. |
 | JSON | Flat version-1 array, unchanged fields, matching text traversal order | Preserve existing consumers without putting visual prefixes into machine data. |
-| Cleanup boundary | Preserve existing resource ancestry and ownership independently | Display/resume grouping must not expand, shrink or authorize removal scope. |
+| Inactivity cutoff | `batch finish --inactive-for` uses the same effective activity as `LAST ACTIVE`, including descendants | Preview selection must agree with the activity the user sees. |
+| Human batch preview | All candidate rows in creator-tree order, with `SESSION`, `LAST ACTIVE`, `PLAN`, `REASON`, and a selection summary | Make review readable without hiding why a session is retained. |
+| Preview progress | One updating line on terminals; bounded plain progress when redirected | Routine STARTED/COMPLETED pairs must not bury the review summary. |
+| Receipt presentation | Full receipt and blocker details stay in `--json`; normal text gives a retrieval hint, not a raw or abbreviated token | Keep machine authority intact without flooding human output. |
+| Cleanup boundary | Preserve resource ancestry, ownership, non-age safety checks and approval independently | Shared activity determines age eligibility, not disposal authority. |
 
 ### Listing contract
 
@@ -66,12 +70,61 @@ A parent's `LAST ACTIVE` and its position among siblings use the same rolled-up
 time. Rollup is recursive and includes its own activity. A recent grandchild can
 move its ancestor group above another root, but does not appear ahead of its own
 parent. Rollup is computed for the listing; it does not write activity timestamps
-into parent records, invent engagement, or change cleanup's inactivity evidence.
+into parent records or invent engagement. `batch finish --inactive-for` evaluates
+its age cutoff against that same effective timestamp.
 
 `--json` remains `{ version: 1, command: "list", sessions: [...] }`. Entries still
 contain only `slug`, `branch` and `worktreePath`, without indentation, connectors,
 nested arrays or added relationship/activity fields. The sequence is the same
 parent-first traversal as the text table, not a globally sorted flat list.
+
+### Shared inactivity clock
+
+`as batch finish --inactive-for <duration>` compares its cutoff against the same
+own/subtree activity used by `as list`, with the same creator relationships and
+legacy-root rules. A recent descendant protects its ancestors from age selection.
+All recorded descendants contribute, even if excluded from the batch's removal
+selection. Ordinary checkout events and working-file mtimes do not introduce a
+second age clock behind the displayed activity.
+
+Age eligibility is not permission to remove a worktree. Dirty state, live or
+uncertain operations/processes, ownership, native registration/locks, ignored
+data, unknown evidence, branch preservation and explicit receipt approval retain
+their independent guards. Incomplete subtree activity prevents age eligibility.
+
+Apply rechecks the shared clock against fresh records for each selected target.
+New descendant activity after preview prevents removal of its ancestor. When
+both an ancestor and its descendants are selected, applying the approved selection
+must not invalidate an ancestor's clock merely because the batch already removed
+one of its own approved descendants. Receipts still bind the exact selected
+resources; this does not imply recursive cleanup or add descendants to the selection.
+
+Explicit cleanup without an inactivity cutoff retains its existing non-age
+inspection and approval rules; this change does not introduce a cutoff there.
+
+### Human batch preview
+
+The default dry-run output is a review summary, not an execution log. It keeps
+all candidates visible, uses the same creator-tree order and activity labels as
+`list`, and aligns `SESSION`, `LAST ACTIVE`, `PLAN` and `REASON` columns. Candidates
+without a trustworthy tree position still appear as ungrouped rows; unavailable
+activity is shown as unknown, not invented.
+
+`PLAN` says `would remove` only for the exact receipt selection; other rows say
+`keep`. Reasons use readable labels without upgrading uncertain process/resource
+evidence into a claim of successful completion or confirmed ownership. Show the
+primary reason and `(+N)` for additional blockers. Full slugs remain visible;
+terminals may shorten reason text with an ellipsis while piped output stays full.
+
+The summary states the inactivity window, branch preservation, eligible/retained
+counts and that no changes were made. It does not print the raw receipt by default
+or replace it with a short approval alias. A concise hint points to `--json`, which
+retains the complete receipt, blockers, existing schema and structured progress.
+
+Terminal progress uses one updating inspection line that clears before the final
+table. Redirected human progress stays bounded and contains no terminal controls.
+Failures remain visible rather than being hidden with routine progress. Devenv's
+own shell/task startup output is outside this renderer's scope.
 
 ### Creator and resume contract
 
@@ -113,7 +166,7 @@ implicit worktree creation, repair, conversation migration, or session cleanup.
   ahead of older roots and each ancestor displays that newest time. Within each
   sibling set, rolled-up time determines order; ties use ascending slug.
 - [ ] AC-4: Given repeated listing of the same records, own activity timestamps,
-  resource ancestry, ownership and cleanup evidence remain unchanged.
+  resource ancestry, ownership and cleanup evidence remain unchanged by polling.
 - [ ] AC-5: Given the table, JSON contains the same slugs in the same traversal
   order, but retains its exact existing envelope and unprefixed entry fields.
 - [ ] AC-6: Given a child whose parent contains multiple Pi conversations,
@@ -133,6 +186,25 @@ implicit worktree creation, repair, conversation migration, or session cleanup.
 - [ ] AC-11: Given narrow terminal or piped output, full slugs and relationship
   connectors survive; terminal branch shortening and full piped names retain
   the existing table contract.
+
+- [ ] AC-12: Given old parent activity and a recent descendant, batch preview
+  reports that descendant's timestamp as the parent's effective activity and
+  refuses age eligibility for the parent, even when the descendant is excluded.
+- [ ] AC-13: Given an eligible ancestor preview, new descendant activity before
+  apply causes a fresh refusal without removing the ancestor. A batch selecting
+  an inactive parent and child can complete its exact approved selection without
+  weakening receipt or branch-preservation checks.
+- [ ] AC-14: Given old recorded engagement but fresh checkout/file timestamps,
+  batch uses the displayed engagement for age. Dirty data, ignored data and
+  live/unknown process evidence still independently block removal.
+
+- [ ] AC-15: Given a batch preview with selected, retained and multiply blocked
+  entries, text shows every candidate in tree order with aligned activity, plan
+  and reason columns, correct counts, additional-blocker cues and no raw receipt.
+  JSON retains the complete receipt/blockers and unchanged schema.
+- [ ] AC-16: Given a terminal preview, inspection progress uses one updating line
+  cleared before the table; redirected progress is bounded without escape codes.
+  JSON retains every structured progress event and failures stay visible.
 
 ## Invariants
 
@@ -175,6 +247,9 @@ conversation working directories, or the separate local-commit detection work.
 | AC-9 | Missing conversation, missing parent worktree and reused-parent-slug fixtures; assert error and no agent execution | Yes |
 | AC-10 | Fake-agent launch argv/cwd regression | Yes |
 | AC-11 | Controlled terminal widths and redirected output with deep prefixes and long names | Yes |
+| AC-12–13 | Parent/child/grandchild fixtures, excluded descendants, controlled engagement timestamps, preview/apply races and exact branch-preserving batch receipts | Yes |
+| AC-14 | Checkout/touch fixtures with old engagement plus dirty, ignored-data and live/unknown-process guard regressions | Yes |
+| AC-15–16 | Mixed-candidate CLI fixtures, text/JSON comparisons, controlled terminal-width/progress probes and read-only before/after evidence | Yes |
 | Invariants | Existing inventory scale, metadata compatibility, lifecycle, Pi activity and guarded-cleanup regressions; host flake checks | Yes |
 
 ## References
