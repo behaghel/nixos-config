@@ -1308,3 +1308,8 @@ devenv -q --profile agent-session-tests shell -- bash tests/zsh-direnv-completio
 The regression tests run the CLI with Node against disposable local Git remotes.
 They cover creation, resumption, recovery, cleanup guards, installed completions,
 and default-on template wiring. The Nix check also runs outside a Git checkout.
+It runs four independent suite groups with at most four concurrent Bun processes,
+limited by `NIX_BUILD_CORES`. Tests within each group remain sequential. Each
+process has its own home and temporary directories; any failed group fails the
+check. New suites join the default group automatically, so adding tests does not
+require updating a shard list. Logs identify their group as `[agent-session N/4]`.
