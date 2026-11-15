@@ -168,8 +168,9 @@ an appended marker alone is not a completed mapping. No resources are retired.
 
 Prefer `as <task-slug> doctor --json` (or verified `as . doctor --json`) and named
 status over repository-wide status when one resource is relevant. On supporting
-versions, `as list --json` is cheap recorded-binding inventory, not live Git state;
-its branch is the recorded initial branch. Exact `status --worktree <path> --json`
+versions, `as list` is a recent-first table using locally recorded activity;
+`as list --json` retains the cheap recorded-binding inventory schema and the same
+ordering. Neither is live Git state; its branch is the recorded initial branch. Exact `status --worktree <path> --json`
 can inspect a missing directory without entering it.
 
 Treat absent, inconsistent and unknown evidence distinctly. Empty inventory or a
@@ -178,6 +179,21 @@ and filesystem evidence must agree. Do not invent a slug for a saved path, repai
 on lookup, silently prune registrations or turn an unrecorded binding into a
 replacement session. Doctor findings are proposals for human review, not authority.
 Metadata repair does not recreate local configuration links.
+
+## Record local engagement
+
+On supporting versions, `as <slug> activity touch` (or verified `as . activity touch`)
+records current engagement silently, under the lifecycle lock, without starting
+an operation or changing existing leases, acknowledgements, ownership or work.
+It requires an existing verified worktree and accepts no timestamp or approval
+flags. It is not an activity reconciliation or cleanup bypass.
+
+The `devenv-workflow` Pi extension uses this for session entry, user messages and
+visible assistant responses, not tool-only/thinking-only messages, tool results,
+streaming updates or idle time. It never reads conversation history or sends
+message contents to the CLI. Listing itself remains read-only. Unsupported
+launchers or failed writes warn without stopping Pi; resolve the environment or
+obtain approval for any needed upgrade instead of editing records by hand.
 
 ## Acknowledge interrupted activity explicitly
 

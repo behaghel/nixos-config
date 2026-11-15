@@ -30,6 +30,7 @@ The default agent is `pi`, which must be available in your environment.
 ```sh
 as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
+as list                             # recent-first session table
 as list --json                      # cheap recorded-binding inventory
 as status                           # reconcile all sessions
 as my-task status                   # inspect one session
@@ -73,6 +74,28 @@ Interactive cleanup uses Node-compatible confirmation for normal, forced and bul
 finish. Only `y` or `yes` (case-insensitive) confirms; empty input, EOF, or a failed
 prompt cancels without cleanup. Non-terminal calls require explicit `--yes`.
 `--yes` skips only confirmation, not ownership or cleanup safety checks.
+
+## Recording local engagement
+
+`as <slug> activity touch` records the current time as local engagement for an
+existing, verified managed worktree. `as . activity touch` selects the current
+managed binding, including from nested directories. Success is silent. There are
+no timestamp, force, approval, or JSON arguments, and no network requests.
+
+The command takes the lifecycle lock, revalidates the worktree, and updates only
+`lastWorkAt`. Existing operation leases, interruption history, identity, branches,
+and work are preserved. Missing or unregistered worktrees are refused, not
+repaired. This records engagement, not successful operation completion, and does
+not acknowledge interrupted work or authorize retirement.
+
+The `devenv-workflow` Pi extension calls this command on session entry and
+qualifying completed messages. It passes only the current working directory;
+conversation contents and Pi history are never copied into session metadata.
+Older launchers or failed writes produce a warning without stopping the Pi
+conversation or automatically upgrading tools. Retry a later message after
+fixing the launcher/environment; ordinary primary or unmanaged contexts stay
+quiet. The extension must be loaded from the intended package source; changing a
+project pin alone does not update personal Pi resources.
 
 ## Interrupted activity recovery
 
@@ -367,7 +390,24 @@ assembler completions for the installed `as` alias.
 ## Recorded-binding inventory
 
 `as list [--json]` reads recorded session bindings without inspecting checkout
-Git state, refreshing remotes, or running preparation or agent commands. JSON is
+Git state, refreshing remotes, or running preparation or agent commands. Text
+output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table, newest activity
+first, with session names breaking ties. Activity reflects locally recorded
+creation and managed start/launch/resume/run start and completion, including
+failed commands; listing and status polling never advance it. With the
+`devenv-workflow` Pi extension loaded and a supporting launcher, Pi session entry,
+user messages and visible assistant responses also record local engagement while
+Pi stays open. Tool-only and thinking-only messages, streaming updates, tool
+results, and idle time do not independently advance it. Commits made outside
+managed commands are not yet observed.
+
+Activity is shown as a relative age below seven days and a local `YYYY-MM-DD`
+date thereafter. Terminals shorten long branch names with `…` while preserving
+session names and activity. At widths too small for the minimum row, preserving
+those values takes priority over fitting the terminal. Piped output retains the
+aligned table with full names and no colour or truncation.
+
+JSON uses the same activity ordering, with no added activity fields. It remains
 one document with `version: 1`, `command: "list"`, and `sessions`, each containing
 only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
 branch, not an observation of the current branch, ownership, or clean state.

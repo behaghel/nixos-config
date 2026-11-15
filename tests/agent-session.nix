@@ -51,6 +51,8 @@ pkgs.runCommand "agent-session-tests"
     cp ${../modules/flake/agent-session}/* modules/flake/agent-session/
     cp ${./agent-session.test.ts} tests/agent-session.test.ts
     cp ${./agent-session-templates.test.ts} tests/agent-session-templates.test.ts
+    mkdir -p marketplace/plugins/devenv-workflow/pi
+    cp ${../marketplace/plugins/devenv-workflow/pi/session-activity.ts} marketplace/plugins/devenv-workflow/pi/session-activity.ts
     cp -R ${../templates} templates
     cp ${../devenv.nix} devenv.nix
     cp ${../AGENTS.md} AGENTS.md

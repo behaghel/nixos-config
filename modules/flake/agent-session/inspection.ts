@@ -274,18 +274,54 @@ export function refreshMetadataRemote(
 	return remoteDefaultBranch(root, metadata.remote);
 }
 
+function inventoryActivityTime(metadata: SessionMetadata): number {
+	return Math.max(...[metadata.createdAt, metadata.lastWorkAt ?? ""]
+		.map((timestamp) => Date.parse(timestamp)).filter(Number.isFinite));
+}
+
+function inventoryActivityLabel(timestamp: number, now: number): string {
+	if (!Number.isFinite(timestamp)) return "unknown";
+	const age = Math.max(0, now - timestamp);
+	if (age < 60_000) return "just now";
+	if (age < 3_600_000) return `${Math.floor(age / 60_000)}m ago`;
+	if (age < 86_400_000) return `${Math.floor(age / 3_600_000)}h ago`;
+	if (age < 7 * 86_400_000) return `${Math.floor(age / 86_400_000)}d ago`;
+	const date = new Date(timestamp);
+	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 // Binding inventory, not a claim about live Git state or cleanup eligibility.
 // Read every record before output: an unreadable record cannot prove absence.
 export function showInventory(root: string, json: boolean): void {
-	const sessions = readMetadataInventory(root).map(({ slug, branch, worktreePath }) =>
+	const records = readMetadataInventory(root).map((metadata) => ({
+		metadata, activity: inventoryActivityTime(metadata),
+	})).sort((a, b) => b.activity - a.activity ||
+		(a.metadata.slug < b.metadata.slug ? -1 : a.metadata.slug > b.metadata.slug ? 1 : 0));
+	const sessions = records.map(({ metadata: { slug, branch, worktreePath } }) =>
 		({ slug, branch, worktreePath }));
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ version: 1, command: "list", sessions })}\n`);
 		return;
 	}
-	for (const session of sessions)
-		process.stdout.write(`${session.slug}  ${session.branch}\n  ${session.worktreePath}\n`);
-	if (!sessions.length) process.stdout.write("No recorded agent sessions.\n");
+	if (!sessions.length) {
+		process.stdout.write("No recorded agent sessions.\n");
+		return;
+	}
+	const now = Date.now();
+	const rows = [["SESSION", "BRANCH", "LAST ACTIVE"], ...records.map(({ metadata, activity }) =>
+		[metadata.slug, metadata.branch, inventoryActivityLabel(activity, now)])];
+	const width = (value: string) => [...value].length;
+	const columnWidth = (column: number) => Math.max(...rows.map((row) => width(row[column])));
+	const sessionWidth = columnWidth(0), activityWidth = columnWidth(2);
+	const available = process.stdout.isTTY && process.stdout.columns
+		? process.stdout.columns - sessionWidth - activityWidth - 4 : Infinity;
+	// Preserve names and activity even if the terminal cannot fit the minimum row.
+	const branchWidth = Math.min(columnWidth(1), Math.max("BRANCH".length, available));
+	const output = rows.map(([slug, branch, activity]) => {
+		if (width(branch) > branchWidth) branch = [...branch].slice(0, branchWidth - 1).join("") + "…";
+		return `${slug}${" ".repeat(sessionWidth - width(slug))}  ${branch}${" ".repeat(branchWidth - width(branch))}  ${activity}\n`;
+	}).join("");
+	process.stdout.write(output);
 }
 
 // Resolve aliases even when the final component is missing, without treating

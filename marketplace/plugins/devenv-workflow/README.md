@@ -54,6 +54,20 @@ Installation, migration and upgrades must verify requested operations in both
 usage and shell completions, and report capability gaps with source-revision
 evidence. A discovered launcher alone is not setup acceptance.
 
+## Local session activity
+
+In managed devenv worktrees, the extension records session entry, user messages,
+and visible assistant responses through `agent-session . activity touch`. This
+keeps `as list` ordering current while Pi remains open. Tool-only or thinking-only
+messages, tool results, streaming updates, and idle time do not independently
+count. No conversation content is sent to the CLI or read from Pi history.
+
+The launcher must support `activity touch` in its usage and completions. Missing
+support or failed writes produce a warning without interrupting Pi or upgrading
+the project automatically. Primary checkouts and ordinary unmanaged worktrees do
+not gain managed records from this integration. Local development follows the
+Pi package source you selected, not whichever devenv pin is present.
+
 ## Workflow
 
 ```
