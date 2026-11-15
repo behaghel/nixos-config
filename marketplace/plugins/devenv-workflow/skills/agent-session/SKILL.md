@@ -168,9 +168,10 @@ an appended marker alone is not a completed mapping. No resources are retired.
 
 Prefer `as <task-slug> doctor --json` (or verified `as . doctor --json`) and named
 status over repository-wide status when one resource is relevant. On supporting
-versions, `as list` is a recent-first table using locally recorded activity;
-`as list --json` retains the cheap recorded-binding inventory schema and the same
-ordering. Neither is live Git state; its branch is the recorded initial branch. Exact `status --worktree <path> --json`
+versions, `as list` is a creator-session tree using locally recorded activity;
+parents show their subtree's newest activity, and siblings sort recent-first.
+`as list --json` stays flat with the existing fields and the same parent-first
+traversal. Neither is live Git state; its branch is the recorded initial branch. Exact `status --worktree <path> --json`
 can inspect a missing directory without entering it.
 
 Treat absent, inconsistent and unknown evidence distinctly. Empty inventory or a
@@ -179,6 +180,24 @@ and filesystem evidence must agree. Do not invent a slug for a saved path, repai
 on lookup, silently prune registrations or turn an unrecorded binding into a
 replacement session. Doctor findings are proposals for human review, not authority.
 Metadata repair does not recreate local configuration links.
+
+## Creator conversations and resume
+
+On supporting versions, Pi agent-run shell commands expose `PI_SESSION_ID` and
+`PI_SESSION_FILE`. Creation checks the bounded conversation header against the
+verified invoking worktree and records creator navigation separately from resource
+ancestry. Never infer a Pi creator from branch/path names or `parentSessionId`.
+
+`as <child> resume` reopens its exact recorded creator conversation in the parent
+worktree, not the child's newest conversation. Missing or replaced origins refuse
+launch rather than guessing. `as <child> launch` still works inside the child.
+Legacy and shell-created bindings without creator information are listing/resume
+roots, even if they remain descendants for guarded cleanup. Pi's user-entered
+`!`/`!!` commands lack the agent shell variables and use the shell fallback.
+
+Verify the installed CLI's capabilities and source before relying on this behavior;
+a newer skill does not change an older launcher. Do not backfill origins, rewrite
+resource ancestry, move/copy Pi histories or retire worktrees to fix navigation.
 
 ## Record local engagement
 

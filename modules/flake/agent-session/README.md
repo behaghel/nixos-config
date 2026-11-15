@@ -30,12 +30,12 @@ The default agent is `pi`, which must be available in your environment.
 ```sh
 as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
-as list                             # recent-first session table
+as list                             # recent-first creator-session tree
 as list --json                      # cheap recorded-binding inventory
 as status                           # reconcile all sessions
 as my-task status                   # inspect one session
 as my-task launch                   # launch in an existing worktree
-as my-task resume                   # launch with --continue
+as my-task resume                   # creator conversation, or latest own conversation for roots
 as my-task cd                       # change the current shell's directory
 as my-task run bun test             # run devenv -q shell -- bun test there
 as my-task branch create feat/work  # create and record ownership; no checkout
@@ -391,8 +391,11 @@ assembler completions for the installed `as` alias.
 
 `as list [--json]` reads recorded session bindings without inspecting checkout
 Git state, refreshing remotes, or running preparation or agent commands. Text
-output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table, newest activity
-first, with session names breaking ties. Activity reflects locally recorded
+output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table with `tree`-style
+connectors for recorded Pi creator relationships. Parents precede their children.
+Each node displays the newest activity in its subtree; roots and sibling sets
+sort by that time, newest first, with session names breaking ties. Activity
+reflects locally recorded
 creation and managed start/launch/resume/run start and completion, including
 failed commands; listing and status polling never advance it. With the
 `devenv-workflow` Pi extension loaded and a supporting launcher, Pi session entry,
@@ -407,7 +410,8 @@ session names and activity. At widths too small for the minimum row, preserving
 those values takes priority over fitting the terminal. Piped output retains the
 aligned table with full names and no colour or truncation.
 
-JSON uses the same activity ordering, with no added activity fields. It remains
+JSON uses the same parent-first traversal, with unprefixed slugs, no nesting,
+and no added relationship or activity fields. It remains
 one document with `version: 1`, `command: "list"`, and `sessions`, each containing
 only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
 branch, not an observation of the current branch, ownership, or clean state.
@@ -422,6 +426,43 @@ output rather than silently omitting potential bindings. A dangling metadata
 store is not reported as an empty inventory. Listing does not repair records,
 prune registrations, or remove files. It accepts only `--json`, not `--refresh`,
 and is repository-wide rather than a session action.
+
+## Creator conversations and resume
+
+When Pi creates a worktree from a managed parent, the CLI can record an optional
+`creatorConversation` containing the parent's stable session ID and the exact Pi
+conversation ID/file. Pi's agent-run Bash/PowerShell commands supply
+`PI_SESSION_ID` and `PI_SESSION_FILE`; the CLI checks only the bounded JSONL
+header against the verified invoking worktree. It never scans conversation
+entries or guesses a creator from the most recent file. Custom session storage
+locations work through the explicit locator.
+
+```text
+SESSION       BRANCH        LAST ACTIVE
+parent        agent/parent  2m ago
+└── child     agent/child   2m ago
+```
+
+`as child resume` reopens that exact creator conversation in the parent's
+worktree, using Pi's `--session` argument rather than the child's `--continue`.
+A newer conversation in the parent does not replace the recorded creator.
+Missing/replaced conversations, unavailable parent worktrees, and changed parent
+identity are errors; no substitute conversation is launched. `as child launch`
+still launches inside the child.
+
+Without creator information, listing treats a binding as a root and `resume`
+keeps its own-worktree `--continue` behavior. This covers legacy records and shell
+`create`/`start`, even from another managed worktree. Pi's user-entered `!`/`!!`
+commands do not receive its shell-tool session variables and use that same
+shell fallback. A stale/inherited context whose header names a different
+worktree cannot establish a creator association.
+
+Creator provenance is separate from `parentSessionId`, which continues to govern
+resource ancestry and guarded recursive cleanup. Shell-created or legacy entries
+can be roots in this listing while remaining resource descendants for cleanup.
+Rollup changes no stored timestamps. Missing creator parents do not hide their
+children from inventory or erase known provenance; resume still refuses the
+unavailable origin. Slug reuse never adopts an earlier parent's conversation.
 
 ## Exact-resource inspection
 
@@ -1203,7 +1244,8 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `sessions.ts` | Configuration, session records, locks, discovery, and path validation |
 | `git.ts` | Git execution, repository roots, refs, and worktree registration |
 | `github.ts` | GitHub PR resolution, source-head verification, and review push safeguards |
-| `inspection.ts` | Local session state, branch ownership, and status reporting |
+| `inspection.ts` | Local session state, creator-tree inventory, branch ownership, and status reporting |
+| `creator.ts` | Bounded Pi header validation and creator-context capture |
 | `ownership.ts` | Explicitly reviewed legacy identity and ancestry mapping |
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |

@@ -290,13 +290,52 @@ function inventoryActivityLabel(timestamp: number, now: number): string {
 	return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function inventoryTree(metadata: SessionMetadata[]) {
+	type Node = { metadata: SessionMetadata; activity: number; prefix: string; children: Node[] };
+	const nodes: Node[] = metadata.map((record) => ({ metadata: record, activity: inventoryActivityTime(record), prefix: "", children: [] }));
+	const byId = new Map<string, Node>();
+	for (const node of nodes) {
+		const id = node.metadata.sessionId;
+		if (!id) continue;
+		if (byId.has(id)) throw new CliError("Ambiguous session identities in creator tree; no inventory emitted.");
+		byId.set(id, node);
+	}
+	const roots: Node[] = [];
+	for (const node of nodes) {
+		const creator = node.metadata.creatorConversation;
+		const parent = creator ? byId.get(creator.parentSessionId) : undefined;
+		if (parent) parent.children.push(node);
+		else roots.push(node);
+	}
+	const visiting = new Set<Node>(), visited = new Set<Node>();
+	function rollup(node: Node): number {
+		if (visiting.has(node)) throw new CliError("Cycle in creator tree; no inventory emitted.");
+		if (visited.has(node)) return node.activity;
+		visiting.add(node);
+		for (const child of node.children) node.activity = Math.max(node.activity, rollup(child));
+		visiting.delete(node); visited.add(node);
+		return node.activity;
+	}
+	// Visit every node so a cyclic component cannot disappear as a rootless tree.
+	for (const node of nodes) rollup(node);
+	const compare = (a: Node, b: Node) => b.activity - a.activity ||
+		(a.metadata.slug < b.metadata.slug ? -1 : a.metadata.slug > b.metadata.slug ? 1 : 0);
+	const ordered: Node[] = [];
+	function append(node: Node, prefix = "", connector = "") {
+		node.prefix = prefix + connector;
+		ordered.push(node);
+		const childPrefix = prefix + (connector ? connector === "└── " ? "    " : "│   " : "");
+		const children = node.children.sort(compare);
+		children.forEach((child, index) => append(child, childPrefix, index === children.length - 1 ? "└── " : "├── "));
+	}
+	for (const root of roots.sort(compare)) append(root);
+	return ordered;
+}
+
 // Binding inventory, not a claim about live Git state or cleanup eligibility.
 // Read every record before output: an unreadable record cannot prove absence.
 export function showInventory(root: string, json: boolean): void {
-	const records = readMetadataInventory(root).map((metadata) => ({
-		metadata, activity: inventoryActivityTime(metadata),
-	})).sort((a, b) => b.activity - a.activity ||
-		(a.metadata.slug < b.metadata.slug ? -1 : a.metadata.slug > b.metadata.slug ? 1 : 0));
+	const records = inventoryTree(readMetadataInventory(root));
 	const sessions = records.map(({ metadata: { slug, branch, worktreePath } }) =>
 		({ slug, branch, worktreePath }));
 	if (json) {
@@ -308,8 +347,8 @@ export function showInventory(root: string, json: boolean): void {
 		return;
 	}
 	const now = Date.now();
-	const rows = [["SESSION", "BRANCH", "LAST ACTIVE"], ...records.map(({ metadata, activity }) =>
-		[metadata.slug, metadata.branch, inventoryActivityLabel(activity, now)])];
+	const rows = [["SESSION", "BRANCH", "LAST ACTIVE"], ...records.map(({ metadata, activity, prefix }) =>
+		[prefix + metadata.slug, metadata.branch, inventoryActivityLabel(activity, now)])];
 	const width = (value: string) => [...value].length;
 	const columnWidth = (column: number) => Math.max(...rows.map((row) => width(row[column])));
 	const sessionWidth = columnWidth(0), activityWidth = columnWidth(2);

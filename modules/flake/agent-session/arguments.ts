@@ -414,7 +414,7 @@ function usage(): string {
 		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
 		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
-		"  agent-session <task-slug> resume",
+		"  agent-session <task-slug> resume (recorded creator conversation in parent, otherwise latest own conversation)",
 		"  agent-session <task-slug> status [--json] [--refresh]",
 		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",
 		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",

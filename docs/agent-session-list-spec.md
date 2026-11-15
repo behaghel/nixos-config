@@ -1,5 +1,10 @@
 # Spec: Tidy, recent-first agent-session inventory
 
+Tree grouping, subtree activity rollup and creator-conversation resume are defined
+in the [creator-session tree spec](agent-session-tree-spec.md). Its traversal and
+ordering contract supersedes global flat ordering below; the activity signals,
+columns, time labels, read-only behavior and JSON fields remain unchanged.
+
 ## Problem
 
 When returning to a project after time away, the user needs to see where they

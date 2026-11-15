@@ -127,6 +127,8 @@ function runCli(cwd: string, args: string[], env: Record<string, string> = {}) {
 		encoding: "utf8",
 		env: {
 			...process.env,
+			// Fixtures opt into Pi provenance explicitly, never the test runner's chat.
+			PI_SESSION_ID: "", PI_SESSION_FILE: "",
 			...(configPath && existsSync(configPath) ? { AGENT_SESSION_CONFIG: configPath } : {}),
 			...env,
 		},
@@ -181,6 +183,134 @@ function startManagedSession(
 		agentLog,
 	};
 }
+
+describe("creator conversation tree happy path", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-creator-tree-");
+		const parent = startManagedSession(fixture, "parent");
+		const origin = join(fixture.root, "origin conversation.jsonl");
+		const piId = "creator-conversation";
+		const header = { type: "session", version: 3, id: piId, timestamp: "2000-01-01T00:00:00Z", cwd: parent.worktree };
+		writeFileSync(origin, `${JSON.stringify(header)}\n${JSON.stringify({ type: "message", message: { role: "user", content: "private conversation text" } })}\n`);
+		utimesSync(origin, new Date("2000-01-01"), new Date("2000-01-01"));
+		const environment = { PI_SESSION_FILE: origin, PI_SESSION_ID: piId };
+		const record = (slug: string) => sessionMetadataPath(fixture.checkout, slug);
+		const metadata = (slug: string) => JSON.parse(readFileSync(record(slug), "utf8"));
+		const createChild = (command = "create", env = environment) => runCli(parent.worktree, ["child", command, ...(command === "start" ? ["--no-agent"] : [])], env);
+		return { ...fixture, parent, origin, piId, header, environment, record, metadata, createChild };
+	}
+
+	it("records the exact creator and lists its child underneath with rolled-up activity and unchanged JSON fields", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			expect(runCli(fixture.checkout, ["other", "create"]).status).toBe(0);
+			const parent = fixture.metadata("parent"), child = fixture.metadata("child");
+			expect(JSON.stringify(child.creatorConversation)).toBe(JSON.stringify({ parentSessionId: parent.sessionId, piSessionId: fixture.piId, sessionFile: realpathSync(fixture.origin) }));
+			expect(child.parentSessionId).toBe(parent.sessionId);
+			expect(readFileSync(fixture.record("child"), "utf8").includes("private conversation text")).toBe(false);
+			for (const [slug, year] of [["parent", "2000"], ["other", "2002"], ["child", "2003"]]) {
+				writeFileSync(fixture.record(slug), JSON.stringify({ ...fixture.metadata(slug), createdAt: `${year}-01-01T12:00:00Z`, lastWorkAt: `${year}-01-01T12:00:00Z` }));
+			}
+			const before = ["parent", "child", "other"].map((slug) => readFileSync(fixture.record(slug), "utf8")).join("\n");
+			const list = runCli(fixture.checkout, ["list"], { TZ: "UTC" });
+			expect(list.status).toBe(0);
+			expect(list.stdout).toBe([
+				["SESSION", "BRANCH", "LAST ACTIVE"],
+				["parent", "agent/parent", "2003-01-01"],
+				["└── child", "agent/child", "2003-01-01"],
+				["other", "agent/other", "2002-01-01"],
+			].map(([slug, branch, activity]) => `${slug.padEnd(9)}  ${branch.padEnd(12)}  ${activity}\n`).join(""));
+			const json = JSON.parse(runCli(fixture.checkout, ["list", "--json"]).stdout);
+			expect(Object.keys(json).sort().join(",")).toBe("command,sessions,version");
+			expect(json.version).toBe(1);
+			expect(json.command).toBe("list");
+			expect(json.sessions.map((session: { slug: string }) => session.slug).join(",")).toBe("parent,child,other");
+			for (const session of json.sessions) expect(Object.keys(session).sort().join(",")).toBe("branch,slug,worktreePath");
+			expect(["parent", "child", "other"].map((slug) => readFileSync(fixture.record(slug), "utf8")).join("\n")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("resumes the exact creator in its parent worktree rather than the newer conversation, and keeps child launch local", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			writeFileSync(join(fixture.root, "newer.jsonl"), `${JSON.stringify({ ...fixture.header, id: "newer-conversation" })}\n`);
+			const resumed = runCli(fixture.checkout, ["child", "resume"]);
+			expect(resumed.status).toBe(0);
+			expect(readFileSync(fixture.parent.agentLog, "utf8").trim().split("\n").at(-1)).toBe(fixture.parent.worktree);
+			expect(readFileSync(`${fixture.parent.agentLog}.args`, "utf8").trim().split("\n").at(-1)).toBe(`--session ${realpathSync(fixture.origin)}`);
+			expect(runCli(fixture.checkout, ["child", "launch"]).status).toBe(0);
+			expect(readFileSync(fixture.parent.agentLog, "utf8").trim().split("\n").at(-1)).toBe(fixture.metadata("child").worktreePath);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("captures creator context for start without changing resource ancestry", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild("start").status).toBe(0);
+			const child = fixture.metadata("child");
+			expect(child.creatorConversation?.piSessionId).toBe(fixture.piId);
+			expect(child.parentSessionId).toBe(fixture.metadata("parent").sessionId);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps shell-created and older resource children as listing/resume roots", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild("create", { PI_SESSION_FILE: "", PI_SESSION_ID: "" }).status).toBe(0);
+			const child = fixture.metadata("child");
+			expect(child.parentSessionId).toBe(fixture.metadata("parent").sessionId);
+			expect(child.creatorConversation).toBe(undefined);
+			expect(runCli(fixture.checkout, ["list"]).stdout.includes("└──")).toBe(false);
+			expect(runCli(fixture.checkout, ["child", "resume"]).status).toBe(0);
+			expect(readFileSync(fixture.parent.agentLog, "utf8").trim().split("\n").at(-1)).toBe(child.worktreePath);
+			expect(readFileSync(`${fixture.parent.agentLog}.args`, "utf8").trim().split("\n").at(-1)).toBe("--continue");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const missing of ["conversation", "replaced-conversation", "parent-record", "parent-worktree", "parent-incarnation"]) {
+		it(`refuses a known missing/replaced creator (${missing}) without launching a substitute`, () => {
+			const fixture = setup();
+			try {
+				expect(fixture.createChild().status).toBe(0);
+				const before = readFileSync(fixture.parent.agentLog, "utf8");
+				if (missing === "conversation") rmSync(fixture.origin);
+				if (missing === "replaced-conversation") writeFileSync(fixture.origin, `${JSON.stringify({ ...fixture.header, id: "different-conversation" })}\n`);
+				if (missing === "parent-record") rmSync(fixture.record("parent"));
+				if (missing === "parent-worktree") rmSync(fixture.parent.worktree, { recursive: true, force: true });
+				if (missing === "parent-incarnation") writeFileSync(fixture.record("parent"), JSON.stringify({ ...fixture.metadata("parent"), sessionId: "11111111-1111-4111-8111-111111111111" }));
+				const resumed = runCli(fixture.checkout, ["child", "resume"]);
+				expect(resumed.status).toBe(1);
+				expect(resumed.stderr.toLowerCase()).toContain("creator");
+				expect(readFileSync(fixture.parent.agentLog, "utf8")).toBe(before);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("does not attribute inherited or mismatched Pi environment to the invoking worktree", () => {
+		const fixture = setup();
+		try {
+			writeFileSync(fixture.origin, `${JSON.stringify({ ...fixture.header, cwd: fixture.checkout })}\n`);
+			expect(fixture.createChild().status).toBe(0);
+			expect(fixture.metadata("child").creatorConversation).toBe(undefined);
+			expect(runCli(fixture.checkout, ["list"]).stdout.includes("└──")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rejects malformed creator records instead of silently reverting to root behavior", () => {
+		const fixture = setup();
+		try {
+			expect(fixture.createChild().status).toBe(0);
+			const child = fixture.metadata("child");
+			writeFileSync(fixture.record("child"), JSON.stringify({ ...child, creatorConversation: { parentSessionId: child.sessionId, piSessionId: fixture.piId, sessionFile: fixture.origin } }));
+			const list = runCli(fixture.checkout, ["list", "--json"]);
+			expect(list.status).toBe(1);
+			expect(list.stdout).toBe("");
+			expect(runCli(fixture.checkout, ["child", "resume"]).status).toBe(1);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
 
 describe("explicit session branch ownership", () => {
 	function setup() {
