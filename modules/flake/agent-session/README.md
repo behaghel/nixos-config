@@ -30,6 +30,7 @@ The default agent is `pi`, which must be available in your environment.
 ```sh
 as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
+as list                             # recent-first session table
 as list --json                      # cheap recorded-binding inventory
 as status                           # reconcile all sessions
 as my-task status                   # inspect one session
@@ -367,7 +368,20 @@ assembler completions for the installed `as` alias.
 ## Recorded-binding inventory
 
 `as list [--json]` reads recorded session bindings without inspecting checkout
-Git state, refreshing remotes, or running preparation or agent commands. JSON is
+Git state, refreshing remotes, or running preparation or agent commands. Text
+output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table, newest activity
+first, with session names breaking ties. Activity reflects locally recorded
+creation and managed start/launch/resume/run start and completion, including
+failed commands; listing and status polling never advance it. It does not yet
+observe individual Pi messages or commits made outside managed commands.
+
+Activity is shown as a relative age below seven days and a local `YYYY-MM-DD`
+date thereafter. Terminals shorten long branch names with `…` while preserving
+session names and activity. At widths too small for the minimum row, preserving
+those values takes priority over fitting the terminal. Piped output retains the
+aligned table with full names and no colour or truncation.
+
+JSON uses the same activity ordering, with no added activity fields. It remains
 one document with `version: 1`, `command: "list"`, and `sessions`, each containing
 only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
 branch, not an observation of the current branch, ownership, or clean state.

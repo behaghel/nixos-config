@@ -2931,6 +2931,125 @@ process.stdout.write(fs.readFileSync(${JSON.stringify(responsePath)}, 'utf8'));
 	return { ...fixture, branch, head, response, responsePath, ghLog, agentLog, prepareLog, environment };
 }
 
+describe("recent-first inventory table", () => {
+	const now = Date.parse("2026-11-15T12:00:00Z");
+
+	function inventoryFixture(records: { slug: string; createdAt: string; lastWorkAt?: string }[]) {
+		const fixture = createRepositoryFixture("agent-list-table-");
+		writeConfig(fixture.checkout, "/unused");
+		const store = join(fixture.checkout, ".git/agent-session/sessions");
+		mkdirSync(store, { recursive: true });
+		for (const record of records) {
+			writeFileSync(join(store, `${record.slug}.json`), JSON.stringify({
+				version: 1, branch: `agent/${record.slug}`,
+				worktreePath: join(fixture.worktrees, record.slug),
+				remote: "origin", defaultBranch: "master", conversation: null, ...record,
+			}));
+		}
+		const clock = join(fixture.root, "clock.mjs");
+		writeFileSync(clock, `Date.now = () => ${now};\n`);
+		return { ...fixture, store, clock, environment: { NODE_OPTIONS: `--import=${clock}`, TZ: "UTC" } };
+	}
+
+	it("prints aligned rows newest first with creation fallback and stable ties in text and JSON", () => {
+		const fixture = inventoryFixture([
+			{ slug: "alpha", createdAt: "2000-01-01T00:00:00Z", lastWorkAt: "2026-11-15T09:00:00Z" },
+			{ slug: "beta", createdAt: "2000-01-01T00:00:00Z", lastWorkAt: "2026-11-15T09:00:00Z" },
+			{ slug: "fallback", createdAt: "2026-11-15T11:00:00Z" },
+			{ slug: "newest", createdAt: "2000-01-01T00:00:00Z", lastWorkAt: "2026-11-15T11:58:00Z" },
+			{ slug: "old", createdAt: "2000-01-01T00:00:00Z" },
+		]);
+		try {
+			const before = readdirSync(fixture.store).map((name) => readFileSync(join(fixture.store, name), "utf8")).join("\n");
+			const text = runCli(fixture.checkout, ["list"], fixture.environment);
+			expect(text.status).toBe(0);
+			expect(text.stdout).toBe([
+				["SESSION", "BRANCH", "LAST ACTIVE"],
+				["newest", "agent/newest", "2m ago"],
+				["fallback", "agent/fallback", "1h ago"],
+				["alpha", "agent/alpha", "3h ago"],
+				["beta", "agent/beta", "3h ago"],
+				["old", "agent/old", "2000-01-01"],
+			].map(([slug, branch, active]) => `${slug.padEnd(8)}  ${branch.padEnd(14)}  ${active}\n`).join(""));
+			const json = runCli(fixture.checkout, ["list", "--json"], fixture.environment);
+			expect(json.status).toBe(0);
+			const inventory = JSON.parse(json.stdout);
+			expect(inventory.version).toBe(1);
+			expect(inventory.command).toBe("list");
+			expect(inventory.sessions.map((session: { slug: string }) => session.slug).join(",")).toBe("newest,fallback,alpha,beta,old");
+			for (const session of inventory.sessions) {
+				expect(Object.keys(session).sort().join(",")).toBe("branch,slug,worktreePath");
+			}
+			expect(readdirSync(fixture.store).map((name) => readFileSync(join(fixture.store, name), "utf8")).join("\n")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("uses relative ages below a week and dates at or above a week", () => {
+		const ages: [string, number, string][] = [
+			["seconds", 30_000, "just now"],
+			["minute", 60_000, "1m ago"],
+			["hour", 3_600_000, "1h ago"],
+			["day", 86_400_000, "1d ago"],
+			["almost-week", 7 * 86_400_000 - 1, "6d ago"],
+			["week", 7 * 86_400_000, "2026-11-08"],
+			["older", 8 * 86_400_000, "2026-11-07"],
+		];
+		const fixture = inventoryFixture(ages.map(([slug, age]) => ({ slug, createdAt: new Date(now - age).toISOString() })));
+		try {
+			const result = runCli(fixture.checkout, ["list"], fixture.environment);
+			expect(result.status).toBe(0);
+			const lines = result.stdout.trimEnd().split("\n");
+			expect(lines.length).toBe(ages.length + 1);
+			for (const [slug, , expected] of ages) {
+				expect(lines.find((line) => line.startsWith(`${slug} `))?.trimEnd().endsWith(`  ${expected}`)).toBe(true);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("shortens only branches in a narrow terminal but keeps full names when piped", () => {
+		const slug = "a-session-with-a-very-long-name";
+		const fixture = inventoryFixture([{ slug, createdAt: "2026-11-15T11:58:00Z" }]);
+		try {
+			const terminal = join(fixture.root, "terminal.mjs");
+			writeFileSync(terminal, `import ${JSON.stringify(fixture.clock)};\nObject.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 62 } });\n`);
+			const tty = runCli(fixture.checkout, ["list"], { ...fixture.environment, NODE_OPTIONS: `--import=${terminal}` });
+			expect(tty.status).toBe(0);
+			const lines = tty.stdout.trimEnd().split("\n");
+			expect(lines.length).toBe(2);
+			expect(lines[0]).toContain("LAST ACTIVE");
+			expect(lines[1]).toContain(slug);
+			expect(lines[1]).toContain("…");
+			expect(lines[1].endsWith("2m ago")).toBe(true);
+			expect(lines.every((line) => [...line].length <= 62)).toBe(true);
+			const piped = runCli(fixture.checkout, ["list"], { ...fixture.environment, COLUMNS: "62" });
+			expect(piped.status).toBe(0);
+			expect(piped.stdout).toContain(`agent/${slug}`);
+			expect(piped.stdout.includes("…")).toBe(false);
+			expect(piped.stdout.includes("\u001b")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("moves an older session first immediately after resume", () => {
+		const fixture = createRepositoryFixture("agent-list-resume-");
+		try {
+			startManagedSession(fixture, "z-resumed");
+			startManagedSession(fixture, "a-other");
+			for (const [slug, date] of [["z-resumed", "2000-01-01"], ["a-other", "2001-01-01"]]) {
+				const path = sessionMetadataPath(fixture.checkout, slug);
+				const metadata = JSON.parse(readFileSync(path, "utf8"));
+				writeFileSync(path, JSON.stringify({ ...metadata, createdAt: `${date}T00:00:00Z`, lastWorkAt: `${date}T00:00:00Z` }));
+			}
+			const names = () => JSON.parse(runCli(fixture.checkout, ["list", "--json"]).stdout).sessions.map((session: { slug: string }) => session.slug).join(",");
+			expect(names()).toBe("a-other,z-resumed");
+			expect(runCli(fixture.checkout, ["z-resumed", "resume"]).status).toBe(0);
+			expect(names()).toBe("z-resumed,a-other");
+			const text = runCli(fixture.checkout, ["list"]);
+			expect(text.status).toBe(0);
+			expect(text.stdout.split("\n")[1].startsWith("z-resumed ")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("metadata-only inventory", () => {
 	it("lists bindings without inspecting unrelated checkouts, then inspects only the named target", () => {
 		const fixture = createRepositoryFixture("agent-inventory-");

@@ -168,8 +168,9 @@ an appended marker alone is not a completed mapping. No resources are retired.
 
 Prefer `as <task-slug> doctor --json` (or verified `as . doctor --json`) and named
 status over repository-wide status when one resource is relevant. On supporting
-versions, `as list --json` is cheap recorded-binding inventory, not live Git state;
-its branch is the recorded initial branch. Exact `status --worktree <path> --json`
+versions, `as list` is a recent-first table using locally recorded activity;
+`as list --json` retains the cheap recorded-binding inventory schema and the same
+ordering. Neither is live Git state; its branch is the recorded initial branch. Exact `status --worktree <path> --json`
 can inspect a missing directory without entering it.
 
 Treat absent, inconsistent and unknown evidence distinctly. Empty inventory or a
