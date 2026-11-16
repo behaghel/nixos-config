@@ -4007,6 +4007,180 @@ describe("inactive-session batch preview", () => {
 	});
 });
 
+describe("state-first inactive batch apply", () => {
+	it("respects colour and NO_COLOR in human apply without adding cursor controls to pipes", () => {
+		const fixture = setup();
+		try {
+			const args = [...fixture.args, "--expected", fixture.receipt, "--yes"];
+			const forced = runCli(fixture.checkout, [...args, "--color=always"], { NO_COLOR: "1" });
+			expect(forced.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(forced.stdout)).toBe(true);
+			expect(/\u001b\[\d+A/.test(forced.stdout)).toBe(false);
+			const never = runCli(fixture.checkout, [...args, "--color=never"]);
+			expect(never.status).toBe(0); expect((never.stdout + never.stderr).includes("\u001b")).toBe(false);
+			const terminal = join(fixture.root, "terminal.mjs");
+			writeFileSync(terminal, `for (const stream of [process.stdout, process.stderr]) Object.defineProperties(stream, { isTTY: { value: true }, columns: { value: 100 }, rows: { value: 30 } });`);
+			const env = { NODE_OPTIONS: `--import=${terminal}`, TERM: "xterm-256color", NO_COLOR: "1" };
+			const muted = runCli(fixture.checkout, args, env);
+			expect(muted.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(muted.stdout)).toBe(false);
+			const auto = runCli(fixture.checkout, args, { ...env, NO_COLOR: "" });
+			expect(auto.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(auto.stdout)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps default apply compact and puts approved paths and successful checks behind verbose", () => {
+		const fixture = setup();
+		try {
+			const args = [...fixture.args, "--expected", fixture.receipt, "--yes", "--color=never"];
+			const quiet = runCli(fixture.checkout, args);
+			expect(quiet.status).toBe(0); expect(quiet.stdout.includes(fixture.worktrees)).toBe(false);
+			expect(quiet.stderr.includes("STARTED")).toBe(false);
+			const verbose = runCli(fixture.checkout, [...args, "--verbose"]);
+			expect(verbose.status).toBe(0); expect(verbose.stdout).toContain(join(realpathSync(fixture.worktrees), "human"));
+			expect(verbose.stderr).toContain("STARTED apply:human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps live row positions stable and bounds redraws after resize without dropping final identities", () => {
+		const renderer = resolve("modules/flake/agent-session/batch-output.ts");
+		const script = `import { BatchOutput } from ${tomlString(renderer)};
+let columns = 120, rows = 60;
+Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { get: () => columns }, rows: { get: () => rows } });
+const write = process.stdout.write.bind(process.stdout), chunks = [];
+process.stdout.write = (text) => { chunks.push(String(text)); return true; };
+const targets = Array.from({length: 40}, (_, i) => ({slug: 'session' + i, worktreePath: '/fixture/' + i}));
+const output = new BatchOutput(targets, {color: 'never'});
+output.start(); const before = chunks.at(-1);
+output.checking('session0'); output.removing('session0'); const during = chunks.at(-1);
+columns = 36; rows = 8; const start = chunks.length;
+output.checking('session1'); const resized = chunks.slice(start).join('');
+const outcomes = targets.map(target => ({...target, outcome: 'finished', reason: 'confirmed-removal'}));
+for (const outcome of outcomes) { output.checking(outcome.slug); output.removing(outcome.slug); output.complete(outcome); }
+const final = output.finish(outcomes);
+write(JSON.stringify({before, during, resized, after: chunks.slice(start).join(''), final}));`;
+		const result = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8", env: { ...process.env, TERM: "xterm-256color" } });
+		expect(result.status).toBe(0);
+		const captured = JSON.parse(result.stdout);
+		expect(captured.before.split("\n").findIndex((line: string) => line.startsWith("session30"))).toBe(captured.during.split("\n").findIndex((line: string) => line.startsWith("session30")));
+		expect(captured.during).toContain("Removing");
+		expect(/\u001b\[\d+A/.test(captured.resized)).toBe(false);
+		const moves = [...captured.after.matchAll(/\u001b\[(\d+)A/g)].map((match) => Number(match[1]));
+		expect(moves.every((height) => height <= 6)).toBe(true);
+		for (let i = 0; i < 40; i++) expect(captured.final).toContain(`session${i}\n`);
+		expect(captured.final.split("\n").every((line: string) => [...line].length < 36)).toBe(true);
+		expect(captured.final.includes("…")).toBe(false);
+	});
+
+	it("updates an approved resource live on a narrow terminal and truthfully reports already-absent replay", () => {
+		const fixture = setup();
+		try {
+			const args = [...fixture.args, "--expected", fixture.receipt, "--yes", "--color=never"];
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, ...args], "", "", { TERM: "xterm-256color", TEST_PTY_ROWS: "10", TEST_PTY_COLUMNS: "36" });
+			expect(result.status).toBe(0); expect(result.answered).toBe(false);
+			for (const word of ["Checking", "Removing", "Removed"]) expect(result.output).toContain(word);
+			expect(/\u001b\[\d+A/.test(result.output)).toBe(true);
+			const replay = runCli(fixture.checkout, args);
+			expect(replay.status).toBe(0); expect(replay.stdout).toContain("Already absent");
+			expect(replay.stdout).toContain("1 already absent");
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reports an empty approved selection without inventing resource rows", () => {
+		const fixture = setup([]);
+		try {
+			const result = runCli(fixture.checkout, [...fixture.args, "--expected", fixture.receipt, "--yes", "--color=never"]);
+			expect(result.status).toBe(0); expect(result.stdout).toContain("No approved resources");
+			expect(result.stdout).toContain("0 removed"); expect(result.stdout.includes("Waiting")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("announces apply inspection before a blocked receipt-context query", async () => {
+		const fixture = setup();
+		const release = join(fixture.root, "release"), marker = join(fixture.root, "checking");
+		try {
+			const bin = join(fixture.root, "slow-bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$*" in *'rev-parse --git-common-dir'*) touch ${tomlString(marker)}; while [ ! -f ${tomlString(release)} ]; do sleep 0.02; done ;; esac\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const child = spawn("node", [cliScript, ...fixture.args, "--expected", fixture.receipt, "--yes", "--color=never"], { cwd: fixture.checkout, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) }, stdio: ["ignore", "pipe", "pipe"] });
+			let stdout = "", stderr = ""; child.stdout.on("data", (data) => stdout += data); child.stderr.on("data", (data) => stderr += data);
+			const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+			try {
+				const deadline = Date.now() + 15000;
+				while (!existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+				expect(existsSync(marker)).toBe(true); expect(stderr).toContain("Checking approved cleanup"); expect(stdout).toBe("");
+			} finally { writeFileSync(release, "continue\n"); expect(await closed).toBe(0); }
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	function setup(slugs = ["human"]) {
+		const fixture = createRepositoryFixture();
+		if (!slugs.length) writeConfig(fixture.checkout, "true");
+		for (const slug of slugs) { startManagedSession(fixture, slug); backdateSession(fixture, slug); }
+		const args = ["batch", "finish", "--inactive-for", "7d"];
+		const preview = runCli(fixture.checkout, [...args, "--dry-run", "--json"]);
+		if (preview.status !== 0) throw new Error(preview.stderr);
+		return { ...fixture, args, receipt: JSON.parse(preview.stdout).receipt };
+	}
+
+	it("shows mixed confirmed, refused and uncertain outcomes and retains original native failure evidence", () => {
+		const fixture = setup(["a-removed", "b-refused", "c-uncertain"]);
+		try {
+			const dirty = join(realpathSync(fixture.worktrees), "b-refused"), uncertain = join(realpathSync(fixture.worktrees), "c-uncertain");
+			writeFileSync(join(dirty, "README.md"), "keep local edits\n");
+			const bin = join(fixture.root, "native-bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ] && [ "$4" = ${tomlString(uncertain)} ]; then rm "$4/README.md"; printf 'fixture stdout evidence\\n'; printf 'fixture native removal failed https://demo:secret@example.invalid/path\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, [...fixture.args, "--expected", fixture.receipt, "--yes", "--color=never"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(1);
+			for (const word of ["Removed", "Refused", "Uncertain", "1 removed", "1 refused", "1 uncertain"]) expect(result.stdout).toContain(word);
+			expect(result.stderr.split("fixture native removal failed").length).toBe(2);
+			expect(result.stderr).toContain("fixture stdout evidence");
+			expect(result.stderr.includes("secret")).toBe(false);
+			expect(existsSync(join(fixture.worktrees, "a-removed"))).toBe(false);
+			expect(existsSync(dirty)).toBe(true); expect(existsSync(uncertain)).toBe(true);
+			expect(existsSync(join(uncertain, "README.md"))).toBe(false);
+			for (const slug of ["a-removed", "b-refused", "c-uncertain"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps the JSON apply envelope and structured events unstyled even with verbose forced colour", () => {
+		const fixture = setup();
+		try {
+			const result = runCli(fixture.checkout, [...fixture.args, "--expected", fixture.receipt, "--yes", "--json", "--verbose", "--color=always"]);
+			expect(result.status).toBe(0);
+			expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+			const value = JSON.parse(result.stdout);
+			expect(Object.keys(value).sort().join(",")).toBe("branchesModified,command,dryRun,keepBranch,partial,remoteAssetsModified,resources,success,version");
+			expect(value.resources[0].outcome).toBe("finished");
+			expect(value.keepBranch).toBe(true); expect(value.branchesModified).toBe(false);
+			const events = result.stderr.trim().split("\n").map((line: string) => JSON.parse(line));
+			expect(events.every((event: { type: string }) => event.type === "progress")).toBe(true);
+			expect(events.map((event: { phase: string; status: string }) => `${event.phase}:${event.status}`).join(",")).toContain("apply:human:started");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("finishes an approved inactive resource with a plain state table and counts, preserving its branch", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const { worktree } = startManagedSession(fixture, "human");
+			backdateSession(fixture, "human");
+			const args = ["batch", "finish", "--inactive-for", "7d"];
+			const preview = runCli(fixture.checkout, [...args, "--dry-run", "--json"]);
+			expect(preview.status).toBe(0);
+			const approved = JSON.parse(preview.stdout);
+			expect(approved.resources.find((resource: { slug: string }) => resource.slug === "human").reason).toBe("eligible");
+			const result = runCli(fixture.checkout, [...args, "--expected", approved.receipt, "--yes", "--color=never"]);
+			expect(result.status).toBe(0);
+			for (const word of ["SESSION", "STATE", "human", "Removed", "1 removed"]) expect(result.stdout).toContain(word);
+			expect(result.stdout.includes(approved.receipt)).toBe(false);
+			expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+			for (const noise of ["STARTED", "COMPLETED"]) expect(result.stderr.includes(noise)).toBe(false);
+			expect(existsSync(worktree)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("guarded inactive batch finish", () => {
 	it("finishes only unchanged preview candidates, preserves branches and replays confirmed absence", () => {
 		const fixture = createRepositoryFixture();

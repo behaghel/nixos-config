@@ -381,6 +381,12 @@ review that fresh preview before authorizing its exact selection. Never use a
 truncated display token as approval. Batch receipts are top-level `receipt`, not
 `plan.receipt`. Apply with the same
 window/exclusions, `--expected <receipt> --yes --json`, only after approval.
+Providers advertising `preview/apply state output` also support human apply
+rows and durable outcome counts; `--verbose` exposes approved paths/checks.
+This is presentation only: `Removing` is not proof of removal, and `Uncertain`
+is not permission to repeat an effect. JSON schemas, receipts, approval and branch
+preservation are unchanged. Pipes stay append-only; opting into colour never
+authorizes cursor controls.
 Age alone is not disposability; preserve live, dirty, unapproved ignored-data and
 unresolved resources. Do not infer eligibility from a case/PR label or update consumer history.
 

@@ -9,7 +9,8 @@ import {
 	assertConfiguredWorktreePath, discoverManagedWorktrees, loadConfig,
 	metadataPath, metadataSlugs, readMetadata, validateSlug, withOperationLock, inspectActiveOperation,
 } from "./sessions.ts";
-import { CliError, progressReporter, run, writeCommandResult } from "./runtime.ts";
+import { CliError, progressReporter, run, withInspection, writeCommandResult, type InspectionProgress } from "./runtime.ts";
+import { BatchOutput } from "./batch-output.ts";
 import { BatchPreview } from "./batch-preview.ts";
 import type { BatchFinishOptions, ProgressReporter, SessionMetadata } from "./types.ts";
 
@@ -423,6 +424,7 @@ export function completeRemoval(root: string, target: Target, reconciled: boolea
 }
 
 export function batchFinish(root: string, invocationRoot: string, options: BatchFinishOptions): number {
+	if (!options.dryRun) return withInspection("Checking approved cleanup", options.json, options, (progress) => applyBatch(root, invocationRoot, options, progress));
 	const report = progressReporter("batch finish", options.json, options.dryRun);
 	if (options.dryRun) {
 		const observedAt = new Date().toISOString();
@@ -488,7 +490,15 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 		}, options.json, display?.finish() ?? "");
 		return 0;
 	}
+	return 0;
+}
+
+function applyBatch(root: string, invocationRoot: string, options: BatchFinishOptions, progress: InspectionProgress): number {
+	if (options.verbose) progress.flush();
+	const report: ProgressReporter = options.json || options.verbose ? progressReporter("batch finish", options.json) : () => {};
 	const receipt = decodeReceipt(root, options);
+	const display = options.json ? undefined : new BatchOutput(receipt.targets, options);
+	progress.flush(); display?.start();
 	let resources: Outcome[];
 	try {
 		resources = withOperationLock(root, "batch finish", () => {
@@ -498,6 +508,7 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 			return receipt.targets.map((target): Outcome => {
 				const base = { slug: target.slug, worktreePath: target.worktreePath };
 				report(`apply:${target.slug}`, "started");
+				display?.checking(target.slug);
 				const operate = (): Outcome => {
 					try {
 						const context = snapshotExactResources(root);
@@ -511,13 +522,15 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 						if (candidate.reason !== "eligible") return { ...base, outcome: "refused", reason: candidate.reason, problem: candidate.problem, inspection };
 						if (candidate.snapshot?.fingerprint !== target.fingerprint || candidate.worktreePath !== target.worktreePath) return { ...base, outcome: "refused", reason: "changed-since-preview", inspection };
 						journal.start(target);
+						display?.removing(target.slug);
 						const removed = run("git", ["worktree", "remove", "--", target.worktreePath], root);
-						if (removed.status !== 0) return { ...base, outcome: "uncertain", reason: "native-removal-unconfirmed", problem: removed.stderr };
+						if (removed.status !== 0) return { ...base, outcome: "uncertain", reason: "native-removal-unconfirmed", problem: [removed.stdout, removed.stderr, removed.errorCode].filter(Boolean).join("\n") };
 						return completeRemoval(root, target, false);
 					} catch (error) { return { ...base, outcome: "uncertain", reason: "inspection-or-cleanup-failed", problem: String(error) }; }
 				};
 				const outcome = operate();
 				report(`apply:${target.slug}`, outcome.outcome === "refused" ? "skipped" : outcome.outcome === "uncertain" ? "failed" : "completed", outcome.reason);
+				display?.complete(outcome);
 				return outcome;
 			});
 		});
@@ -528,6 +541,6 @@ export function batchFinish(root: string, invocationRoot: string, options: Batch
 	const partial = !success && resources.some((resource) => ["finished", "absent"].includes(resource.outcome));
 	writeCommandResult({ version: 1, command: "batch finish", dryRun: false, keepBranch: true,
 		branchesModified: false, remoteAssetsModified: false, success, partial, resources }, options.json,
-		`${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})`).join("\n")}\n`);
+		display?.finish(resources) ?? "");
 	return success ? 0 : 1;
 }
