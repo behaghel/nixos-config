@@ -287,12 +287,29 @@ On providers whose usage explicitly documents personal colour defaults, the
 optional file is `$XDG_CONFIG_HOME/agent-session/config.json`, falling back to
 `~/.config/agent-session/config.json`; relative XDG paths are ignored. It accepts
 `color: auto|always|never`. Explicit colour flags override it, and only an explicit
-`--color=always` overrides nonempty `NO_COLOR`. JSON and protocol output ignore
-the file. Do not infer this capability from older colour flags alone, write a
+`--color=always` overrides nonempty `NO_COLOR`. JSON ignores colour preferences;
+protocol output is unchanged. Do not infer this capability from older colour flags alone, write a
 user's personal file without permission, or put force/consent/project policy in
-it. Malformed settings stop normal presentation commands; explicit colour flags
-can bypass the file for diagnosis. These colour preferences do not authorize
+it. Malformed settings stop normal preference consumers; explicit colour and
+branch flags can bypass their respective defaults for diagnosis. Colour preferences do not authorize
 branch deletion or retirement.
+
+On versions advertising `--delete-branches`, built-in cleanup preserves branches.
+That flag requests only the selected mode's existing eligible-deletion path;
+`--keep-branch` always wins, even if both flags are present. Every automated
+`finish --yes` must explicitly choose a branch disposition, and receipt-based
+single/tree apply still requires `--keep-branch`. Older providers can have a
+destructive default, so retain explicit preservation flags in portable automation.
+
+The same personal file can contain `branches: preserve|delete` on providers
+whose usage documents interactive branch defaults. It affects reviewed single,
+session-tree and historical-mode previews/terminal proposals, never automated
+apply, repository-wide bulk defaults or inactive-batch deletion authority.
+Scope previews may consult it even with JSON; explicit branch flags override it.
+A personal request is not an agent's separate permission to delete: agents still
+preserve branches unless the user explicitly authorizes that exact deletion.
+Neither force nor consent can be enabled in the file. Unrecorded and inactive
+cleanup preserve all branches; explicit deletion requests there are unsupported.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 
@@ -300,8 +317,10 @@ On versions supporting historical branch review, a human operator can run
 `as <task-slug> finish --branches`. It selects one recorded worktree and candidate
 local branches from its saved initial/current branch, recorded creations and
 retained checkout history, not descendant sessions. The operator reviews the
-current refs, optionally approves eligible local deletion (default No), then
-confirms the final removal plan (default No). `--keep-branch` skips deletion.
+current refs and confirms the final removal plan (default No). On versions with
+`--delete-branches`, deletion is requested by that flag or an effective personal
+preference before the single approval; otherwise older providers may ask a
+separate default-No branch question. `--keep-branch` skips deletion.
 This is explicit branch-selection authority, not ownership inferred from history.
 Expired reflogs mean discovery is not guaranteed exhaustive. Legacy ancestry and
 an unclaimed current branch need no fabricated ownership mapping in this mode;
@@ -313,9 +332,11 @@ scope is refused; interrupted or partial cleanup requires inspection, not force.
 never synthesize terminal consent for a real worktree; use the human handoff.
 
 On versions supporting interactive recursive finish, a human operator can run
-`as <task-slug> finish --all`, review the selected tree, choose whether to delete
-eligible local branches (default No), then confirm the final plan (default No).
-`--keep-branch` skips the branch question. Only verified exclusively owned tips
+`as <task-slug> finish --all` and confirm the exact final plan (default No).
+On versions with `--delete-branches`, preservation is the built-in default;
+that flag or an effective personal preference requests eligible deletion before
+one final approval, and `--keep-branch` overrides it. Older providers may instead
+ask a separate branch question; follow their verified interface. Only verified exclusively owned tips
 merged by ancestry into the displayed local default/base branch qualify; unmerged,
 unclaimed or externally checked-out branches are preserved with reasons. Shared
 claims block cleanup. Branch deletion follows successful removal of the entire

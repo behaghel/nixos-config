@@ -176,15 +176,15 @@ as my-task finish --branches --keep-branch   # remove worktree, preserve refs
 Checkout history is candidate-discovery evidence, **not proof of ownership**.
 Reflogs may expire, branches may be renamed or recreated, and deleted refs may
 appear in the list. The preview reports this limitation, candidate sources and
-current tips. Undecided eligible candidates are labeled `branch:`; the final
-plan uses `delete:` or `preserve:` after the operator chooses. Branches blocked
+current tips. Previews and the final plan use `delete:` or `preserve:` according
+to the effective branch request; preservation is the built-in default. Branches blocked
 from deletion are always labeled `preserve:` with their reason. The preview
 never promises exhaustive history or silently adopts branches.
 
-The operator first reviews the candidate branches, then optionally approves
-local deletion (default No), explicitly including branches without recorded
-ownership. The final plan states what will be removed and asks for confirmation
-(default No). `--keep-branch` skips the deletion question. Non-terminal removal,
+The operator requests eligible deletion with `--delete-branches` or a personal
+interactive preference, explicitly including candidates without recorded ownership
+in this mode. The final plan states what will be removed and asks once for
+confirmation (default No). `--keep-branch` overrides every deletion request. Non-terminal removal,
 `--yes`, `--expected`, `--force`, `--all` and `--gone` cannot be combined with this
 mode. `--json` is available only for read-only previews, not as an apply receipt.
 
@@ -241,13 +241,14 @@ Interactive recursive cleanup needs no receipt to copy:
 ```sh
 as parent finish --all
 # Review the selected tree and eligible/preserved branches.
-# Also delete eligible local branches? [y/N]
+# Branches are preserved by default; --delete-branches requests eligible deletion.
 # Review the final removal plan.
 # Remove these local session assets? [y/N]
 ```
 
-The branch question defaults to preserving all branches. `--keep-branch` skips
-that question. The final confirmation defaults to cancellation; empty input,
+There is no separate branch question: `--delete-branches` or the effective
+personal preference requests eligible deletion, and `--keep-branch` always wins.
+The final confirmation defaults to cancellation; empty input,
 EOF and failed confirmation never approve removal. Non-terminal calls cannot
 use this interactive path, and `--yes` alone does not replace receipt approval.
 
@@ -282,7 +283,7 @@ as parent finish --all --keep-branch --expected <receipt> --yes --json
 
 A fully resolved metadata-v3 tree with no blockers receives a top-level
 `receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no
-execution receipt is issued. Preview without `--keep-branch` remains available
+execution receipt is issued. Preview with `--delete-branches` remains available
 for inspection. Automated recursive branch deletion and recursive `--force`
 are not supported.
 Single-session and inactive-batch receipts cannot authorize a recursive finish.
@@ -404,32 +405,50 @@ its generated completion source and CLI help explain the distinction without
 inserting description text into commands. Fish registration replaces stale
 assembler completions for the installed `as` alias.
 
-## Personal colour preferences
+## Personal defaults and branch disposition
 
-Commands advertising `--color` read optional personal defaults from
+Optional personal defaults are read from
 `$XDG_CONFIG_HOME/agent-session/config.json`, or
 `~/.config/agent-session/config.json` when XDG is unset, empty or relative.
 No project-level override is searched. The file is read-only to the CLI and
-currently supports one optional key:
+supports two optional keys:
 
 ```json
 {
-  "color": "auto"
+  "color": "auto",
+  "branches": "preserve"
 }
 ```
 
-Values are `auto`, `always` and `never`; an absent file or key defaults to `auto`.
+Colour values are `auto`, `always` and `never`; an absent colour key defaults to `auto`.
 Explicit `--color` flags override the file. Nonempty `NO_COLOR` suppresses personal
 colour settings, including configured `always`; only explicit `--color=always`
 opts back in. Configured `always` can colour redirected human output when
 `NO_COLOR` is empty. Colour never changes state words or cleanup scope.
 
-JSON and completion/protocol output do not consult this presentation file.
-Malformed JSON, invalid types, unsupported settings and unreadable files stop
-ordinary presentation commands before work, without printing file contents.
-An explicit `--color` flag bypasses the file, allowing diagnosis while it is
-being corrected. This file cannot configure verbosity, branch deletion, force,
-consent, project policy or agent/child commands.
+Branch values are `preserve` (the built-in default) and `delete` (a request for
+eligible deletion, not consent). Personal branch requests apply to single-session,
+recorded session-tree and historical-review previews and interactive cleanup.
+Repository-wide `--all`/`--gone` and inactive batches do not inherit them; use
+explicit branch flags where the selected mode already supports deletion.
+`--keep-branch` overrides both `--delete-branches` and the personal setting,
+regardless of argument order. Existing ownership, publication/ancestry, process,
+artifact, binding and native checks still apply; an ineligible request may refuse
+cleanup rather than weaken a guard.
+
+Every automated `finish --yes` must state `--keep-branch` or `--delete-branches`.
+Automation never inherits personal branch defaults. Receipt-based single/tree
+apply still requires explicit `--keep-branch`; no automated guarded-deletion
+protocol is added. Unrecorded cleanup and inactive batches always preserve refs;
+`--delete-branches` cannot expand their authority.
+
+JSON ignores colour preferences. Scope previews can reflect personal branch
+requests unless flags explicitly choose a disposition. Completion, `cd`, `run`
+and other protocol output do not consult these settings. Malformed JSON, invalid
+types, unsupported settings and unreadable files stop normal preference consumers
+before work, without printing file contents. Explicit colour and branch flags
+bypass their respective defaults for diagnosis. This file cannot configure
+verbosity, force, consent, project policy or agent/child commands.
 
 ## Human inspection output
 
@@ -486,8 +505,8 @@ removals and unattempted actions remain distinct after partial cleanup.
 
 Ordinary human previews end with `Nothing changed`, without receipt tokens or
 replay hints. Supported automation still reads the unchanged full JSON plan and
-receipt from `--dry-run --json`. These presentation controls do not change branch
-defaults, deletion eligibility, force semantics or consent.
+receipt from `--dry-run --json`. Presentation does not change deletion eligibility, force semantics or consent;
+branch defaults and explicit requests are described above.
 
 ## Recorded-binding inventory
 
@@ -716,8 +735,9 @@ It inspects the target, shows the exact worktree, branch disposition and approve
 artifact roots, and asks once. The CLI binds that observation internally; there
 is no receipt to copy. It rechecks after confirmation and refuses changed
 metadata, commits, policy or artifact evidence. No/empty input/EOF cancels without
-removal. Without `--keep-branch`, the existing branch-deletion checks and
-confirmation still apply; this flow does not change branch disposition defaults.
+removal. Built-in behaviour preserves branches. `--delete-branches` or a personal
+interactive request selects the existing eligible-deletion path; `--keep-branch`
+always overrides it. The selected disposition is shown before final approval.
 
 For automation, use the existing branch-preserving receipt workflow:
 
@@ -732,8 +752,8 @@ The first response provides `plan.receipt` and
 replay hints. `--json` remains one machine-readable result with the complete
 receipt; public automation receipts still require `--keep-branch`.
 
-Direct `finish --yes`, even from a terminal or with `--keep-branch`, refuses
-approved artifacts without a matching receipt. Piped stdin does not confer human
+Direct `finish --yes` requires an explicit branch flag, even on a terminal.
+Approved artifacts still require a matching receipt with explicit `--keep-branch`. Piped stdin does not confer human
 approval. Legacy bulk finish cannot use one global confirmation to authorize
 artifact disposal and still skips/refuses it; use single-session approval or
 inactive-batch preview/apply instead. Inactive batch requires its selection
@@ -1015,6 +1035,8 @@ never enable this path. Use the explicit slug: `.` cannot identify an unrecorded
 session.
 
 **All branches are preserved**, regardless of whether `--keep-branch` was passed.
+`--delete-branches` is rejected for unrecorded cleanup; a personal deletion
+preference cannot supply missing ownership authority.
 No branch ownership is inferred, no session record is created or removed, and no
 remote is contacted. Force discards the worktree's uncommitted and ignored local
 files; verify ownership, active use and needed local data before confirming.
