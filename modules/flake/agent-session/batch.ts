@@ -196,6 +196,22 @@ export function captureProcesses(): ProcessSnapshot {
 	catch (error) { return { observedAt, entries: [], problem: String(error) }; }
 }
 
+// Shared by batch and single-session non-forced cleanup. Every unsettled
+// operation blocks: PID absence means interruption, not successful completion.
+export function inspectWorktreeActivity(metadata: SessionMetadata, snapshot = captureProcesses()) {
+	const blockers: Candidate["blockers"] = [];
+	const operations = (metadata.activeOperations ?? []).map((operation) => {
+		const observation = inspectActiveOperation(operation);
+		blockers.push({ reason: observation.state === "live" ? "live-operation" : "uncertain-operation",
+			problem: `Managed operation ${operation.id} (pid ${operation.pid}, ${operation.hostname}): ${observation.state}${observation.problem ? ` (${observation.problem})` : ""}${observation.state === "interrupted" ? `; review with ${sessionCommand(metadata.slug, "activity reconcile")}` : ""}` });
+		return { ...operation, ...observation };
+	});
+	const pids = snapshot.entries.filter((entry) => entry.path === metadata.worktreePath || entry.path.startsWith(`${metadata.worktreePath}/`)).map((entry) => entry.pid);
+	if (snapshot.problem) blockers.push({ reason: "unknown-process-evidence", problem: snapshot.problem });
+	if (pids.length) blockers.push({ reason: "live-cwd" });
+	return { snapshot, operations, pids, blockers };
+}
+
 function workingChanges(worktree: string) {
 	const fields = gitRaw(worktree, ["--no-optional-locks", "status", "--porcelain=v1", "-z", "--untracked-files=all"]).split("\0");
 	const changes: { status: string; path: string; originalPath?: string }[] = [];
@@ -276,11 +292,6 @@ export function inspectCandidate(root: string, invocationRoot: string, slug: str
 			candidate.git.clean = changes.length === 0; candidate.git.changes = changes;
 			if (changes.length) block("dirty");
 		} catch (error) { candidate.inspectionComplete = false; block("unresolved-evidence", `Working-tree status unavailable: ${String(error)}`); }
-		const operations = (metadata.activeOperations ?? []).map((operation) => {
-			const observation = inspectActiveOperation(operation);
-			block(observation.state === "live" ? "live-operation" : "uncertain-operation", `Managed operation ${operation.id} (pid ${operation.pid}, ${operation.hostname}): ${observation.state}${observation.problem ? ` (${observation.problem})` : ""}${observation.state === "interrupted" ? `; review with ${sessionCommand(slug, "activity reconcile")}` : ""}`);
-			return { ...operation, ...observation };
-		});
 		candidate.activity = requireInactivity ? listedActivity(root, metadata, now, options.inactiveMs, sharedContext)
 			: latestObservedWork(metadata, status.ownedBranches, now, options.inactiveMs);
 		if (!candidate.activity.complete) { candidate.inspectionComplete = false; block("unknown-activity", candidate.activity.problems.join("; ")); }
@@ -300,11 +311,10 @@ export function inspectCandidate(root: string, invocationRoot: string, slug: str
 		} catch (error) { candidate.inspectionComplete = false; block("unresolved-evidence", `Native worktree evidence unavailable: ${String(error)}`); }
 		// Preview shares one observed process catalogue. Apply captures a fresh
 		// one here, after potentially expensive metadata work, for each target.
-		const processSnapshot = processes ?? captureProcesses();
-		const live = processSnapshot.entries.filter((entry) => entry.path === metadata.worktreePath || entry.path.startsWith(`${metadata.worktreePath}/`));
-		candidate.processEvidence = { observedAt: processSnapshot.observedAt, source: processes ? "preview-snapshot" : "apply-recheck", pids: live.map((entry) => entry.pid), operations, ...(processSnapshot.problem ? { problem: processSnapshot.problem } : {}) };
-		if (processSnapshot.problem) { candidate.inspectionComplete = false; block("unknown-process-evidence", processSnapshot.problem); }
-		if (live.length) block("live-cwd");
+		const activity = inspectWorktreeActivity(metadata, processes);
+		candidate.processEvidence = { observedAt: activity.snapshot.observedAt, source: processes ? "preview-snapshot" : "apply-recheck", pids: activity.pids, operations: activity.operations, ...(activity.snapshot.problem ? { problem: activity.snapshot.problem } : {}) };
+		if (activity.snapshot.problem) candidate.inspectionComplete = false;
+		for (const blocker of activity.blockers) block(blocker.reason, blocker.problem);
 		if (!candidate.blockers.length) {
 			const branches = Object.fromEntries([...new Set([...status.ownedBranches, status.currentBranch!])].sort()
 				.map((branch) => [branch, git(root, ["rev-parse", "--verify", `refs/heads/${branch}`])]));

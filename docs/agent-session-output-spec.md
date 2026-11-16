@@ -139,6 +139,15 @@ migration error, while inspection JSON payload shapes remain unchanged.
   explicitly escaped session named `status` remains usable. Live and exact
   inspection retain their previous JSON payload schemas at the new entrypoint.
 
+- AC-17: Non-forced single-session cleanup refuses live, interrupted, foreign-host
+  and unknown managed operations, incomplete same-user cwd observations, and
+  processes inside the selected worktree or its descendants. Preview emits no
+  approval receipt while activity is blocked. Apply checks before approval and
+  freshly after approval/revalidation, immediately before native removal;
+  `--yes` and an earlier receipt do not waive this check. Refusal preserves
+  resources and recorded operations without acknowledging or killing anything.
+  The probe does not claim to detect remote work or editors whose cwd is elsewhere.
+
 ## Invariants
 
 - Existing JSON envelopes, fields, receipts and structured progress events remain
@@ -186,6 +195,7 @@ the agreed settings or authority boundaries.
 | AC-11–12 | Isolate HOME/XDG settings; test flag precedence, interactive preferences, automation independence and unsupported deletion modes. | Yes |
 | AC-13 | Verify previews do not mutate or prompt; human output excludes receipt tokens while JSON retains valid receipts. | Yes |
 | AC-14–16 | Command-family coverage including empty/error cases, help/completions, child passthrough, cheap versus live inventory, scoped/exact selectors and retired-command migration/refusal. | Yes |
+| AC-17 | Clean-worktree fixtures with managed operations, failed/partial probes, a real nested-cwd worker, post-confirmation activity and receipt/apply races; verify byte-identical records and retained resources. | Yes |
 | Invariants | Existing provider/template regression suite and flake checks, plus receipt, refusal and interruption regressions. | Yes |
 
 Terminal appearance and live updates also require human acceptance; captured

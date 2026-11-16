@@ -110,7 +110,16 @@ project pin alone does not update personal Pi resources.
 Managed launch/resume/run records start and normal completion. An abrupt stop may
 leave `activeOperations` entries whose recorded process is absent. Those entries
 remain uncertain activity, not proof that a job or its side effects completed.
-Cleanup refuses them; polling and `doctor` never silently erase them.
+Non-forced cleanup refuses them; polling and `doctor` never silently erase them.
+Single-session `finish` and its preview use the same managed-operation and
+same-user cwd inspection as batch cleanup. Clean Git state alone is not enough:
+processes in the worktree or any nested directory block removal, and incomplete
+process evidence is a refusal rather than an assumption of inactivity. Apply
+rechecks after confirmation and expensive validation, immediately before native
+removal; `--yes` and earlier receipts cannot waive the check. Blocked previews
+emit no approval receipt. Operations and resources are retained without killing
+processes or acknowledging interruptions. This does not detect every editor,
+detached job or remote writer, and does not change explicit force semantics.
 
 ```sh
 # From the primary checkout or another worktree, not inside my-task:

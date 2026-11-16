@@ -2736,6 +2736,12 @@ try:
                     record['activeOperations'].append({**record['activeOperations'][0], 'id': 'new-operation'})
                     with open(sys.argv[5], 'w') as data:
                         json.dump(record, data)
+                elif mutation == 'start-operation':
+                    with open(sys.argv[5]) as data:
+                        record = json.load(data)
+                    record.setdefault('activeOperations', []).append({'id': 'late-operation', 'pid': os.getpid(), 'hostname': os.uname().nodename, 'startedAt': '2026-01-01T00:00:00Z'})
+                    with open(sys.argv[5], 'w') as data:
+                        json.dump(record, data)
                 elif mutation == 'cwd-probe':
                     probe = os.path.join(os.environ['PATH'].split(os.pathsep)[0], 'lsof')
                     with open(probe, 'w') as data:
@@ -2781,6 +2787,124 @@ function createHumanFinishFixture() {
 	writeFileSync(join(worktree, ".cache", "tasks.sqlite"), "approved whole subtree\n");
 	return { ...fixture, worktree };
 }
+
+describe("single-session finish activity safeguards", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-single-activity-");
+		writeConfig(fixture.checkout, "true");
+		const created = runCli(fixture.checkout, ["human", "create", "--json"]);
+		if (created.status !== 0) throw new Error(created.stderr);
+		const metadata = JSON.parse(created.stdout).session;
+		const record = sessionMetadataPath(fixture.checkout, "human");
+		const bin = join(fixture.root, "activity-bin"); mkdirSync(bin);
+		const lsof = join(bin, "lsof");
+		writeFileSync(lsof, "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+		return { ...fixture, metadata, record, lsof, environment: { PATH: `${bin}:${process.env.PATH}` } };
+	}
+
+	for (const state of ["live", "interrupted", "foreign-host", "unknown"]) {
+		it(`refuses clean worktrees with ${state} managed activity in preview and apply without changing records`, () => {
+			const fixture = setup();
+			try {
+				const absent = Number(spawnSync("node", ["-e", "process.stdout.write(String(process.pid))"], { encoding: "utf8" }).stdout);
+				const operation = { id: "unsettled-work", pid: state === "live" ? process.pid : absent, hostname: state === "foreign-host" ? `${hostname()}-other` : hostname(), startedAt: fixture.metadata.createdAt };
+				fixture.metadata.activeOperations = [operation];
+				writeFileSync(fixture.record, JSON.stringify(fixture.metadata));
+				const env = { ...fixture.environment };
+				if (state === "unknown") {
+					const preload = join(fixture.root, "unknown-pid.mjs");
+					writeFileSync(preload, `const original = process.kill; process.kill = (pid, signal) => { if (pid === ${operation.pid} && signal === 0) throw Object.assign(new Error('fixture EPERM'), { code: 'EPERM' }); return original(pid, signal); };\n`);
+					Object.assign(env, { NODE_OPTIONS: `--import=${preload}` });
+				}
+				const before = readFileSync(fixture.record, "utf8");
+				for (const flags of [["--dry-run", "--json"], ["--yes"]]) {
+					const result = runCli(fixture.checkout, ["human", "finish", "--keep-branch", ...flags], env);
+					expect(result.status).toBe(1);
+					expect(result.stderr).toContain("Managed operation unsettled-work");
+					expect(result.stderr).toContain(state);
+					expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+					expect(readFileSync(fixture.record, "utf8")).toBe(before);
+					expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+				}
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	for (const probe of ["exit 1", "printf 'p123\\000'", "printf ''", "printf 'p1\\000fcwd\\000n/\\000\\n'; printf 'incomplete observation\\n' >&2"]) {
+		it(`refuses incomplete process evidence (${probe}) without removing a clean worktree`, () => {
+			const fixture = setup();
+			try {
+				writeFileSync(fixture.lsof, `#!/bin/sh\n${probe}\n`);
+				for (const flags of [["--dry-run", "--json"], ["--yes"]]) {
+					const result = runCli(fixture.checkout, ["human", "finish", "--keep-branch", ...flags], fixture.environment);
+					expect(result.status).toBe(1);
+					expect(result.stderr.toLowerCase()).toContain("process cwd evidence");
+					expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+					expect(existsSync(fixture.record)).toBe(true);
+				}
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("does not treat a sibling path prefix as a process inside the selected worktree", () => {
+		const fixture = setup();
+		try {
+			writeFileSync(fixture.lsof, `#!/bin/sh\nprintf 'p123\\000fcwd\\000n${fixture.metadata.worktreePath}-sibling\\000\\n'\n`);
+			const result = runCli(fixture.checkout, ["human", "finish", "--keep-branch", "--yes"], fixture.environment);
+			expect(result.status).toBe(0);
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("refuses an actual unmanaged process in a nested directory even when Git is clean", async () => {
+		const fixture = setup();
+		let child: ReturnType<typeof spawn> | undefined;
+		try {
+			const nested = join(fixture.metadata.worktreePath, "nested"); mkdirSync(nested);
+			child = spawn("node", ["-e", "console.log('ready'); setInterval(() => {}, 1000)"], { cwd: nested, stdio: ["ignore", "pipe", "ignore"] });
+			await new Promise((resolve) => child!.stdout!.once("data", resolve));
+			const result = runCli(fixture.checkout, ["human", "finish", "--keep-branch", "--yes"]);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("Processes using worktree");
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+		} finally {
+			if (child && child.exitCode === null && child.signalCode === null) {
+				const closed = new Promise((resolve) => child!.once("close", resolve));
+				child.kill(); await closed;
+			}
+			rmSync(fixture.root, { recursive: true, force: true });
+		}
+	});
+
+	for (const mutation of ["cwd-probe", "start-operation"]) {
+		it(`rechecks ${mutation} activity after terminal consent`, () => {
+			const fixture = setup();
+			try {
+				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish", "--keep-branch"], "yes\n", mutation, fixture.environment, fixture.metadata.worktreePath);
+				expect(result.answered).toBe(true);
+				expect(result.status).toBe(1);
+				expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+				expect(existsSync(fixture.record)).toBe(true);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("does not let an approved receipt waive managed activity observed before apply", () => {
+		const fixture = setup();
+		try {
+			const args = ["human", "finish", "--keep-branch"];
+			const plan = JSON.parse(runCli(fixture.checkout, [...args, "--dry-run", "--json"], fixture.environment).stdout).plan;
+			fixture.metadata.activeOperations = [{ id: "late-managed-work", pid: process.pid, hostname: hostname(), startedAt: fixture.metadata.createdAt }];
+			writeFileSync(fixture.record, JSON.stringify(fixture.metadata));
+			const result = runCli(fixture.checkout, [...args, "--expected", plan.receipt, "--yes"], fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.stderr).toContain("late-managed-work");
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+			expect(readFileSync(fixture.record, "utf8")).toBe(JSON.stringify(fixture.metadata));
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
 
 describe("human finish workflow", () => {
 	it("prints a text receipt and a complete replay command without changing the JSON receipt", () => {

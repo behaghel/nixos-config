@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { inspectTreeBranches, treeBranchSummary, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
-import { captureProcesses, inspectCandidate, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
+import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, artifactSummary, type IgnoredDataInspection } from "./artifacts.ts";
@@ -54,6 +54,15 @@ function assertNotInvokingWorktree(
 			"Cannot remove the worktree containing the current shell. Run finish from another repository worktree.",
 		);
 	}
+}
+
+function assertNoWorktreeActivity(metadata: SessionMetadata): void {
+	const activity = inspectWorktreeActivity(metadata);
+	if (!activity.blockers.length) return;
+	const problems = activity.blockers.map((blocker) => blocker.reason === "live-cwd"
+		? `Processes using worktree ${metadata.worktreePath}: ${activity.pids.join(", ")}. Leave or stop that work before cleanup.`
+		: blocker.problem ?? blocker.reason);
+	throw new CliError(`Non-forced cleanup blocked.\n${problems.join("\n")}\nNo local session assets were removed.`);
 }
 
 function previewUnrecordedFinish(root: string, invocationRoot: string, slug: string): Record<string, unknown> {
@@ -216,6 +225,7 @@ function finishUnlocked(
 	if (!status.clean) {
 		throw new CliError("Working tree is not clean.");
 	}
+	assertNoWorktreeActivity(metadata);
 	const metadataProgress = (path: string, entries: number) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`);
 	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths, metadataProgress, config.generated_links);
 	if (!ignoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(ignoredData)}`);
@@ -291,12 +301,15 @@ function finishUnlocked(
 		(expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null, currentIgnoredData).receipt !== expected)) {
 		throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
 	}
+	const currentMetadata = readMetadata(root, slug);
+	assertConfiguredWorktreePath(root, currentConfig, currentMetadata);
 	if (approval) {
-		const currentMetadata = readMetadata(root, slug);
-		assertConfiguredWorktreePath(root, currentConfig, currentMetadata);
 		const currentStatus = inspectSession(currentMetadata, defaultBranch);
 		if (finishApprovalFingerprint(root, currentMetadata, currentStatus, currentIgnoredData) !== approval) throw new CliError("Finish target changed; inspect it again before cleanup.");
 	}
+	// Managed starts are serialized by the lifecycle lock. Unmanaged writers
+	// are not: take a fresh cwd snapshot after the wait and expensive rechecks.
+	assertNoWorktreeActivity(currentMetadata);
 	report.flush?.();
 	const removed = run(
 		"git",
@@ -353,6 +366,7 @@ function previewFinish(
 		assertConfiguredWorktreePath(root, config, metadata);
 		assertNotInvokingWorktree(metadata, invocationRoot);
 		const status = inspectSession(metadata);
+		if (!force && !statusCannotOperate(status)) assertNoWorktreeActivity(metadata);
 		const ignoredData = force ? undefined : observedIgnoredData ?? inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
 			(path, entries) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`), config.generated_links);
 		const plan = {
