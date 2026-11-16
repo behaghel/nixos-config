@@ -2,9 +2,9 @@ import { existsSync, lstatSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { commonGitDirectory, git, primaryRoot, repositoryRoot } from "./git.ts";
 import { loadConfig, metadataPath, metadataSlugs, readMetadata, assertConfiguredWorktreePath, readOperationLock, inspectActiveOperation, resolveSessionTarget, resolveWorktreeRoot, sessionDirectory, validateSlug } from "./sessions.ts";
-import { run, writeCommandResult } from "./runtime.ts";
+import { run, formatStateTable, formatLines, styleText, type InspectionProgress } from "./runtime.ts";
 import { sessionCommand, unrecordedRetirementHint } from "./arguments.ts";
-import type { AgentSessionConfig, SessionMetadata } from "./types.ts";
+import type { AgentSessionConfig, SessionMetadata, PresentationOptions } from "./types.ts";
 
 interface Check {
 	id: string;
@@ -29,7 +29,7 @@ function present(path: string): boolean {
 // Only filesystem metadata and local Git topology are inspected. In particular,
 // do not reuse status inspection: git status can refresh the index or invoke a
 // configured fsmonitor. Never include raw config/metadata errors in diagnostics.
-export function doctor(target?: string, json = false): number {
+export function doctor(target?: string, json = false, options: PresentationOptions = {}, progress?: InspectionProgress): number {
 	const checks: Check[] = [];
 	const add = (id: string, status: Check["status"], message: string, session?: string, path?: string, code?: string) =>
 		checks.push({ id, status, message, ...(session ? { slug: session } : {}), ...(path ? { path } : {}), ...(code ? { code } : {}) });
@@ -118,6 +118,7 @@ export function doctor(target?: string, json = false): number {
 				registered.set(candidate, lines.find((line) => line.startsWith("branch refs/heads/"))?.slice("branch refs/heads/".length));
 			}
 			for (const candidate of slug ? [slug] : [...candidates].sort()) {
+				progress?.update(`Checking ${candidate}`);
 				try { validateSlug(candidate); } catch {
 					add("binding", "error", "A metadata filename or managed worktree slot has an invalid slug. Inspect local state manually.");
 					continue;
@@ -188,9 +189,47 @@ export function doctor(target?: string, json = false): number {
 	}
 	const ok = !checks.some((check) => check.status === "error");
 	const result = { version: 1, command: "doctor", ok, ...(slug ? { slug } : {}), checks };
-	const text = `Doctor: ${ok ? "no errors" : "errors found"}\n` + checks.map((check) =>
-		`${check.status.toUpperCase()} ${check.id}${check.slug ? ` [${check.slug}]` : ""}${check.path ? ` (${check.path})` : ""}: ${check.message}\n`,
-	).join("");
-	writeCommandResult(result, json, text);
+	progress?.flush();
+	if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
+	else {
+		const errors = checks.filter((check) => check.status === "error").length;
+		const warnings = checks.filter((check) => check.status === "warning").length;
+		const passes = checks.filter((check) => check.status === "ok").length;
+		const findings = options.verbose ? checks : checks.filter((check) => ["error", "warning"].includes(check.status));
+		const labels: Record<string, string> = {
+			configuration: "Configuration", "shell-artifacts": "Shell integration", "completion-artifacts": "Completions",
+			"shell-parent": "Parent shell", repository: "Repository", lock: "Lifecycle lock", "worktree-root": "Worktree root",
+			binding: "Session binding", activity: "Activity", "activity-history": "Activity history", "local-link": "Local link", sessions: "Sessions",
+		};
+		const reasons: Record<string, string> = {
+			"metadata-missing": "Record missing; review repair", "metadata-missing-renamed": "Record missing; manual review needed",
+			"metadata-invalid": "Invalid record; inspect or restore manually", "metadata-path-mismatch": "Recorded location differs; inspect manually",
+			"worktree-missing": "Worktree missing; inspect location", "git-binding-invalid": "Git registration differs; inspect manually",
+			"session-unknown": "Session unknown; check the name", "activity-interrupted": "Interrupted operation; review reconciliation",
+			"activity-foreign-host": "Operation on another host; inspect there", "activity-unknown": "Operation uncertain; inspect manually",
+		};
+		const reason = (check: Check) => {
+			if (options.verbose) return check.message;
+			if (check.code && reasons[check.code]) return reasons[check.code];
+			if (check.id === "local-link") return "Link missing or conflicting; inspect manually";
+			if (check.id === "lock") return "Lock needs review; verify its owning process";
+			return check.message.split(/\.\s/)[0];
+		};
+		const colour = (check: Check) => check.status === "error" ? 31 : check.status === "warning" ? 33 : check.status === "ok" ? 32 : 2;
+		const state = (check: Check) => check.status === "ok" ? "Pass" : check.status[0].toUpperCase() + check.status.slice(1);
+		const rows: { cells: string[]; check: Check; count: number }[] = [];
+		const grouped = new Map<string, typeof rows[number]>();
+		for (const check of findings) {
+			const cells = [check.slug ?? "Project", (labels[check.id] ?? check.id) + (check.path ? ` (${check.path})` : ""), state(check), reason(check)];
+			const key = JSON.stringify(cells), previous = options.verbose ? undefined : grouped.get(key);
+			if (previous) previous.count++;
+			else { const row = { cells, check, count: 1 }; rows.push(row); grouped.set(key, row); }
+		}
+		process.stdout.write(formatLines([styleText(`Doctor · ${ok ? warnings ? "warnings found" : "no errors" : "needs attention"}`, errors ? 31 : warnings ? 33 : 32, options.color)]));
+		if (rows.length) process.stdout.write("\n" + formatStateTable(["SESSION", "CHECK", "STATE", "REASON"], rows.map(({ cells, count }) =>
+			[cells[0], cells[1] + (count > 1 ? ` ×${count}` : ""), ...cells.slice(2)]),
+			options, (row, column) => column === 2 ? colour(rows[row].check) : column === 0 ? 1 : undefined));
+		process.stdout.write(formatLines([...(findings.length ? [""] : []), `${errors} error${errors === 1 ? "" : "s"} · ${warnings} warning${warnings === 1 ? "" : "s"} · ${passes} checks passed`]));
+	}
 	return ok ? 0 : 1;
 }

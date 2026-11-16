@@ -1,7 +1,7 @@
 import { CliError } from "./runtime.ts";
 import { validateSlug } from "./sessions.ts";
 import { parsePullRequestSelection } from "./github.ts";
-import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions } from "./types.ts";
+import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions, PresentationOptions } from "./types.ts";
 
 export const commandNames = [
 	"cd",
@@ -13,7 +13,6 @@ export const commandNames = [
 	"launch",
 	"start",
 	"resume",
-	"status",
 	"list",
 	"batch",
 	"doctor",
@@ -22,12 +21,23 @@ export const commandNames = [
 	"completion",
 ];
 
-export const sessionCommandNames = commandNames.filter((name) => !["completion", "list", "batch"].includes(name));
-export const globalCommandNames = ["status", "list", "batch", "doctor", "completion", "finish"];
+export const sessionCommandNames = commandNames.filter((name) => !["completion", "batch"].includes(name));
+export const globalCommandNames = ["list", "batch", "doctor", "completion", "finish"];
+
+// Retired command words stay reserved: never reinterpret an old invocation as
+// authority to create, enter or remove a same-named session.
+export function isCommandWord(value: string): boolean {
+	return commandNames.includes(value) || value === "status";
+}
+
+function retiredStatus(slug?: string): CliError {
+	const replacement = slug ? sessionCommand(slug, "list --inspect") : "agent-session list --inspect";
+	return argumentError(`'status' has been removed. Use: ${replacement}. Existing inspection flags follow --inspect. To address a session named status, use: agent-session -- status <command>.`);
+}
 export const currentSessionCommandNames = sessionCommandNames.filter((name) => !["create", "start", "repair"].includes(name));
 
 export function sessionCommand(slug: string, command: string): string {
-	return `agent-session ${commandNames.includes(slug) ? "-- " : ""}${slug} ${command}`;
+	return `agent-session ${isCommandWord(slug) ? "-- " : ""}${slug} ${command}`;
 }
 
 export function unrecordedRetirementHint(slug: string): string {
@@ -46,6 +56,7 @@ export function parseInvocation(args: string[]): {
 } {
 	const [first, ...rest] = args;
 	if (!first) throw argumentError("Missing command.");
+	if (first === "status") throw retiredStatus();
 	if (first === "__complete" || globalCommandNames.includes(first)) {
 		return { command: first, args: rest, global: true };
 	}
@@ -57,6 +68,7 @@ export function parseInvocation(args: string[]): {
 	if (!slug) throw argumentError("Missing <task-slug>.");
 	if (slug !== ".") validateSlug(slug);
 	if (!command) throw argumentError(`Missing <command> for session '${slug}'.`);
+	if (command === "status") throw retiredStatus(slug);
 	if (!sessionCommandNames.includes(command)) {
 		throw argumentError(`Unknown command '${command}'.${didYouMean(command, sessionCommandNames)}`);
 	}
@@ -157,7 +169,21 @@ export function parseBranchArguments(args: string[]): { slug: string; name: stri
 	return { slug, name, json: options.includes("--json") };
 }
 
-export function parseCreateArguments(args: string[]): {
+function presentationArguments(input: string[]): PresentationOptions & { args: string[] } {
+	let color: PresentationOptions["color"] = "auto";
+	let verbose = false;
+	const args = input.filter((argument) => {
+		if (argument === "--verbose") { verbose = true; return false; }
+		if (!argument.startsWith("--color=")) return true;
+		const value = argument.slice("--color=".length);
+		if (!["auto", "always", "never"].includes(value)) throw argumentError("--color requires auto|always|never.");
+		color = value as PresentationOptions["color"];
+		return false;
+	});
+	return { args, color, verbose };
+}
+
+export function parseCreateArguments(input: string[]): PresentationOptions & {
 	slug: string;
 	dryRun: boolean;
 	json: boolean;
@@ -165,6 +191,7 @@ export function parseCreateArguments(args: string[]): {
 	trustPr: boolean;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let dryRun = false;
 	let json = false;
 	let pr: PullRequestSelection | undefined;
@@ -193,16 +220,17 @@ export function parseCreateArguments(args: string[]): {
 	if (trustPr && pr === undefined) throw argumentError("--trust-pr requires --pr.");
 	if (createBranch && pr === undefined) throw argumentError("--create-branch (-c) requires --pr.");
 	if (createBranch && pr) pr = { ...pr, mode: "independent" };
-	return { slug, dryRun, json, pr, trustPr };
+	return { slug, dryRun, json, pr, trustPr, color, verbose };
 }
 
-export function parseStartArguments(args: string[]): {
+export function parseStartArguments(input: string[]): PresentationOptions & {
 	slug: string;
 	launchConfiguredAgent: boolean;
 	pr?: PullRequestSelection;
 	trustPr: boolean;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let launchConfiguredAgent = true;
 	let pr: PullRequestSelection | undefined;
 	let trustPr = false;
@@ -228,10 +256,10 @@ export function parseStartArguments(args: string[]): {
 	if (trustPr && !pr) throw argumentError("--trust-pr requires --pr.");
 	if (createBranch && !pr) throw argumentError("--create-branch (-c) requires --pr.");
 	if (createBranch && pr) pr = { ...pr, mode: "independent" };
-	return { slug, launchConfiguredAgent, pr, trustPr };
+	return { slug, launchConfiguredAgent, pr, trustPr, color, verbose };
 }
 
-export function parseFinishArguments(args: string[]): {
+export function parseFinishArguments(input: string[]): PresentationOptions & {
 	slug?: string;
 	yes: boolean;
 	force: boolean;
@@ -244,6 +272,7 @@ export function parseFinishArguments(args: string[]): {
 	expected?: string;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let expected: string | undefined;
 	let yes = false;
 	let force = false;
@@ -285,6 +314,7 @@ export function parseFinishArguments(args: string[]): {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
+	if ((all || branches || gone) && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags currently require a single-session finish selector.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -304,7 +334,7 @@ export function parseFinishArguments(args: string[]): {
 		throw argumentError(
 			"finish --expected requires one slug, --keep-branch and non-forced cleanup.",
 		);
-	return { slug, yes, force, keepBranch, all, branches, gone, dryRun, json, expected };
+	return { slug, yes, force, keepBranch, all, branches, gone, dryRun, json, expected, color, verbose };
 }
 
 export function parseBatchArguments(args: string[]): BatchFinishOptions {
@@ -316,6 +346,8 @@ export function parseBatchArguments(args: string[]): BatchFinishOptions {
 	let yes = false;
 	let expected: string | undefined;
 	const exclusions: string[] = [];
+	let color: BatchFinishOptions["color"] = "auto";
+	let verbose = false;
 	for (let index = 1; index < args.length; index++) {
 		const argument = args[index] ?? "";
 		if (argument === "--inactive-for") {
@@ -334,57 +366,66 @@ export function parseBatchArguments(args: string[]): BatchFinishOptions {
 			const value = args[++index] ?? "";
 			if (expected || !/^batch-v1\.[A-Za-z0-9_-]+\.[a-f0-9]{64}$/.test(value)) throw argumentError("--expected requires one batch preview receipt.");
 			expected = value;
+		} else if (argument.startsWith("--color=")) {
+			const value = argument.slice("--color=".length);
+			if (!["auto", "always", "never"].includes(value)) throw argumentError("--color requires auto|always|never.");
+			color = value as BatchFinishOptions["color"];
 		} else if (argument === "--dry-run") dryRun = true;
 		else if (argument === "--yes") yes = true;
 		else if (argument === "--json") json = true;
 		else if (argument === "--keep-branch") { /* Always preserve branches. */ }
-		else throw unknownOption("batch finish", argument, ["--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json"]);
+		else if (argument === "--verbose") verbose = true;
+		else throw unknownOption("batch finish", argument, ["--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", "--color=auto", "--color=always", "--color=never", "--verbose"]);
 	}
 	if (!inactiveFor) throw argumentError("batch finish requires --inactive-for.");
 	if (dryRun && (expected || yes)) throw argumentError("Batch preview does not accept --expected or --yes.");
 	if (!dryRun && (!expected || !yes)) throw argumentError("Batch apply requires --expected <preview-receipt> and --yes.");
-	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json, dryRun, yes, expected };
+	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json, dryRun, yes, expected, color, verbose };
 }
 
-export function parseStatusArguments(args: string[]): {
+export function parseListArguments(input: string[], scoped = false): PresentationOptions & {
+	inspect: boolean;
 	slug?: string;
 	worktree?: string;
 	json: boolean;
 	refresh: boolean;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let worktree: string | undefined;
 	let json = false;
 	let refresh = false;
+	let inspect = false;
 	for (let index = 0; index < args.length; index++) {
 		const argument = args[index] ?? "";
-		if (argument === "--worktree") {
+		if (argument === "--inspect") inspect = true;
+		else if (argument === "--worktree") {
 			const value = args[++index];
 			if (worktree || !value || value.startsWith("-")) throw argumentError("--worktree requires exactly one path.");
 			worktree = value;
 		} else if (argument === "--json") json = true;
 		else if (argument === "--refresh") refresh = true;
-		else if (!argument.startsWith("-") && !slug) slug = argument;
+		else if (!argument.startsWith("-") && scoped && !slug) slug = argument;
 		else if (argument.startsWith("-")) {
-			throw unknownOption("status", argument, ["--json", "--refresh", "--worktree"]);
-		} else {
-			throw argumentError(`Unexpected argument '${argument}' for 'status'.`);
-		}
+			throw unknownOption("list", argument, ["--inspect", "--json", "--refresh", "--worktree", "--verbose", "--color=auto", "--color=always", "--color=never"]);
+		} else throw argumentError("Use: agent-session <task-slug> list --inspect, not agent-session list <task-slug>.");
 	}
+	if (!inspect && (refresh || worktree || slug)) throw argumentError("Live inspection and session selectors require list --inspect.");
 	if (worktree && (slug || refresh)) throw argumentError("--worktree cannot be combined with a session slug or --refresh.");
-	return { slug, worktree, json, refresh };
+	return { slug, worktree, json, refresh, inspect, color, verbose };
 }
 
-export function parseDoctorArguments(args: string[]): { slug?: string; json: boolean } {
+export function parseDoctorArguments(input: string[]): PresentationOptions & { slug?: string; json: boolean } {
+	const { args, color, verbose } = presentationArguments(input);
 	let slug: string | undefined;
 	let json = false;
 	for (const argument of args) {
 		if (argument === "--json") json = true;
-		else if (argument.startsWith("-")) throw unknownOption("doctor", argument, ["--json"]);
+		else if (argument.startsWith("-")) throw unknownOption("doctor", argument, ["--json", "--verbose", "--color=auto", "--color=always", "--color=never"]);
 		else if (!slug) slug = argument;
 		else throw argumentError(`Unexpected argument '${argument}' for 'doctor'.`);
 	}
-	return { slug, json };
+	return { slug, json, color, verbose };
 }
 
 export function parseRequiredSlug(command: string, args: string[]): string {
@@ -411,26 +452,26 @@ function usage(): string {
 		"  agent-session <task-slug> run <command> [args...]",
 		"  agent-session <task-slug> branch create <name> [--json] (create and record ownership without switching)",
 		"  agent-session <task-slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json] (explicitly reviewed legacy mapping)",
-		"  agent-session <task-slug> create [--dry-run] [--json] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
+		"  agent-session <task-slug> create [--dry-run] [--json] [--color=auto|always|never] [--verbose] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> launch",
-		"  agent-session <task-slug> start [--no-agent] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
+		"  agent-session <task-slug> start [--no-agent] [--color=auto|always|never] [--verbose] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
 		"  agent-session <task-slug> resume (recorded creator conversation in parent, otherwise latest own conversation)",
-		"  agent-session <task-slug> status [--json] [--refresh]",
+		"  agent-session <task-slug> list --inspect [--json] [--refresh] [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",
 		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",
 		"  agent-session <task-slug> repair",
-		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]] [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> finish --branches [--keep-branch] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
 		"  agent-session <task-slug> finish --all [--keep-branch] (preview recorded descendants, choose eligible branch deletion and confirm)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
-		"  agent-session . <cd|run|branch|ownership|activity|launch|resume|status|doctor|finish> (current managed worktree)",
-		"  agent-session [<task-slug>] doctor [--json] (read-only diagnostics)",
+		"  agent-session . <cd|run|branch|ownership|activity|launch|resume|list|doctor|finish> (current managed worktree)",
+		"  agent-session [<task-slug>] doctor [--json] [--color=auto|always|never] [--verbose] (read-only diagnostics)",
 		"  agent-session -- <task-slug> <command> (escape a command-word slug)",
-		"  agent-session list [--json] (recorded bindings only; no checkout inspection)",
-		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] (--dry-run | --expected <receipt> --yes) [--json]",
-		"  agent-session status [--json] [--refresh]",
-		"  agent-session status --worktree <path> [--json] (read-only exact inspection)",
+		"  agent-session list [--json] [--color=auto|always|never] [--verbose] (recorded bindings only; no checkout inspection)",
+		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] (--dry-run | --expected <receipt> --yes) [--json] [--color=auto|always|never] [--verbose] (presentation flags apply to previews)",
+		"  agent-session list --inspect [--json] [--refresh] [--color=auto|always|never] [--verbose] (live Git/binding table)",
+		"  agent-session list --inspect --worktree <path> [--json] [--color=auto|always|never] [--verbose] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session completion <bash|zsh|fish>",
 	].join("\n");

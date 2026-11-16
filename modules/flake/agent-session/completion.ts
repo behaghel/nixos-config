@@ -1,7 +1,7 @@
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { loadConfig, metadataSlugs, readMetadataInventory, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
 import {
-	commandNames,
+	isCommandWord,
 	sessionCommandNames,
 	currentSessionCommandNames,
 	globalCommandNames,
@@ -9,19 +9,19 @@ import {
 } from "./arguments.ts";
 
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
+const presentationOptions = ["--color=auto", "--color=always", "--color=never", "--verbose"];
 const commandOptions: Record<string, string[]> = {
 	branch: ["create", "--json"],
 	activity: ["touch", "reconcile", "--dry-run", "--json"],
 	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
-	create: ["--dry-run", "--json", ...prOptions],
-	start: ["--no-agent", ...prOptions],
-	status: ["--json", "--refresh"],
-	doctor: ["--json"],
-	"global-doctor": ["--json"],
-	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
-	"global-status": ["--json", "--refresh", "--worktree"],
-	"global-list": ["--json"],
-	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json"],
+	create: ["--dry-run", "--json", ...prOptions, ...presentationOptions],
+	start: ["--no-agent", ...prOptions, ...presentationOptions],
+	list: ["--inspect", "--json", "--refresh", ...presentationOptions],
+	doctor: ["--json", ...presentationOptions],
+	"global-doctor": ["--json", ...presentationOptions],
+	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json", ...presentationOptions],
+	"global-list": ["--inspect", "--json", "--refresh", "--worktree", ...presentationOptions],
+	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", ...presentationOptions],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],
 };
 
@@ -67,9 +67,9 @@ export function completionCandidates(scope: string): string[] {
 			} catch {
 				// No implicit target is offered without a verified current binding.
 			}
-			return scope === "sessions" ? [...current, ...slugs] : [...global, ...current, ...slugs.filter((slug) => !commandNames.includes(slug))];
+			return scope === "sessions" ? [...current, ...slugs] : [...global, ...current, ...slugs.filter((slug) => !isCommandWord(slug))];
 		}
-		if (["cd", "run", "launch", "resume", "status", "finish"].includes(scope)) return recorded;
+		if (["cd", "run", "launch", "resume", "list", "finish"].includes(scope)) return recorded;
 	} catch {
 		// Completion remains usable outside a configured Git checkout.
 	}

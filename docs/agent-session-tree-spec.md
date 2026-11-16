@@ -1,5 +1,11 @@
 # Spec: Creator-session trees and resume
 
+The [state-first output spec](agent-session-output-spec.md) supersedes the human
+presentation and approval-interaction rules below where they conflict, including
+JSON-only blocker explanations and separate branch/final confirmation questions.
+Creator relationships, activity, cleanup authority and machine contracts remain
+unchanged.
+
 ## Problem
 
 A worktree can be the result of a conversation in another worktree. A flat

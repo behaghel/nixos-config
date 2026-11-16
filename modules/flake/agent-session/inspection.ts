@@ -23,8 +23,8 @@ import {
 	validateSlug,
 	branchCreationMessage,
 } from "./sessions.ts";
-import { CliError, run, formatActivityTime, formatTable } from "./runtime.ts";
-import type { AgentSessionConfig, SessionMetadata, SessionStatus, ManagedWorktree } from "./types.ts";
+import { CliError, run, formatActivityTime, formatStateTable, formatLines, displayText, styleText, type InspectionProgress } from "./runtime.ts";
+import type { AgentSessionConfig, SessionMetadata, SessionStatus, ManagedWorktree, PresentationOptions } from "./types.ts";
 
 function brokenStatus(slug: string, problem: string): SessionStatus {
 	return {
@@ -330,10 +330,11 @@ export function sessionActivityTree(metadata: SessionMetadata[]) {
 
 // Binding inventory, not a claim about live Git state or cleanup eligibility.
 // Read every record before output: an unreadable record cannot prove absence.
-export function showInventory(root: string, json: boolean): void {
+export function showInventory(root: string, json: boolean, options: PresentationOptions = {}, progress?: InspectionProgress): void {
 	const records = sessionActivityTree(readMetadataInventory(root));
 	const sessions = records.map(({ metadata: { slug, branch, worktreePath } }) =>
 		({ slug, branch, worktreePath }));
+	progress?.flush();
 	if (json) {
 		process.stdout.write(`${JSON.stringify({ version: 1, command: "list", sessions })}\n`);
 		return;
@@ -343,9 +344,10 @@ export function showInventory(root: string, json: boolean): void {
 		return;
 	}
 	const now = Date.now();
-	const rows = [["SESSION", "BRANCH", "LAST ACTIVE"], ...records.map(({ metadata, activity, prefix }) =>
-		[prefix + metadata.slug, metadata.branch, formatActivityTime(activity, now)])];
-	process.stdout.write(formatTable(rows, 1));
+	const headers = ["SESSION", "BRANCH", "LAST ACTIVE", ...(options.verbose ? ["WORKTREE"] : [])];
+	const rows = records.map(({ metadata, activity, prefix }) =>
+		[prefix + metadata.slug, metadata.branch, formatActivityTime(activity, now), ...(options.verbose ? [metadata.worktreePath] : [])]);
+	process.stdout.write(formatStateTable(headers, rows, options, (_row, column) => column === 0 ? 1 : column === 2 ? 36 : 2));
 }
 
 // Resolve aliases even when the final component is missing, without treating
@@ -458,10 +460,18 @@ export function inspectExactResource(root: string, path: string, sharedContext?:
 	return { version: 1, worktreePath, resourceState, evidence, bindingSlugs, sessions, ...(problem ? { problem } : {}) };
 }
 
-export function showExactStatus(root: string, path: string, json: boolean): void {
+export function showExactStatus(root: string, path: string, json: boolean, options: PresentationOptions = {}, progress?: InspectionProgress): void {
 	const result = inspectExactResource(root, path);
+	progress?.flush();
 	if (json) process.stdout.write(`${JSON.stringify(result)}\n`);
-	else process.stdout.write(`${result.worktreePath}  ${result.resourceState.toUpperCase()}${result.problem ? `\n${result.problem}` : ""}\n`);
+	else {
+		const state = result.resourceState[0].toUpperCase() + result.resourceState.slice(1);
+		const colour = result.resourceState === "present" ? 32 : result.resourceState === "absent" ? 2 : 31;
+		process.stdout.write(formatStateTable(["WORKTREE", "STATE"], [[result.worktreePath, state]], options, (_row, column) => column === 1 ? colour : undefined, { table: true }));
+		process.stdout.write(formatLines(["", "1 resource inspected",
+			...(options.verbose && result.problem ? result.problem.split("\n").map((line) => `  ${displayText(line)}`) : []),
+		]));
+	}
 }
 
 export function showStatus(
@@ -469,6 +479,8 @@ export function showStatus(
 	slug: string | undefined,
 	json: boolean,
 	refresh: boolean,
+	options: PresentationOptions = {},
+	progress?: InspectionProgress,
 ): void {
 	if (slug) validateSlug(slug);
 	const config = loadConfig(root);
@@ -482,6 +494,7 @@ export function showStatus(
 	const slugs = slug ? [slug] : knownSlugs;
 	const refreshedDefaults = new Map<string, string>();
 	const statuses = slugs.map((sessionSlug) => {
+		progress?.update(`Inspecting ${sessionSlug}`);
 		if (!existsSync(metadataPath(root, sessionSlug))) {
 			const worktree = discovered.get(sessionSlug);
 			return worktree
@@ -508,38 +521,47 @@ export function showStatus(
 		return inspectSession(metadata, defaultBranch);
 	});
 	const operation = readOperationLock(root) ?? null;
+	progress?.flush();
 	if (json) {
 		process.stdout.write(
 			`${JSON.stringify({ version: 1, operation, sessions: statuses })}\n`,
 		);
 		return;
 	}
-	if (operation) {
-		process.stdout.write(
-			`Operation active: ${operation.command} (pid ${operation.pid})\n`,
-		);
-	}
+	if (operation) process.stdout.write(formatLines([
+		styleText(`Operation active: ${displayText(operation.command)} (pid ${operation.pid})`, 33, options.color),
+	]));
 	if (statuses.length === 0) {
 		process.stdout.write("No managed agent sessions.\n");
 		return;
 	}
-	for (const session of statuses) {
-		const hygiene = ["broken", "orphaned", "unrecorded", "conflict"].includes(
-			session.state,
-		)
-			? session.state.toUpperCase()
-			: [
-					session.clean ? "CLEAN" : "DIRTY",
-					session.fresh ? "FRESH" : "STALE",
-					session.publication.toUpperCase(),
-				].join(" ");
-		const branches =
-			session.ownedBranches.length > 1
-				? `\n  owned branches: ${session.ownedBranches.join(", ")}`
-				: "";
-		process.stdout.write(
-			`${session.slug}  ${session.currentBranch ?? session.branch}  ${hygiene}\n  ${session.worktreePath}${branches}${session.pr ? `\n  PR: ${pullRequestSummary(session.pr)}; base: ${session.pr.baseBranch}` : ""}\n`,
-		);
-		if (session.problem) process.stderr.write(`${session.problem}\n`);
-	}
+	const special: Partial<Record<SessionStatus["state"], string>> = {
+		broken: "Metadata needs inspection", orphaned: "Worktree missing", unrecorded: "Metadata missing", conflict: "Branch conflict",
+	};
+	const needsAttention = (session: SessionStatus) => session.state !== "ready" || ["unpushed", "behind", "diverged"].includes(session.publication);
+	const colour = (session: SessionStatus) => special[session.state] ? 31 : needsAttention(session) ? 33 : 32;
+	const state = (session: SessionStatus) => special[session.state] ?? [
+		session.clean ? "Clean" : "Dirty", session.fresh ? "Fresh" : "Stale",
+		session.publication[0].toUpperCase() + session.publication.slice(1),
+	].join(" · ");
+	const prDetail = (session: SessionStatus) => session.pr
+		? [`  PR: ${displayText(pullRequestSummary(session.pr))}; base: ${displayText(session.pr.baseBranch)}`] : [];
+	const details = (session: SessionStatus) => [
+		`  Current branch: ${displayText(session.currentBranch ?? "unknown")}`,
+		`  Initial branch: ${displayText(session.initialBranch || "unknown")}`,
+		`  Owned branches: ${displayText(session.ownedBranches.join(", ") || "none")}`,
+		...(session.problem ? session.problem.split("\n").map((line) => `  ${displayText(line)}`) : []),
+	];
+	const hasPr = statuses.some((session) => session.pr);
+	process.stdout.write(formatStateTable(["SESSION", "BRANCH", "STATE", ...(hasPr ? ["PR"] : [])], statuses.map((session) =>
+		[session.slug, (session.currentBranch ?? session.branch) || "unknown", state(session),
+			...(hasPr ? [session.pr ? `#${session.pr.number} · ${session.pr.state}${session.pr.isDraft ? " · DRAFT" : ""}` : "—"] : [])]), options,
+		(row, column) => column === 2 ? colour(statuses[row]) : column === 0 ? 1 : column === 3 ? 36 : undefined,
+		{ table: true, shortenColumns: [1] }));
+	if (slug && statuses[0].pr) process.stdout.write(formatLines(prDetail(statuses[0])));
+	const count = statuses.filter(needsAttention).length;
+	process.stdout.write(formatLines(["", `${statuses.length} session${statuses.length === 1 ? "" : "s"} · ${count} ${count === 1 ? "needs" : "need"} attention`]));
+	if (options.verbose) for (const session of statuses) process.stdout.write(formatLines([
+		"", `${displayText(session.slug)}:`, `  Worktree: ${displayText(session.worktreePath) || "unknown"}`, ...(!slug ? prDetail(session) : []), ...details(session),
+	]));
 }

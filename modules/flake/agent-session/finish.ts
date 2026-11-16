@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
+import { FinishOutput } from "./finish-output.ts";
 import { inspectTreeBranches, treeBranchSummary, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
-import { captureProcesses, inspectCandidate, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
+import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, artifactSummary, type IgnoredDataInspection } from "./artifacts.ts";
@@ -41,9 +42,10 @@ import {
 	progressReporter,
 	runPhase,
 	writeCommandResult,
+	withInspection,
 	run,
 } from "./runtime.ts";
-import type { SessionMetadata, SessionStatus, ProgressReporter, BatchFinishOptions } from "./types.ts";
+import type { SessionMetadata, SessionStatus, ProgressReporter, BatchFinishOptions, PresentationOptions } from "./types.ts";
 
 function assertNotInvokingWorktree(
 	metadata: Pick<SessionMetadata, "worktreePath">,
@@ -54,6 +56,15 @@ function assertNotInvokingWorktree(
 			"Cannot remove the worktree containing the current shell. Run finish from another repository worktree.",
 		);
 	}
+}
+
+function assertNoWorktreeActivity(metadata: SessionMetadata): void {
+	const activity = inspectWorktreeActivity(metadata);
+	if (!activity.blockers.length) return;
+	const problems = activity.blockers.map((blocker) => blocker.reason === "live-cwd"
+		? `Processes using worktree ${metadata.worktreePath}: ${activity.pids.join(", ")}. Leave or stop that work before cleanup.`
+		: blocker.problem ?? blocker.reason);
+	throw new CliError(`Non-forced cleanup blocked.\n${problems.join("\n")}\nNo local session assets were removed.`);
 }
 
 function previewUnrecordedFinish(root: string, invocationRoot: string, slug: string): Record<string, unknown> {
@@ -70,24 +81,32 @@ function previewUnrecordedFinish(root: string, invocationRoot: string, slug: str
 	};
 }
 
-function forceFinishUnrecorded(root: string, invocationRoot: string, slug: string, yes: boolean): void {
+function cleanupGit(root: string, args: string[], problem: string, output?: FinishOutput, verbose = false): void {
+	const result = run("git", args, root, output && !verbose ? "pipe" : "inherit");
+	if (result.status !== 0) throw new CliError([problem, result.stdout, result.stderr, result.errorCode].filter(Boolean).join("\n"));
+}
+
+function forceFinishUnrecorded(root: string, invocationRoot: string, slug: string, yes: boolean, output?: FinishOutput, verbose = false): void {
 	assertPrimaryCheckout(root);
 	const target = unrecordedWorktree(root, slug);
 	assertNotInvokingWorktree(target, invocationRoot);
-	process.stderr.write(`Force-remove unrecorded worktree, including uncommitted and ignored local files:\n  worktree: ${target.worktreePath}\n  current branch: ${target.currentBranch ?? "detached HEAD"}\n  HEAD: ${target.head}\nAll branches will be preserved; no ownership metadata will be invented.\n`);
-	if (target.currentBranch === null) process.stderr.write("Warning: detached HEAD commits may become unreachable. Create a branch first if you need to retain them.\n");
+	if (output) output.plan({ slug, worktreePath: target.worktreePath, currentBranch: target.currentBranch, head: target.head, ownedBranches: [], keepBranch: true, unrecorded: true, force: true });
+	else process.stderr.write(`Force-remove unrecorded worktree, including uncommitted and ignored local files:\n  worktree: ${target.worktreePath}\n  current branch: ${target.currentBranch ?? "detached HEAD"}\n  HEAD: ${target.head}\nAll branches will be preserved; no ownership metadata will be invented.\n`);
+	if (!output && target.currentBranch === null) process.stderr.write("Warning: detached HEAD commits may become unreachable. Create a branch first if you need to retain them.\n");
 	if (!yes) {
 		if (!process.stdin.isTTY) throw new CliError(`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`);
-		if (!confirm("Discard this unrecorded worktree and preserve all branches? [y/N]")) throw new CliError("Cleanup cancelled.");
+		if (!(output ? output.confirm(true) : confirm("Discard this unrecorded worktree and preserve all branches? [y/N]"))) throw new CliError("Cleanup cancelled.");
 	}
 	// Recheck absence and physical/Git identity after the confirmation wait. Do
 	// not fall back to recorded cleanup if metadata appeared in the meantime.
 	const current = unrecordedWorktree(root, slug);
 	assertNotInvokingWorktree(current, invocationRoot);
 	if (JSON.stringify(current) !== JSON.stringify(target)) throw new CliError("Unrecorded worktree target changed; obtain a fresh preview before cleanup.");
-	const removed = run("git", ["worktree", "remove", "--force", target.worktreePath], root, "inherit");
-	if (removed.status !== 0) throw new CliError("Could not remove the unrecorded worktree; branches were not deleted.");
-	process.stdout.write("Unrecorded worktree removed locally. All branches preserved; no session record created or deleted. Remote assets were not modified.\n");
+	output?.begin(); output?.starting("worktree", "Removing");
+	cleanupGit(root, ["worktree", "remove", "--force", target.worktreePath], "Could not remove the unrecorded worktree; branches were not deleted.", output, verbose);
+	output?.removedWorktree();
+	const summary = "Unrecorded worktree removed locally. All branches preserved; no session record created or deleted. Remote assets were not modified.";
+	if (output) output.finish(summary); else process.stdout.write(`${summary}\n`);
 }
 
 function forceFinishUnlocked(
@@ -96,6 +115,8 @@ function forceFinishUnlocked(
 	slug: string,
 	yes: boolean,
 	keepBranch: boolean,
+	output?: FinishOutput,
+	verbose = false,
 ): void {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -104,6 +125,7 @@ function forceFinishUnlocked(
 	assertConfiguredWorktreePath(root, config, metadata);
 	assertNotInvokingWorktree(metadata, invocationRoot);
 	let ownedBranches = sessionBranchSets(metadata, root).owned;
+	let currentBranch: string | null = null;
 	if (existsSync(metadata.worktreePath)) {
 		const status = inspectSession(metadata);
 		if (statusCannotOperate(status)) {
@@ -112,12 +134,14 @@ function forceFinishUnlocked(
 			);
 		}
 		ownedBranches = status.ownedBranches;
+		currentBranch = status.currentBranch;
 	}
 
 	const branchList = ownedBranches
 		.map((branch) => `  branch:   ${branch}${keepBranch ? " (preserved)" : ""}`)
 		.join("\n");
-	process.stderr.write(
+	if (output) output.plan({ slug, worktreePath: metadata.worktreePath, metadataPath: metadataPath(root, slug), currentBranch, ownedBranches, keepBranch, force: true });
+	else process.stderr.write(
 		`Force-remove local session assets, including uncommitted or unpublished work:\n  worktree: ${metadata.worktreePath}${branchList ? `\n${branchList}` : ""}\n`,
 	);
 	if (!yes) {
@@ -126,43 +150,31 @@ function forceFinishUnlocked(
 				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`,
 			);
 		}
-		if (!confirm("Discard local session assets? [y/N]")) {
+		if (!(output ? output.confirm(true) : confirm("Discard local session assets? [y/N]"))) {
 			throw new CliError("Cleanup cancelled.");
 		}
 	}
 
+	output?.begin();
 	if (existsSync(metadata.worktreePath)) {
-		const removed = run(
-			"git",
-			["worktree", "remove", "--force", metadata.worktreePath],
-			root,
-			"inherit",
-		);
-		if (removed.status !== 0) {
-			throw new CliError("Could not remove the local session worktree.");
-		}
+		output?.starting("worktree", "Removing");
+		cleanupGit(root, ["worktree", "remove", "--force", metadata.worktreePath], "Could not remove the local session worktree.", output, verbose);
+		output?.removedWorktree();
 	} else if (worktreeIsRegistered(root, metadata.worktreePath)) {
-		const removed = run(
-			"git",
-			["worktree", "remove", "--force", metadata.worktreePath],
-			root,
-			"inherit",
-		);
-		if (removed.status !== 0) {
-			throw new CliError("Could not remove the missing worktree registration.");
-		}
-	}
+		output?.starting("worktree", "Unregistering");
+		cleanupGit(root, ["worktree", "remove", "--force", metadata.worktreePath], "Could not remove the missing worktree registration.", output, verbose);
+		output?.completed("worktree", "Unregistered");
+	} else output?.completed("worktree", "Absent");
 	if (!keepBranch) {
 		for (const branch of ownedBranches) {
-			const deleted = run("git", ["branch", "-D", branch], root, "inherit");
-			if (deleted.status !== 0) {
-				throw new CliError(
-					`Worktree removed, but local branch ${branch} could not be deleted.`,
-				);
-			}
+			output?.starting(`branch:${branch}`, "Deleting");
+			cleanupGit(root, ["branch", "-D", branch], `Worktree removed, but local branch ${branch} could not be deleted.`, output, verbose);
+			output?.completed(`branch:${branch}`, "Deleted");
 		}
 	}
+	output?.starting("record", "Removing");
 	unlinkSync(metadataPath(root, slug));
+	output?.completed("record", "Removed");
 	const disposition = keepBranch
 		? ownedBranches.length === 1
 			? `Local branch preserved: ${ownedBranches[0]}`
@@ -170,9 +182,8 @@ function forceFinishUnlocked(
 		: ownedBranches.length === 1
 			? "Local branch deleted."
 			: `${ownedBranches.length} local branches deleted.`;
-	process.stdout.write(
-		`Session force-finished locally. ${disposition} Remote assets were not modified.\nProject root: ${root}\n`,
-	);
+	const summary = `Session force-finished locally. ${disposition} Remote assets were not modified.`;
+	if (output) output.finish(summary); else process.stdout.write(`${summary}\nProject root: ${root}\n`);
 }
 
 // Interactive consent binds the observed scope, not a token the user must copy.
@@ -196,6 +207,8 @@ function finishUnlocked(
 	keepBranch: boolean,
 	expected?: string,
 	report: ProgressReporter = () => {},
+	output?: FinishOutput,
+	verbose = false,
 ): void {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -216,6 +229,7 @@ function finishUnlocked(
 	if (!status.clean) {
 		throw new CliError("Working tree is not clean.");
 	}
+	assertNoWorktreeActivity(metadata);
 	const metadataProgress = (path: string, entries: number) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`);
 	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths, metadataProgress, config.generated_links);
 	if (!ignoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(ignoredData)}`);
@@ -267,7 +281,8 @@ function finishUnlocked(
 		.map((branch) => `  branch:   ${branch} (${keepBranch ? "preserved" : "delete"})`)
 		.join("\n");
 	report.flush?.();
-	process.stderr.write(
+	if (output) output.plan({ slug, worktreePath: metadata.worktreePath, metadataPath: metadataPath(root, slug), currentBranch: status.currentBranch, ownedBranches: status.ownedBranches, keepBranch, ignoredData });
+	else process.stderr.write(
 		`Ready to remove local session assets:\n  worktree: ${metadata.worktreePath}\n${branchList}\n${artifactSummary(ignoredData)}`,
 	);
 	if (!yes) {
@@ -276,7 +291,7 @@ function finishUnlocked(
 				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --yes`,
 			);
 		}
-		if (!confirm(keepBranch ? "Remove local worktree and preserve branches? [y/N]" : "Delete local worktree and branch? [y/N]")) {
+		if (!(output ? output.confirm() : confirm(keepBranch ? "Remove local worktree and preserve branches? [y/N]" : "Delete local worktree and branch? [y/N]"))) {
 			throw new CliError("Cleanup cancelled.");
 		}
 	}
@@ -291,33 +306,29 @@ function finishUnlocked(
 		(expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null, currentIgnoredData).receipt !== expected)) {
 		throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
 	}
+	const currentMetadata = readMetadata(root, slug);
+	assertConfiguredWorktreePath(root, currentConfig, currentMetadata);
 	if (approval) {
-		const currentMetadata = readMetadata(root, slug);
-		assertConfiguredWorktreePath(root, currentConfig, currentMetadata);
 		const currentStatus = inspectSession(currentMetadata, defaultBranch);
 		if (finishApprovalFingerprint(root, currentMetadata, currentStatus, currentIgnoredData) !== approval) throw new CliError("Finish target changed; inspect it again before cleanup.");
 	}
+	// Managed starts are serialized by the lifecycle lock. Unmanaged writers
+	// are not: take a fresh cwd snapshot after the wait and expensive rechecks.
+	assertNoWorktreeActivity(currentMetadata);
 	report.flush?.();
-	const removed = run(
-		"git",
-		["worktree", "remove", metadata.worktreePath],
-		root,
-		"inherit",
-	);
-	if (removed.status !== 0) {
-		throw new CliError("Could not remove the local session worktree.");
-	}
+	output?.begin(); output?.starting("worktree", "Removing");
+	cleanupGit(root, ["worktree", "remove", metadata.worktreePath], "Could not remove the local session worktree.", output, verbose);
+	output?.removedWorktree();
 	if (!keepBranch) {
 		for (const branch of status.ownedBranches) {
-			const deleted = run("git", ["branch", "-D", branch], root, "inherit");
-			if (deleted.status !== 0) {
-				throw new CliError(
-					`Worktree removed, but local branch ${branch} could not be deleted.`,
-				);
-			}
+			output?.starting(`branch:${branch}`, "Deleting");
+			cleanupGit(root, ["branch", "-D", branch], `Worktree removed, but local branch ${branch} could not be deleted.`, output, verbose);
+			output?.completed(`branch:${branch}`, "Deleted");
 		}
 	}
+	output?.starting("record", "Removing");
 	unlinkSync(metadataPath(root, slug));
+	output?.completed("record", "Removed");
 	const onlyCheck = branchChecks.length === 1 ? branchChecks[0] : undefined;
 	const disposition = status.ownedBranches.length === 0
 		? "Borrowed branches preserved."
@@ -330,9 +341,8 @@ function finishUnlocked(
 			: onlyCheck?.merged
 				? `Merged into: ${mergedDefault}`
 				: `Remote branch preserved: ${onlyCheck?.upstream.stdout ?? "none"}`;
-	process.stdout.write(
-		`Session finished locally. ${disposition}\nProject root: ${root}\n`,
-	);
+	const summary = `Session finished locally. ${disposition}`;
+	if (output) output.finish(summary); else process.stdout.write(`${summary}\nProject root: ${root}\n`);
 }
 
 function previewFinish(
@@ -353,6 +363,7 @@ function previewFinish(
 		assertConfiguredWorktreePath(root, config, metadata);
 		assertNotInvokingWorktree(metadata, invocationRoot);
 		const status = inspectSession(metadata);
+		if (!force && !statusCannotOperate(status)) assertNoWorktreeActivity(metadata);
 		const ignoredData = force ? undefined : observedIgnoredData ?? inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths,
 			(path, entries) => report(`inspect-metadata-chunk:${slug}`, "completed", `${path}: ${entries} metadata entries scanned so far`), config.generated_links);
 		const plan = {
@@ -390,20 +401,6 @@ function previewFinish(
 	return phase ? runPhase(report, phase, inspect) : inspect();
 }
 
-function finishPreviewText(plan: Record<string, unknown>, slug: string, keepBranch: boolean): string {
-	if (plan.allBranchesPreserved === true) return `Would remove unrecorded local worktree ${String(plan.worktreePath)} and preserve all branches. Force discards uncommitted and ignored local files.${plan.detachedHeadMayBecomeUnreachable ? " Detached HEAD commits may become unreachable; create a branch first if needed." : ""}\n`;
-	const ignoredData = plan.ignoredData as IgnoredDataInspection | undefined;
-	if (ignoredData?.safe === false) return `Non-forced cleanup blocked: ${ignoredDataProblem(ignoredData)}\nNo resources changed.\n`;
-	if (!plan.force && (plan.clean !== true || !["ready", "stale"].includes(String(plan.state)))) return `Non-forced cleanup blocked: state=${String(plan.state)}, clean=${String(plan.clean)}.\nNo resources changed.\n`;
-	const branches = (plan.ownedBranches as string[]).join(", ") || "none";
-	const summary = `Would remove local worktree ${String(plan.worktreePath)} and ${keepBranch ? "preserve" : "delete"} session-owned branches: ${branches}.\n${artifactSummary(ignoredData)}`;
-	if (plan.force) return summary;
-	const command = sessionCommand(slug, "finish").replace(/^agent-session /, "as ");
-	return typeof plan.receipt === "string"
-		? `${summary}Receipt: ${plan.receipt}\nApply: ${command} --keep-branch --expected ${plan.receipt} --yes\n`
-		: `${summary}Confirm interactively: ${command}${keepBranch ? " --keep-branch" : ""}\n`;
-}
-
 export function finish(
 	root: string,
 	invocationRoot: string,
@@ -414,46 +411,38 @@ export function finish(
 	dryRun: boolean,
 	json: boolean,
 	expected?: string,
+	options: PresentationOptions = {},
 ): void {
-	const report = progressReporter("finish", json);
-	if (dryRun) {
-		const plan = force && !sessionRecordExists(root, slug)
-			? runPhase(report, "inspect-finish", () => previewUnrecordedFinish(root, invocationRoot, slug))
-			: previewFinish(root, invocationRoot, slug, force, keepBranch, report);
-		writeCommandResult(
-			{ version: 1, command: "finish", dryRun: true, plan }, json,
-			finishPreviewText(plan, slug, keepBranch),
-		);
-		return;
-	}
-	runPhase(report, "cleanup", () =>
-		withOperationLock(root, "finish", () => {
-			// Only this explicit-slug entrypoint may retire an unrecorded slot.
-			// Bulk cleanup continues to use recorded metadata exclusively.
-			if (force && !sessionRecordExists(root, slug)) {
-				if (expected) throw new CliError("Forced unrecorded cleanup does not accept a recorded-session receipt.");
-				return forceFinishUnrecorded(root, invocationRoot, slug, yes);
+	withInspection("Inspecting cleanup", json, options, (progress) => {
+		const output = json ? undefined : new FinishOutput(options);
+		if (options.verbose) progress.flush();
+		const report = json || options.verbose ? progressReporter("finish", json) : Object.assign(((phase: string, status: string) => {
+			if (!output?.started && (status === "started" || phase.startsWith("inspect-metadata-chunk:"))) progress.update("Inspecting cleanup");
+		}) as ProgressReporter, { flush: () => progress.flush() });
+		try {
+			if (dryRun) {
+				const plan = force && !sessionRecordExists(root, slug)
+					? runPhase(report, "inspect-finish", () => previewUnrecordedFinish(root, invocationRoot, slug))
+					: previewFinish(root, invocationRoot, slug, force, keepBranch, report);
+				progress.flush();
+				writeCommandResult({ version: 1, command: "finish", dryRun: true, plan }, json, output?.preview(plan) ?? "");
+				return;
 			}
-			if (
-				expected && force &&
-				previewFinish(
-					root,
-					invocationRoot,
-					slug,
-					force,
-					keepBranch,
-					report,
-					null,
-				).receipt !== expected
-			)
-				throw new CliError(
-					"Finish target changed; obtain a fresh preview before cleanup.",
-				);
-			return force
-				? forceFinishUnlocked(root, invocationRoot, slug, yes, keepBranch)
-				: finishUnlocked(root, invocationRoot, slug, yes, keepBranch, expected, report);
-		}),
-	);
+			runPhase(report, "cleanup", () => withOperationLock(root, "finish", () => {
+				// Unrecorded retirement remains exclusive to this explicit-slug path.
+				if (force) {
+					progress.flush();
+					if (!sessionRecordExists(root, slug)) {
+						if (expected) throw new CliError("Forced unrecorded cleanup does not accept a recorded-session receipt.");
+						return forceFinishUnrecorded(root, invocationRoot, slug, yes, output, options.verbose);
+					}
+					if (expected && previewFinish(root, invocationRoot, slug, force, keepBranch, report, null).receipt !== expected) throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
+					return forceFinishUnlocked(root, invocationRoot, slug, yes, keepBranch, output, options.verbose);
+				}
+				return finishUnlocked(root, invocationRoot, slug, yes, keepBranch, expected, report, output, options.verbose);
+			}));
+		} catch (error) { progress.flush(); output?.abort(); throw error; }
+	});
 }
 
 function selectSessionTree(root: string, slug: string) {

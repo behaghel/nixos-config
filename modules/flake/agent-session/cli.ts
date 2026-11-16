@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError } from "./runtime.ts";
+import { CliError, styleText, withInspection } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, createBranch, runInSession, launch, resume, start, repair } from "./lifecycle.ts";
@@ -20,7 +20,7 @@ import {
 	parseOwnershipArguments,
 	parseStartArguments,
 	parseFinishArguments,
-	parseStatusArguments,
+	parseListArguments,
 	parseBatchArguments,
 	parseDoctorArguments,
 	parseRequiredSlug,
@@ -70,6 +70,7 @@ export function main(args: string[]): number {
 				options.json,
 				options.pr,
 				options.trustPr,
+				{ color: options.color, verbose: options.verbose },
 			);
 		}
 		if (command === "completion") {
@@ -99,7 +100,7 @@ export function main(args: string[]): number {
 		if (command === "start") {
 			const options = parseStartArguments(rest);
 			const root = primaryRoot(repositoryRoot());
-			return start(root, options.slug, options.launchConfiguredAgent, options.pr, options.trustPr);
+			return start(root, options.slug, options.launchConfiguredAgent, options.pr, options.trustPr, { color: options.color, verbose: options.verbose });
 		}
 		if (command === "resume") {
 			const slug = resolveSessionTarget(parseRequiredSlug("resume", rest));
@@ -111,30 +112,26 @@ export function main(args: string[]): number {
 			return batchFinish(primaryRoot(invocationRoot), invocationRoot, options);
 		}
 		if (command === "list") {
-			if (rest.some((argument) => argument !== "--json"))
-				throw argumentError("Use: agent-session list [--json].");
-			showInventory(primaryRoot(repositoryRoot()), rest.includes("--json"));
-			return 0;
-		}
-		if (command === "status") {
-			const options = parseStatusArguments(rest);
-			if (options.worktree) {
-				showExactStatus(primaryRoot(repositoryRoot()), options.worktree, options.json);
+			const options = parseListArguments(rest, !invocation.global);
+			return withInspection(options.inspect ? "Inspecting sessions" : "Reading session inventory", options.json, options, (progress) => {
+				if (!options.inspect) {
+					showInventory(primaryRoot(repositoryRoot()), options.json, options, progress);
+					return 0;
+				}
+				if (options.worktree) {
+					showExactStatus(primaryRoot(repositoryRoot()), options.worktree, options.json, options, progress);
+					return 0;
+				}
+				showStatus(primaryRoot(repositoryRoot()),
+					options.slug === undefined ? undefined : resolveSessionTarget(options.slug),
+					options.json, options.refresh, options, progress);
 				return 0;
-			}
-			if (invocation.global && options.slug) throw legacySessionSyntax(command);
-			showStatus(
-				primaryRoot(repositoryRoot()),
-				options.slug === undefined ? undefined : resolveSessionTarget(options.slug),
-				options.json,
-				options.refresh,
-			);
-			return 0;
+			});
 		}
 		if (command === "doctor") {
 			const options = parseDoctorArguments(rest);
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
-			return doctor(options.slug, options.json);
+			return withInspection("Checking session health", options.json, options, (progress) => doctor(options.slug, options.json, options, progress));
 		}
 		if (command === "repair") {
 			const slug = parseRequiredSlug("repair", rest);
@@ -173,6 +170,7 @@ export function main(args: string[]): number {
 					options.dryRun,
 					options.json,
 					options.expected,
+					options,
 				);
 			}
 			return 0;
@@ -183,7 +181,10 @@ export function main(args: string[]): number {
 		);
 	} catch (error) {
 		if (error instanceof CliError) {
-			process.stderr.write(`${error.message}\n`);
+			const [headline, ...details] = error.message.split("\n");
+			const message = error.color === undefined ? error.message
+				: [styleText(headline, 31, error.color, process.stderr.isTTY), ...details].join("\n");
+			process.stderr.write(`${message}\n`);
 			return error.exitCode;
 		}
 		process.stderr.write(`${String(error)}\n`);

@@ -69,7 +69,10 @@ for (const [name, document] of [["skill", skill], ["adoption", adoption]]) {
   assert.match(document, /installed source revision/i, `${name}: report provenance alongside capability gaps`);
 }
 assert.match(adoption, /__complete targets/);
-assert.match(adoption, /__complete options:global-status/);
+assert.match(adoption, /__complete options:global-list/);
+assert.match(adoption, /list --inspect/);
+assert.match(adoption, /Older launchers may advertise `status`/);
+assert.match(skill, /as \. list --inspect --json/);
 assert.match(adoption, /__complete options:global-batch/);
 assert.match(adoption, /smallest targeted pin update/i);
 assert.match(adoption, /Do not invoke retirement/i);
