@@ -19,7 +19,7 @@ const commandOptions: Record<string, string[]> = {
 	list: ["--inspect", "--json", "--refresh", ...presentationOptions],
 	doctor: ["--json", ...presentationOptions],
 	"global-doctor": ["--json", ...presentationOptions],
-	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
+	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json", ...presentationOptions],
 	"global-list": ["--inspect", "--json", "--refresh", "--worktree", ...presentationOptions],
 	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", ...presentationOptions],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],

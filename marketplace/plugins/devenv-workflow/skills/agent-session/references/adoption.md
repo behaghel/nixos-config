@@ -153,6 +153,7 @@ and candidates for the actual operations, for example:
 | Prepare and run work | Session commands `create`/`run`; creation `--json` when requested. |
 | Exact path inspection | Global `list --inspect --worktree` in usage and `--inspect`/`--worktree` in `options:global-list`; use only the advertised `status --worktree` interface on older verified versions. |
 | Guarded branch-preserving finish | `finish` with `--keep-branch`, `--dry-run` and `--expected` in usage and session completion options. |
+| Single-session cleanup presentation | Requested `--color=auto|always|never` and `--verbose` in single-session usage and `options:finish`. This does not establish support on other cleanup selectors. |
 | Interrupted activity acknowledgement | `activity reconcile [--dry-run [--json]]` in usage and `reconcile`/preview flags in `options:activity`; no acknowledgement apply during capability checks. |
 | Inactive batch retirement | Global `batch finish` plus requested window/exclusion/receipt/apply flags, including `--inactive-for`, `--expected` and `--yes`, in usage and `options:global-batch`. |
 

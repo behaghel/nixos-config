@@ -431,6 +431,37 @@ refer to the displayed Git/binding state, not cleanup eligibility or proof that
 all activity has completed. Inspection stays offline by default; `--refresh` retains
 its explicit remote-refresh behaviour.
 
+## Human single-session cleanup output
+
+`as <slug> finish` and its previews accept `--color=auto|always|never` and
+`--verbose`, with the same colour policy as inspection. These flags are not
+supported with `--all`, `--gone` or `--branches` selectors.
+
+Human previews and confirmation plans show `ASSET`, `ACTION` and `DETAIL`,
+including exact worktree and record paths, owned/borrowed branch disposition and
+approved artifact roots. Directory approval covers the whole subtree, including
+logs and task databases; link targets and remote assets remain preserved.
+Very narrow terminals may stack cells, never shorten the approved paths.
+
+The default-No confirmation retains its existing permission and revalidation
+checks. After approval, the same table changes from proposed actions to live
+outcomes, ending with confirmed resource states and counts. Reuse requires a plan
+that fits the unchanged terminal and a verified ordinary prompt echo. If those
+positions cannot be established safely (including redirected, resized or verbose
+output), the plan remains in scrollback and execution follows below it instead.
+Terminal-mode queries are read-only; cleanup never changes the user's echo mode.
+Short viewports show a compact live window, then the complete final result;
+resizing never clears unrelated scrollback. Redirected output is plain
+and append-only by default. Successful Git chatter is hidden unless verbose.
+A failed native operation leaves affected resources `Uncertain`, not presumed
+intact or removed, and retains the original available diagnostic. Confirmed
+removals and unattempted actions remain distinct after partial cleanup.
+
+Ordinary human previews end with `Nothing changed`, without receipt tokens or
+replay hints. Supported automation still reads the unchanged full JSON plan and
+receipt from `--dry-run --json`. These presentation controls do not change branch
+defaults, deletion eligibility, force semantics or consent.
+
 ## Recorded-binding inventory
 
 `as list [--json] [--verbose] [--color=auto|always|never]` reads recorded session
@@ -669,11 +700,10 @@ as task finish --keep-branch --expected <receipt> --yes
 ```
 
 The first response provides `plan.receipt` and
-`plan.artifactDisposalRequiresReceipt` (the automation requirement). Text
-`finish --keep-branch --dry-run` prints the same receipt and a complete apply
-command; `--json` remains one machine-readable result. A branch-deleting text
-preview instead prints the interactive command: public automation receipts still
-require `--keep-branch`.
+`plan.artifactDisposalRequiresReceipt` (the automation requirement). Human
+`finish --dry-run` previews show scope and disposition without raw receipts or
+replay hints. `--json` remains one machine-readable result with the complete
+receipt; public automation receipts still require `--keep-branch`.
 
 Direct `finish --yes`, even from a terminal or with `--keep-branch`, refuses
 approved artifacts without a matching receipt. Piped stdin does not confer human

@@ -259,7 +259,7 @@ export function parseStartArguments(input: string[]): PresentationOptions & {
 	return { slug, launchConfiguredAgent, pr, trustPr, color, verbose };
 }
 
-export function parseFinishArguments(args: string[]): {
+export function parseFinishArguments(input: string[]): PresentationOptions & {
 	slug?: string;
 	yes: boolean;
 	force: boolean;
@@ -272,6 +272,7 @@ export function parseFinishArguments(args: string[]): {
 	expected?: string;
 } {
 	let slug: string | undefined;
+	const { args, color, verbose } = presentationArguments(input);
 	let expected: string | undefined;
 	let yes = false;
 	let force = false;
@@ -313,6 +314,7 @@ export function parseFinishArguments(args: string[]): {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
+	if ((all || branches || gone) && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags currently require a single-session finish selector.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -332,7 +334,7 @@ export function parseFinishArguments(args: string[]): {
 		throw argumentError(
 			"finish --expected requires one slug, --keep-branch and non-forced cleanup.",
 		);
-	return { slug, yes, force, keepBranch, all, branches, gone, dryRun, json, expected };
+	return { slug, yes, force, keepBranch, all, branches, gone, dryRun, json, expected, color, verbose };
 }
 
 export function parseBatchArguments(args: string[]): BatchFinishOptions {
@@ -458,7 +460,7 @@ function usage(): string {
 		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",
 		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",
 		"  agent-session <task-slug> repair",
-		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]] [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> finish --branches [--keep-branch] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
 		"  agent-session <task-slug> finish --all [--keep-branch] (preview recorded descendants, choose eligible branch deletion and confirm)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",

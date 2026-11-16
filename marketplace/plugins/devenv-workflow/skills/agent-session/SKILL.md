@@ -274,8 +274,13 @@ as <task-slug> finish --keep-branch --expected <receipt> --yes
 ```
 
 The receipt is `plan.receipt`; verify `plan.worktreePath`, `plan.currentBranch`,
-`plan.keepBranch` and non-forced behavior. A branch-preserving text preview also
-prints the receipt and full apply command; JSON remains the machine interface.
+`plan.keepBranch` and non-forced behavior. Use JSON for the complete receipt;
+state-first human previews omit raw tokens and replay hints. Older providers may
+also print them in text, but that is not the automation interface. On versions
+advertising single-session presentation flags in usage and `options:finish`,
+`--verbose` adds diagnostics and `--color=auto|always|never` controls styling.
+Neither flag changes scope or approval. Do not assume the flags work on other
+cleanup selectors without verifying their installed support.
 A preview is not cleanup authorization.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.

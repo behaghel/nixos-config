@@ -170,6 +170,7 @@ export function main(args: string[]): number {
 					options.dryRun,
 					options.json,
 					options.expected,
+					options,
 				);
 			}
 			return 0;

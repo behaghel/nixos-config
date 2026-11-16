@@ -17,14 +17,15 @@ export class CliError extends Error {
 // EAGAIN. Let a child of the same runtime read asynchronously while the parent
 // waits synchronously, keeping the existing operation lock held throughout.
 // Callers enforce TTY input; EOF or a failed prompt never supplies consent.
-export function confirm(question: string): boolean {
+export function confirm(question: string, onAccepted?: (simpleEcho: boolean) => void): boolean {
 	const reader = `
 process.stderr.write(process.argv[1] + ' ');
 let input = '', answered = false;
 const answer = (accepted) => {
   if (answered) return;
   answered = true;
-  process.stdout.write(accepted ? 'yes' : 'no');
+  const simple = /^(?:y|yes)\\n$/i.test(input);
+  process.stdout.write(accepted ? process.argv[2] === 'observe' ? simple ? 'yes:simple' : 'yes:other' : 'yes' : 'no');
   process.stdin.pause();
 };
 process.stdin.setEncoding('utf8');
@@ -36,10 +37,12 @@ process.stdin.on('data', (chunk) => {
 process.stdin.on('end', () => answer(false));
 process.stdin.on('error', () => answer(false));
 `;
-	const result = spawnSync(process.execPath, ["--input-type=module", "-e", reader, question], {
+	const result = spawnSync(process.execPath, ["--input-type=module", "-e", reader, question, onAccepted ? "observe" : "legacy"], {
 		stdio: ["inherit", "pipe", "inherit"], encoding: "utf8",
 	});
-	return result.status === 0 && result.stdout === "yes";
+	const accepted = result.status === 0 && (onAccepted ? ["yes:simple", "yes:other"].includes(result.stdout) : result.stdout === "yes");
+	if (accepted) onAccepted?.(result.stdout === "yes:simple");
+	return accepted;
 }
 
 export function formatActivityTime(timestamp: number, now: number): string {
