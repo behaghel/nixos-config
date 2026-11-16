@@ -137,18 +137,21 @@ agent-session __complete targets
 agent-session __complete options:create
 agent-session __complete options:finish
 agent-session __complete options:activity
-agent-session __complete options:global-status
+agent-session __complete options:global-list
 agent-session __complete options:global-batch
 agent-session completion bash
 ```
 
-Select the generated completion shell to match the project. Compare usage and
-candidates for the actual operations, for example:
+Select the generated completion shell to match the project. Unified inspection
+requires `list --inspect` in usage and `--inspect` in `options:global-list`.
+Older launchers may advertise `status` and `options:global-status` instead; report
+that actual interface and do not claim the new flag is supported. Compare usage
+and candidates for the actual operations, for example:
 
 | Requested operation | Required usage/completion evidence |
 |---|---|
 | Prepare and run work | Session commands `create`/`run`; creation `--json` when requested. |
-| Exact path inspection | Global `status` with `--worktree` in usage and `options:global-status`. |
+| Exact path inspection | Global `list --inspect --worktree` in usage and `--inspect`/`--worktree` in `options:global-list`; use only the advertised `status --worktree` interface on older verified versions. |
 | Guarded branch-preserving finish | `finish` with `--keep-branch`, `--dry-run` and `--expected` in usage and session completion options. |
 | Interrupted activity acknowledgement | `activity reconcile [--dry-run [--json]]` in usage and `reconcile`/preview flags in `options:activity`; no acknowledgement apply during capability checks. |
 | Inactive batch retirement | Global `batch finish` plus requested window/exclusion/receipt/apply flags, including `--inactive-for`, `--expected` and `--yes`, in usage and `options:global-batch`. |

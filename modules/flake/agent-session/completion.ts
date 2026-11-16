@@ -1,7 +1,7 @@
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { loadConfig, metadataSlugs, readMetadataInventory, discoverManagedWorktrees, resolveSessionTarget } from "./sessions.ts";
 import {
-	commandNames,
+	isCommandWord,
 	sessionCommandNames,
 	currentSessionCommandNames,
 	globalCommandNames,
@@ -16,12 +16,11 @@ const commandOptions: Record<string, string[]> = {
 	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
 	create: ["--dry-run", "--json", ...prOptions, ...presentationOptions],
 	start: ["--no-agent", ...prOptions, ...presentationOptions],
-	status: ["--json", "--refresh"],
-	doctor: ["--json"],
-	"global-doctor": ["--json"],
+	list: ["--inspect", "--json", "--refresh", ...presentationOptions],
+	doctor: ["--json", ...presentationOptions],
+	"global-doctor": ["--json", ...presentationOptions],
 	finish: ["--all", "--branches", "--keep-branch", "--expected", "--force", "--yes", "--dry-run", "--json"],
-	"global-status": ["--json", "--refresh", "--worktree"],
-	"global-list": ["--json"],
+	"global-list": ["--inspect", "--json", "--refresh", "--worktree", ...presentationOptions],
 	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", ...presentationOptions],
 	"global-finish": ["--all", "--gone", "--keep-branch", "--force", "--yes", "--dry-run", "--json"],
 };
@@ -68,9 +67,9 @@ export function completionCandidates(scope: string): string[] {
 			} catch {
 				// No implicit target is offered without a verified current binding.
 			}
-			return scope === "sessions" ? [...current, ...slugs] : [...global, ...current, ...slugs.filter((slug) => !commandNames.includes(slug))];
+			return scope === "sessions" ? [...current, ...slugs] : [...global, ...current, ...slugs.filter((slug) => !isCommandWord(slug))];
 		}
-		if (["cd", "run", "launch", "resume", "status", "finish"].includes(scope)) return recorded;
+		if (["cd", "run", "launch", "resume", "list", "finish"].includes(scope)) return recorded;
 	} catch {
 		// Completion remains usable outside a configured Git checkout.
 	}

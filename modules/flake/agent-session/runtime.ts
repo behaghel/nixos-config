@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { stripVTControlCharacters } from "node:util";
 import type { ColorMode, PresentationOptions, ProgressReporter } from "./types.ts";
 
 export class CliError extends Error {
@@ -127,6 +128,101 @@ export function progressReporter(command: string, json: boolean, compactInspecti
 export function styleText(text: string, code: number, color: ColorMode = "auto", terminal = process.stdout.isTTY): string {
 	const enabled = color === "always" || (color === "auto" && terminal && process.env.TERM !== "dumb" && !process.env.NO_COLOR);
 	return enabled ? `\x1b[${code}m${text}\x1b[0m` : text;
+}
+
+export function displayText(text: string): string {
+	return stripVTControlCharacters(text).replace(/[\x00-\x1f\x7f-\x9f]/g, (character) => `\\x${character.charCodeAt(0).toString(16).padStart(2, "0")}`);
+}
+
+/** Wrap durable output without truncating names, paths or problem statements. */
+export function formatLines(lines: string[], width = process.stdout.isTTY ? Math.max(1, (process.stdout.columns || 80) - 1) : Infinity): string {
+	return lines.flatMap((line) => {
+		const plain = stripVTControlCharacters(line);
+		if ([...plain].length <= width) return [line];
+		const indent = " ".repeat(Math.min(plain.match(/^ */)?.[0].length ?? 0, width - 1));
+		const available = width - indent.length;
+		const result: string[] = [];
+		let current = "";
+		for (const word of plain.trimStart().split(" ")) {
+			if (current && [...`${current} ${word}`].length > available) { result.push(indent + current); current = ""; }
+			const remaining = [...word];
+			while (remaining.length > available) {
+				if (current) { result.push(indent + current); current = ""; }
+				result.push(indent + remaining.splice(0, available).join(""));
+			}
+			if (remaining.length) current += (current ? " " : "") + remaining.join("");
+		}
+		if (current) result.push(indent + current);
+		return result;
+	}).join("\n") + "\n";
+}
+
+export function formatStateTable(headers: string[], rows: string[][], options: PresentationOptions = {},
+	cellColor?: (row: number, column: number) => number | undefined,
+	layout: { table?: boolean; shortenColumns?: number[] } = {}): string {
+	const data = rows.map((row) => row.map(displayText));
+	const widths = headers.map((header, column) => Math.max(header.length, ...data.map((row) => [...row[column]].length)));
+	const width = process.stdout.isTTY ? Math.max(1, (process.stdout.columns || 80) - 1) : Infinity;
+	const colour = (text: string, code?: number) => code === undefined ? text : styleText(text, code, options.color);
+	const needed = () => widths.reduce((sum, value) => sum + value, 0) + 2 * (headers.length - 1);
+	if (needed() > width && !layout.table) {
+		return formatLines(data.flatMap((row, rowIndex) => [
+			colour(row[0], cellColor?.(rowIndex, 0) ?? 1),
+			...row.slice(1).map((value, index) => `  ${headers[index + 1][0]}${headers[index + 1].slice(1).toLowerCase()}: ${colour(value, cellColor?.(rowIndex, index + 1))}`), "",
+		]));
+	}
+	if (layout.table && needed() > width) {
+		// Sacrifice secondary width first; identity and state cells wrap only
+		// when even those columns cannot otherwise fit. No card fallback.
+		for (const column of layout.shortenColumns ?? []) widths[column] = Math.max(headers[column].length, widths[column] - Math.max(0, needed() - width));
+		while (needed() > width) {
+			const room = widths.map((value, column) => value - headers[column].length);
+			const maximum = Math.max(...room);
+			if (maximum <= 0) break;
+			widths[room.indexOf(maximum)]--;
+		}
+	}
+	const line = (row: string[], rowIndex: number) => {
+		const cells = row.map((value, column) => layout.shortenColumns?.includes(column) && [...value].length > widths[column]
+			? [[...value].slice(0, widths[column] - 1).join("") + "…"]
+			: formatLines([value], widths[column]).slice(0, -1).split("\n"));
+		return Array.from({ length: Math.max(...cells.map((cell) => cell.length)) }, (_, part) => cells.map((cell, column) => {
+			const value = cell[part] ?? "";
+			const padded = column === headers.length - 1 ? value : value + " ".repeat(widths[column] - [...value].length);
+			return colour(padded, rowIndex < 0 ? 1 : cellColor?.(rowIndex, column));
+		}).join("  "));
+	};
+	return [...line(headers, -1), ...data.flatMap(line)].join("\n") + "\n";
+}
+
+export interface InspectionProgress {
+	update: (label: string) => void;
+	flush: () => void;
+}
+
+export function withInspection<T>(label: string, json: boolean, options: PresentationOptions,
+	operation: (progress: InspectionProgress) => T): T {
+	let transient = false, announced = false;
+	const terminal = process.stdout.isTTY && process.stderr.isTTY && process.env.TERM !== "dumb";
+	const progress: InspectionProgress = {
+		update(text) {
+			if (json) return;
+			if (terminal) {
+				const width = Math.max(1, (process.stderr.columns || 80) - 1);
+				process.stderr.write(`\r\x1b[2K${styleText([...displayText(text)].slice(0, width).join(""), 36, options.color)}`);
+				transient = true;
+			} else if (!announced) { process.stderr.write(`${displayText(label)}...\n`); announced = true; }
+		},
+		flush() { if (transient) process.stderr.write("\r\x1b[2K"); transient = false; },
+	};
+	progress.update(label);
+	try { return operation(progress); }
+	catch (error) {
+		if (json) throw error;
+		const failure = error instanceof CliError ? error : new CliError(String(error));
+		failure.color = options.color ?? "auto";
+		throw failure;
+	} finally { progress.flush(); }
 }
 
 /** Compact preparation only; callers retain the existing machine reporter. */

@@ -26,7 +26,9 @@ This spec supersedes earlier human-presentation requirements where they conflict
 mandatory unwrapped inventory rows on narrow terminals, raw receipts in ordinary
 text, JSON-only access to blocker explanations, and separate branch-selection
 and final cleanup confirmations. It does not supersede identity, selection,
-activity, eligibility, receipt or other machine/safety contracts.
+activity, eligibility, receipt or other machine/safety contracts. The command
+entrypoint for live inspection is `list --inspect`; `status` is removed with a
+migration error, while inspection JSON payload shapes remain unchanged.
 
 ## Decisions
 
@@ -34,9 +36,10 @@ activity, eligibility, receipt or other machine/safety contracts.
 |----------|--------|-----------|
 | Human output | Temporary in-place progress followed by a durable result | Show current state rather than a transcript of implementation phases. |
 | Collections | Stable rows whose state changes during processing; final counts | Make batch progress and outcomes visible without repeated log lines. |
-| Individual resources | Compact summaries using the same state vocabulary | Do not force single-session operations into oversized tables. |
+| Individual resources | Compact summaries using the same state vocabulary; inspection uses the same table for one or many rows | Unify session inspection without a separate single-resource status interface. |
+| Inspection entrypoint | Cheap inventory through `list`; live Git/binding tables through `list --inspect`; remove `status` with migration guidance | Keep inspection cost explicit and avoid two overlapping listing commands. |
 | Terminal use | Normal scrollback, no full-screen takeover | Remain a conventional CLI and coexist with launched programs. |
-| Narrow terminals | Compact stacked entries with wrapping details | Preserve usable identities, actions and outcomes rather than squeezing columns. |
+| Narrow terminals | Inspection keeps a state-column table, shortening secondary branch display and wrapping cells; other views may stack entries | Keep inspected state visually comparable without losing session identity or state. |
 | Redirected output | Plain append-only output by default; no cursor control | Keep captured output readable and predictable. |
 | Colour | `--color=auto|always|never`, default `auto`, respecting `NO_COLOR` | Provide restrained visual emphasis and explicit control. |
 | Meaning | Words carry every state; colour is supplementary | Output remains understandable without colour. |
@@ -73,10 +76,13 @@ activity, eligibility, receipt or other machine/safety contracts.
   blocker explanations in human-readable form; JSON is not required. Actual
   command failures still surface relevant original technical errors. Routine
   successful checks stay hidden.
-- AC-6: Narrow terminals use compact stacked entries instead of an unusable
-  table. Resource identity, action and outcome remain visible; long paths and
-  explanations wrap. Redirected output is append-only without cursor movement,
-  and preserves full resource identities.
+- AC-6: `list --inspect` remains a table with a visible state column for one or
+  many sessions, including narrower terminals. Secondary branch display may
+  shorten with an ellipsis; verbose details retain the complete current branch.
+  Session identity and state wrap within their columns when necessary rather
+  than switching to cards. Other views may use compact stacked entries on
+  narrow terminals. Redirected output is append-only without cursor movement,
+  and preserves full resource identities and branch values.
 - AC-7: `--color=never` suppresses colour; `auto` colours only suitable terminal
   output and respects `NO_COLOR`; `always` explicitly requests colour, including
   redirected human output. Colour never replaces words or affects JSON/protocol
@@ -113,7 +119,7 @@ activity, eligibility, receipt or other machine/safety contracts.
 
 ### Command boundaries
 
-- AC-14: The presentation applies to `list`, `status`, `doctor`, `create`, `start`,
+- AC-14: The presentation applies to `list` (including `--inspect`), `doctor`, `create`, `start`,
   `launch`, `resume`, `repair`, `branch create`, `ownership`, `activity reconcile`,
   and every `finish`/`batch finish` mode, including errors and empty results.
   Presentation does not add mutation or consent capabilities to those commands.
@@ -122,6 +128,16 @@ activity, eligibility, receipt or other machine/safety contracts.
   successful `activity touch` remains silent. New presentation flags are parsed
   as `as` options only in their documented positions, never stolen from child
   command arguments.
+
+- AC-16: `list` remains a cheap recorded-binding inventory by default.
+  `list --inspect` shows live Git/binding state as a table for one or many sessions;
+  scoped calls use `as <slug> list --inspect`, including `.`. Explicit remote
+  refresh and exact-path inspection remain available under `--inspect`.
+  Inspection-only modifiers and scoped calls without `--inspect` fail before
+  inspection. `status` is absent from help/completions and fails with migration
+  guidance rather than aliasing or being reinterpreted as a session name; an
+  explicitly escaped session named `status` remains usable. Live and exact
+  inspection retain their previous JSON payload schemas at the new entrypoint.
 
 ## Invariants
 
@@ -169,7 +185,7 @@ the agreed settings or authority boundaries.
 | AC-9–10 | In isolated fixtures, approve/decline exact plans, request branch deletion/preservation, and change evidence after confirmation. | Yes; terminal review too |
 | AC-11–12 | Isolate HOME/XDG settings; test flag precedence, interactive preferences, automation independence and unsupported deletion modes. | Yes |
 | AC-13 | Verify previews do not mutate or prompt; human output excludes receipt tokens while JSON retains valid receipts. | Yes |
-| AC-14–15 | Command-family coverage including empty/error cases, help/completions, child argument/stream passthrough and silent protocol paths. | Yes |
+| AC-14–16 | Command-family coverage including empty/error cases, help/completions, child passthrough, cheap versus live inventory, scoped/exact selectors and retired-command migration/refusal. | Yes |
 | Invariants | Existing provider/template regression suite and flake checks, plus receipt, refusal and interruption regressions. | Yes |
 
 Terminal appearance and live updates also require human acceptance; captured

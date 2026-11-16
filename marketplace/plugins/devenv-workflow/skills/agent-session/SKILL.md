@@ -85,8 +85,9 @@ unverified. This is capability-based acceptance, not an automatic chase for late
 Read-only questions do not require allocating a worktree. For repository changes
 subject to a managed-worktree policy:
 
-- If already in this task's recorded worktree, verify it with `as . status --json`
-  and reuse it. A new agent process/conversation is not a new resource request.
+- If already in this task's recorded worktree, verify it with
+  `as . list --inspect --json` on versions advertising unified inspection, or
+  `as . status --json` on older verified versions, and reuse it. A new agent process/conversation is not a new resource request.
 - Otherwise prepare one isolated resource with `as <task-slug> create --json`.
   Use the returned `session.worktreePath` and `session.branch`; do not infer
   identity from a directory basename or a branch-name convention.
@@ -167,12 +168,15 @@ an appended marker alone is not a completed mapping. No resources are retired.
 ## Diagnose without repairing
 
 Prefer `as <task-slug> doctor --json` (or verified `as . doctor --json`) and named
-status over repository-wide status when one resource is relevant. On supporting
+`as <task-slug> list --inspect --json` over repository-wide inspection when one
+resource is relevant. Older verified launchers may advertise `status` instead;
+use their actual interface, never assume the new flag exists. On supporting
 versions, `as list` is a creator-session tree using locally recorded activity;
 parents show their subtree's newest activity, and siblings sort recent-first.
 `as list --json` stays flat with the existing fields and the same parent-first
-traversal. Neither is live Git state; its branch is the recorded initial branch. Exact `status --worktree <path> --json`
-can inspect a missing directory without entering it.
+traversal. Neither is live Git state; its branch is the recorded initial branch. Exact `list --inspect --worktree <path> --json` on unified versions (or advertised
+`status --worktree` on older versions) can inspect a missing directory without
+entering it.
 
 Treat absent, inconsistent and unknown evidence distinctly. Empty inventory or a
 missing directory alone does not prove removal: bindings, native Git registration

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError, styleText } from "./runtime.ts";
+import { CliError, styleText, withInspection } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, createBranch, runInSession, launch, resume, start, repair } from "./lifecycle.ts";
@@ -20,7 +20,7 @@ import {
 	parseOwnershipArguments,
 	parseStartArguments,
 	parseFinishArguments,
-	parseStatusArguments,
+	parseListArguments,
 	parseBatchArguments,
 	parseDoctorArguments,
 	parseRequiredSlug,
@@ -112,30 +112,26 @@ export function main(args: string[]): number {
 			return batchFinish(primaryRoot(invocationRoot), invocationRoot, options);
 		}
 		if (command === "list") {
-			if (rest.some((argument) => argument !== "--json"))
-				throw argumentError("Use: agent-session list [--json].");
-			showInventory(primaryRoot(repositoryRoot()), rest.includes("--json"));
-			return 0;
-		}
-		if (command === "status") {
-			const options = parseStatusArguments(rest);
-			if (options.worktree) {
-				showExactStatus(primaryRoot(repositoryRoot()), options.worktree, options.json);
+			const options = parseListArguments(rest, !invocation.global);
+			return withInspection(options.inspect ? "Inspecting sessions" : "Reading session inventory", options.json, options, (progress) => {
+				if (!options.inspect) {
+					showInventory(primaryRoot(repositoryRoot()), options.json, options, progress);
+					return 0;
+				}
+				if (options.worktree) {
+					showExactStatus(primaryRoot(repositoryRoot()), options.worktree, options.json, options, progress);
+					return 0;
+				}
+				showStatus(primaryRoot(repositoryRoot()),
+					options.slug === undefined ? undefined : resolveSessionTarget(options.slug),
+					options.json, options.refresh, options, progress);
 				return 0;
-			}
-			if (invocation.global && options.slug) throw legacySessionSyntax(command);
-			showStatus(
-				primaryRoot(repositoryRoot()),
-				options.slug === undefined ? undefined : resolveSessionTarget(options.slug),
-				options.json,
-				options.refresh,
-			);
-			return 0;
+			});
 		}
 		if (command === "doctor") {
 			const options = parseDoctorArguments(rest);
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
-			return doctor(options.slug, options.json);
+			return withInspection("Checking session health", options.json, options, (progress) => doctor(options.slug, options.json, options, progress));
 		}
 		if (command === "repair") {
 			const slug = parseRequiredSlug("repair", rest);

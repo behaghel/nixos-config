@@ -24,7 +24,7 @@ agentSession.enable = true;
 
 Add `/.worktrees/` to `.gitignore`. Commit project setup before creating sessions:
 creation requires a clean primary checkout on the upstream remote's default branch.
-The remote tip is fetched for creation; `status` does not fetch unless requested.
+The remote tip is fetched for creation; `list --inspect` fetches only with explicit `--refresh`.
 The default agent is `pi`, which must be available in your environment.
 
 ```sh
@@ -32,8 +32,8 @@ as my-task create                   # prepare without launching a nested agent
 as my-task start                    # prepare and launch Pi
 as list                             # recent-first creator-session tree
 as list --json                      # cheap recorded-binding inventory
-as status                           # reconcile all sessions
-as my-task status                   # inspect one session
+as list --inspect                   # live Git/binding table for all sessions
+as my-task list --inspect           # the same table for one session
 as my-task launch                   # launch in an existing worktree
 as my-task resume                   # creator conversation, or latest own conversation for roots
 as my-task cd                       # change the current shell's directory
@@ -46,12 +46,12 @@ as my-task finish                   # guarded local cleanup, with confirmation
 ## Command grammar and migration
 
 Both `as` and `agent-session` use `<slug> <command>` for session-scoped actions.
-Repository-wide commands remain command-first: `as list`, `as status`, `as doctor`,
+Repository-wide commands remain command-first: `as list`, `as list --inspect`, `as doctor`,
 `as finish --all|--gone`, and `as completion bash|zsh|fish`.
 `as <slug> finish --all --dry-run` previews only that recorded session tree;
 `as finish --all --dry-run` retains repository-wide scope.
 
-Command words are reserved in the first position so old command-first calls cannot
+Command words, including retired `status`, stay reserved in the first position so old calls cannot
 be mistaken for an action on a differently named session. To address an existing
 session whose slug is a command word, put `--` before the slug:
 
@@ -66,6 +66,14 @@ The separator is valid for any slug. Legacy forms such as `as create my-task` an
 Update scripts and their pinned input together; older pins keep their old grammar.
 Existing non-PR session records and cleanup receipt schemas remain supported.
 Creation supports both preview JSON and an actual creation receipt.
+
+`status` is removed, not an alias. Replace `as status` with `as list --inspect`
+and `as <slug> status` with `as <slug> list --inspect`. Refresh and exact-path
+inspection require `--inspect`; scoped `list` also requires it. Old calls fail
+with migration guidance before inspection or mutation. The recorded-inventory,
+live-inspection and exact-resource JSON payload shapes remain unchanged; update
+script invocations with the provider pin. A session named `status` remains usable
+through the explicit escape, for example `as -- status list --inspect`.
 
 Session metadata remains in the shared Git directory at
 `agent-session/sessions/`. Existing Herbert sessions need no data migration.
@@ -387,9 +395,37 @@ its generated completion source and CLI help explain the distinction without
 inserting description text into commands. Fish registration replaces stale
 assembler completions for the installed `as` alias.
 
+## Human inspection output
+
+`list` (including `--inspect`) and `doctor` accept `--color=auto|always|never` and `--verbose`.
+Colour is automatic on capable terminals, respects nonempty `NO_COLOR`, and
+never replaces state words. Explicit `always` opts into colour even in a pipe;
+`never` disables it. JSON remains unstyled and has no new progress events.
+
+Human inspection announces activity before discovery and updates one temporary
+line while checking sessions. That line clears before the durable result.
+Redirected output gets one plain notice on stderr. Plain inventory and doctor
+views may stack entries on narrow terminals. `list --inspect` always retains a
+table with a `STATE` column: secondary branch display shortens with `…` when
+needed, while full session names and state wrap within their columns on smaller
+screens. Verbose details retain the full current branch, and redirected tables
+do not shorten branch values.
+
+`list --inspect` shows `SESSION`, `BRANCH` and `STATE`, followed by counts, using
+the same table for one or many sessions. When PR sessions exist it adds a compact
+`PR` number/recorded-state column; selected PR sessions retain their full link and
+base. PR state is not requeried from GitHub. `list --inspect --worktree <path>`
+shows a resource table with path and evidence classification. `--verbose` retains collection paths and full PR links,
+initial/owned branches and full problem explanations rather than appending them
+to every default report. Attention counts
+refer to the displayed Git/binding state, not cleanup eligibility or proof that
+all activity has completed. Inspection stays offline by default; `--refresh` retains
+its explicit remote-refresh behaviour.
+
 ## Recorded-binding inventory
 
-`as list [--json]` reads recorded session bindings without inspecting checkout
+`as list [--json] [--verbose] [--color=auto|always|never]` reads recorded session
+bindings without inspecting checkout
 Git state, refreshing remotes, or running preparation or agent commands. Text
 output is an aligned `SESSION`, `BRANCH`, `LAST ACTIVE` table with `tree`-style
 connectors for recorded Pi creator relationships. Parents precede their children.
@@ -405,27 +441,27 @@ results, and idle time do not independently advance it. Commits made outside
 managed commands are not yet observed.
 
 Activity is shown as a relative age below seven days and a local `YYYY-MM-DD`
-date thereafter. Terminals shorten long branch names with `…` while preserving
-session names and activity. At widths too small for the minimum row, preserving
-those values takes priority over fitting the terminal. Piped output retains the
-aligned table with full names and no colour or truncation.
+date thereafter. Narrow terminals stack entries with wrapped fields, preserving
+full session names, branches, activity and creator connectors. `--verbose` adds
+the recorded worktree path without querying live checkout state. Piped output
+retains the aligned table with full names, no truncation and no automatic colour.
 
 JSON uses the same parent-first traversal, with unprefixed slugs, no nesting,
 and no added relationship or activity fields. It remains
 one document with `version: 1`, `command: "list"`, and `sessions`, each containing
 only `slug`, `branch`, and `worktreePath`. `branch` is the recorded **initial**
 branch, not an observation of the current branch, ownership, or clean state.
-Use the selected `slug` with `as <slug> status --json` and guarded `finish` for
+Use the selected `slug` with `as <slug> list --inspect --json` and guarded `finish` for
 fresh inspection and cleanup; inventory alone never authorizes removal.
 
 The inventory includes valid records whose checkout is missing, but not
 unrecorded Git worktrees. An empty inventory therefore does not prove a resource
 is absent: consumers also check native Git registration and the filesystem.
 Malformed, unreadable, or unsafe records fail the whole inventory before any
-output rather than silently omitting potential bindings. A dangling metadata
+inventory rows are printed rather than silently omitting potential bindings. A dangling metadata
 store is not reported as an empty inventory. Listing does not repair records,
-prune registrations, or remove files. It accepts only `--json`, not `--refresh`,
-and is repository-wide rather than a session action.
+prune registrations, or remove files. It accepts `--json` and presentation flags,
+not `--refresh`, and is repository-wide rather than a session action.
 
 ## Creator conversations and resume
 
@@ -469,10 +505,10 @@ unavailable origin. Slug reuse never adopts an earlier parent's conversation.
 ## Exact-resource inspection
 
 ```sh
-as status --worktree /absolute/path/to/.worktrees/my-task --json
+as list --inspect --worktree /absolute/path/to/.worktrees/my-task --json
 ```
 
-Exact status runs from another checkout of the same repository, even when the
+Exact inspection runs from another checkout of the same repository, even when the
 selected directory is missing. The path must identify a configured managed slot.
 It reads the binding catalogue and shared native worktree registration list,
 then only the selected checkout's Git state. Unrelated checkout status and
@@ -681,8 +717,8 @@ requires a capable terminal and respects nonempty `NO_COLOR`; explicit `always`
 opts in even for redirected output or when `NO_COLOR` is set. Colour supplements
 state words, never replaces them. `--color=never` disables colour, not in-place
 terminal updates. JSON results and progress events are never styled. These colour
-controls and `--verbose` currently apply to batch previews and create/start
-preparation, not other commands or batch execution.
+controls and `--verbose` currently apply to batch previews, create/start
+preparation and list/doctor inspection, not other commands or batch execution.
 
 The raw approval receipt is not printed in human mode. Add `--json` for the full
 receipt and structured inspection evidence. This performs a fresh preview, so review that selection
@@ -852,7 +888,7 @@ Activity evidence:
   eligibility. The packaged `lsof` supplies this evidence; unavailable,
   unrecognized or failed process inspection blocks eligibility.
 
-Direct `status`, `list` and batch-preview polling update none of these clocks.
+Direct `list`, `list --inspect` and batch-preview polling update none of these clocks.
 Preview does not fetch, repair metadata, prune registrations, remove resources or
 start an agent. Git status inspection disables optional index writes.
 
@@ -870,7 +906,7 @@ Inside a recorded managed worktree, including its nested directories, use the
 explicit target `.` instead of repeating its slug:
 
 ```sh
-as . status --json
+as . list --inspect --json
 as . cd
 as . run bun test
 as . resume
@@ -882,12 +918,12 @@ the current branch name, fetch, allocate, or repair anything. The selected comma
 retains its normal behavior, and JSON output uses the canonical slug, never `.`.
 Renaming the current branch does not change the session identity.
 
-There is no implicit default target: `as status` still lists all sessions. `.` is
+There is no implicit default target: `as list --inspect` inspects all sessions. `.` is
 rejected from the primary checkout, unmanaged worktrees, and unrecorded or invalid
 bindings. A nested Git repository is a separate context, not its outer session.
 Use an explicit slug to inspect or repair missing metadata. Creation, `start`,
 and `repair` require explicit slugs; `.` supports only `cd`, `run`, `launch`,
-`resume`, `status`, `doctor`, and `finish`. The escape form `as -- . status` also works.
+`resume`, `list --inspect`, `doctor`, and `finish`. The escape form `as -- . list --inspect` also works.
 
 The existing invoking-worktree cleanup guard still rejects `as . finish`, even
 with `--force` or `--dry-run`. Move to the primary checkout and finish by slug.
@@ -945,6 +981,14 @@ as my-task doctor --json
 as . doctor --json
 ```
 
+Default human output shows warnings/errors in a compact `SESSION`, `CHECK`,
+`STATE`, `REASON` table, followed by error/warning/pass counts. Repeated identical
+findings share one row with a multiplicity marker; the counts still reflect every
+check. Successful and informational checks stay hidden unless `--verbose` is
+requested. Verbose reports retain every check and its complete safe explanation;
+JSON always retains the original flat checks array, without grouping or omissions.
+Neither mode reveals configuration contents or performs repairs.
+
 Doctor checks module configuration, ignored worktree-root policy, installed shell
 and completion files, recorded bindings and registered managed slots, configured
 local symlinks, and lifecycle locks. It also finds registered slots whose metadata
@@ -989,7 +1033,7 @@ Installed files cannot prove that the parent shell loaded its functions or
 completions; the `shell-parent` informational check asks you to verify `type as`
 there. Lock warnings report only stored owner information, not process liveness
 or proven ownership. Neither a successful report nor a warning grants authority
-to repair or remove anything. Use `status` for dirtiness, freshness, publication,
+to repair or remove anything. Use `list --inspect` for dirtiness, freshness, publication,
 and branch-ownership diagnostics; doctor is not a replacement for cleanup guards.
 There are no `--fix`, `--repair`, or `--refresh` options.
 
@@ -1095,7 +1139,7 @@ refused without GitHub lookup or cloning. Numbers never select another project.
 PRs may come from forks; checkout does not require push permission.
 
 Open, draft, closed, and merged PRs are supported when their retained head can
-be fetched. No PR is reopened or marked ready by creation. Human creation/status
+be fetched. No PR is reopened or marked ready by creation. Human creation/inspection
 output includes PR identity, state, draft status, and the recorded base branch;
 JSON keeps `state` and `isDraft` separate. These are recorded at creation:
 Git-only status refresh does not requery GitHub or adopt a new PR head.
@@ -1178,7 +1222,7 @@ Branches actually created during the session retain normal ownership checks.
 Borrowed sessions store metadata `version: 2` with `initialBranchOwned: false`
 and a preexisting-branch snapshot containing the borrowed branch. Owned sessions
 retain metadata version 1; current readers accept both versions. Outer creation
-receipts and status envelopes remain version 1. Version-1-only launchers reject
+receipts and inspection envelopes remain version 1. Version-1-only launchers reject
 borrowed records rather than ignoring an added flag and deleting a borrowed
 `agent/<slug>` branch. Inconsistent version/ownership records are refused.
 Do not downgrade borrowed records or reconstruct them as version 1. If a borrowed
@@ -1204,7 +1248,7 @@ original PR. Ordinary user Git settings remain unchanged. Publication starts as
 `unpublished`; normal cleanup protects this separate work. Use
 `finish --keep-branch` to remove the worktree and preserve its branch.
 
-Creation receipts and `status --json` expose a `pr` object containing `number`,
+Creation receipts and `list --inspect --json` expose a `pr` object containing `number`,
 `url`, `repository`, `baseBranch`, `headBranch`, `headCommit`, `state`, `isDraft`,
 `mode`, `trustedHeadCommit`, `sourceRepository`, `sourceRemote`, and the optional
 `sourceBranchMissing` annotation. Older records

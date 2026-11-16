@@ -331,10 +331,11 @@ describe("creator conversation trees", () => {
 			expect(slugs()).toBe("parent,child,grandchild,child-b,other");
 			const terminal = join(fixture.root, "narrow-terminal.mjs");
 			writeFileSync(terminal, 'Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 42 } });\n');
-			const tty = runCli(fixture.checkout, ["list"], { NODE_OPTIONS: `--import=${terminal}` });
+			const tty = runCli(fixture.checkout, ["list", "--color=never"], { NODE_OPTIONS: `--import=${terminal}` });
 			expect(tty.status).toBe(0);
 			expect(tty.stdout).toContain("│   └── grandchild");
-			expect(tty.stdout).toContain("…");
+			expect(tty.stdout).toContain("agent/grandchild");
+			expect(tty.stdout.includes("…")).toBe(false);
 			expect(tty.stdout.trimEnd().split("\n").every((line) => [...line].length <= 42)).toBe(true);
 			const piped = runCli(fixture.checkout, ["list"], { COLUMNS: "42" });
 			expect(piped.status).toBe(0);
@@ -818,10 +819,10 @@ describe("explicit session branch ownership", () => {
 			}
 			git(cwd, "switch", "feat/owned-one");
 			git(cwd, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Advance owned branch");
-			const owned = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			const owned = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(owned.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner,feat/owned-one,fix/owned-two");
 			git(cwd, "switch", "-c", "feat/plain-git");
-			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			const status = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.includes("feat/plain-git")).toBe(false);
 			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
 			expect(preview.status).toBe(0);
@@ -854,7 +855,7 @@ describe("explicit session branch ownership", () => {
 			expect(legacy.stderr).toContain("legacy sessions");
 			expect(git(cwd, "branch", "--list", "feat/legacy")).toBe("");
 			git(cwd, "switch", "-c", "feat/plain-legacy");
-			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			const status = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
@@ -869,7 +870,7 @@ describe("explicit session branch ownership", () => {
 			git(cwd, "branch", "-D", "agent/owner");
 			git(cwd, "branch", "agent/owner");
 			git(cwd, "switch", "agent/owner");
-			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			const status = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.length).toBe(0);
 			expect(JSON.parse(status.stdout).sessions[0].state).toBe("conflict");
 			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
@@ -907,7 +908,7 @@ describe("explicit session branch ownership", () => {
 		const fixture = setup();
 		try {
 			git(fixture.session.worktreePath, "switch", "-c", "feat/unclaimed");
-			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			const status = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
 			const finish = runCli(fixture.checkout, ["owner", "finish", "--force", "--yes"]);
 			expect(finish.status).toBe(1);
@@ -933,7 +934,7 @@ describe("explicit session branch ownership", () => {
 			expect(runCli(cwd, [".", "branch", "create", "feat/reused"]).status).toBe(0);
 			git(cwd, "branch", "-D", "feat/reused");
 			git(cwd, "branch", "feat/reused");
-			const status = runCli(fixture.checkout, ["owner", "status", "--json"]);
+			const status = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
 			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
 			expect(JSON.parse(preview.stdout).plans[0].unresolvedBranches.includes("feat/reused")).toBe(true);
@@ -2210,7 +2211,7 @@ describe("cheap inventory and exact resource inspection", () => {
 			expect(inventory.status).toBe(0);
 			expect(JSON.parse(inventory.stdout).sessions.length).toBe(2);
 			expect(readFileSync(calls, "utf8").includes("status --porcelain")).toBe(false);
-			const exact = runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"], env);
+			const exact = runCli(fixture.checkout, ["list", "--inspect", "--worktree", worktree, "--json"], env);
 			expect(exact.status).toBe(0);
 			const result = JSON.parse(exact.stdout);
 			expect(result.resourceState).toBe("present");
@@ -2227,7 +2228,7 @@ describe("cheap inventory and exact resource inspection", () => {
 			const metadata = sessionMetadataPath(fixture.checkout, "missing");
 			const saved = readFileSync(metadata, "utf8");
 			writeFileSync(metadata, "{malformed");
-			const malformed = runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
+			const malformed = runCli(fixture.checkout, ["list", "--inspect", "--worktree", worktree, "--json"]);
 			expect(malformed.status).toBe(0);
 			expect(JSON.parse(malformed.stdout).resourceState).toBe("unknown");
 			const inventory = runCli(fixture.checkout, ["list", "--json"]);
@@ -2235,7 +2236,7 @@ describe("cheap inventory and exact resource inspection", () => {
 			expect(inventory.stdout).toBe("");
 			writeFileSync(metadata, saved);
 			rmSync(worktree, { recursive: true });
-			const inspect = () => runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]);
+			const inspect = () => runCli(fixture.checkout, ["list", "--inspect", "--worktree", worktree, "--json"]);
 			const stale = inspect();
 			expect(stale.status).toBe(0);
 			expect(JSON.parse(stale.stdout).resourceState).toBe("inconsistent");
@@ -2255,12 +2256,12 @@ describe("cheap inventory and exact resource inspection", () => {
 			symlinkSync(join(fixture.root, "nonexistent"), worktree);
 			expect(JSON.parse(inspect().stdout).resourceState).toBe("unknown");
 			expect(lstatSync(worktree).isSymbolicLink()).toBe(true);
-			const outside = runCli(fixture.checkout, ["status", "--worktree", fixture.seed, "--json"]);
+			const outside = runCli(fixture.checkout, ["list", "--inspect", "--worktree", fixture.seed, "--json"]);
 			expect(JSON.parse(outside.stdout).resourceState).toBe("unknown");
 			for (const args of [
-				["status", "--worktree"],
-				["status", "--worktree", worktree, "--refresh"],
-				["missing", "status", "--worktree", worktree],
+				["list", "--inspect", "--worktree"],
+				["list", "--inspect", "--worktree", worktree, "--refresh"],
+				["missing", "list", "--inspect", "--worktree", worktree],
 				["list", "--refresh"],
 			]) expect(runCli(fixture.checkout, args).status).toBe(64);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -3313,7 +3314,7 @@ describe("inactive-session batch preview", () => {
 			expect(outcomes.dirty).toBe("dirty");
 			expect(outcomes.live).toBe("live-operation");
 			expect(outcomes.retained).toBe("excluded");
-			expect(runCli(fixture.checkout, ["eligible", "status", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["eligible", "list", "--inspect", "--json"]).status).toBe(0);
 			expect(runCli(fixture.checkout, ["list", "--json"]).status).toBe(0);
 			const polled = runCli(fixture.checkout, args);
 			expect(polled.status).toBe(0);
@@ -3395,7 +3396,7 @@ describe("inactive-session batch preview", () => {
 			expect(Number.isFinite(Date.parse(metadata.lastWorkAt))).toBe(true);
 			expect(metadata.activeOperations.length).toBe(0);
 			const before = readFileSync(path, "utf8");
-			expect(runCli(fixture.checkout, ["working", "status", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["working", "list", "--inspect", "--json"]).status).toBe(0);
 			expect(readFileSync(path, "utf8")).toBe(before);
 			metadata.lastWorkAt = "2000-01-01T00:00:00Z";
 			writeFileSync(path, JSON.stringify(metadata));
@@ -3574,7 +3575,7 @@ describe("guarded inactive batch finish", () => {
 			const aliasPath = sessionMetadataPath(fixture.checkout, "alias");
 			const metadata = JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "selected"), "utf8"));
 			writeFileSync(aliasPath, JSON.stringify({ ...metadata, slug: "alias", branch: "agent/alias" }));
-			const inspect = () => JSON.parse(runCli(fixture.checkout, ["status", "--worktree", worktree, "--json"]).stdout);
+			const inspect = () => JSON.parse(runCli(fixture.checkout, ["list", "--inspect", "--worktree", worktree, "--json"]).stdout);
 			expect(inspect().resourceState).toBe("inconsistent");
 			git(fixture.checkout, "worktree", "remove", worktree);
 			rmSync(sessionMetadataPath(fixture.checkout, "selected"));
@@ -3756,20 +3757,20 @@ describe("recent-first inventory table", () => {
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 
-	it("shortens only branches in a narrow terminal but keeps full names when piped", () => {
+	it("stacks narrow inventory entries without truncating identities or branches, and keeps piped tables", () => {
 		const slug = "a-session-with-a-very-long-name";
 		const fixture = inventoryFixture([{ slug, createdAt: "2026-11-15T11:58:00Z" }]);
 		try {
 			const terminal = join(fixture.root, "terminal.mjs");
 			writeFileSync(terminal, `import ${JSON.stringify(fixture.clock)};\nObject.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 62 } });\n`);
-			const tty = runCli(fixture.checkout, ["list"], { ...fixture.environment, NODE_OPTIONS: `--import=${terminal}` });
+			const tty = runCli(fixture.checkout, ["list", "--color=never"], { ...fixture.environment, NODE_OPTIONS: `--import=${terminal}` });
 			expect(tty.status).toBe(0);
 			const lines = tty.stdout.trimEnd().split("\n");
-			expect(lines.length).toBe(2);
-			expect(lines[0]).toContain("LAST ACTIVE");
-			expect(lines[1]).toContain(slug);
-			expect(lines[1]).toContain("…");
-			expect(lines[1].endsWith("2m ago")).toBe(true);
+			expect(lines.length).toBe(3);
+			expect(lines[0]).toBe(slug);
+			expect(lines[1]).toContain(`Branch: agent/${slug}`);
+			expect(lines[2]).toContain("Last active: 2m ago");
+			expect(tty.stdout.includes("…")).toBe(false);
 			expect(lines.every((line) => [...line].length <= 62)).toBe(true);
 			const piped = runCli(fixture.checkout, ["list"], { ...fixture.environment, COLUMNS: "62" });
 			expect(piped.status).toBe(0);
@@ -3827,7 +3828,7 @@ describe("metadata-only inventory", () => {
 			expect(target.branch).toBe("agent/target");
 			expect(target.worktreePath).toBe(worktree);
 			expect(Object.keys(target).sort().join(",")).toBe("branch,slug,worktreePath");
-			const selected = runCli(fixture.checkout, [target.slug, "status", "--json"], environment);
+			const selected = runCli(fixture.checkout, [target.slug, "list", "--inspect", "--json"], environment);
 			expect(selected.status).toBe(0);
 			expect(JSON.parse(selected.stdout).sessions[0].branch).toBe("renamed-target");
 			expect(existsSync(marker)).toBe(false);
@@ -3922,7 +3923,7 @@ describe("PR review session creation", () => {
 			expect(git(worktree, "config", `branch.${fixture.branch}.pushRemote`)).toBe("origin");
 			expect(existsSync(fixture.agentLog)).toBe(false);
 			expect(readFileSync(fixture.prepareLog, "utf8")).toBe("prepared");
-			const status = runCli(worktree, [".", "status", "--json"], fixture.environment);
+			const status = runCli(worktree, [".", "list", "--inspect", "--json"], fixture.environment);
 			expect(status.status).toBe(0);
 			expect(JSON.parse(status.stdout).sessions[0].publication).toBe("published");
 			const ghCalls = readFileSync(fixture.ghLog, "utf8").trim().split("\n").map((line) => JSON.parse(line));
@@ -4297,9 +4298,9 @@ describe("PR URLs and fork sources", () => {
 			git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Advance fork");
 			git(fixture.fork, "fetch", fixture.seed, fixture.branch);
 			git(fixture.fork, "update-ref", `refs/heads/${fixture.branch}`, "FETCH_HEAD");
-			const stale = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+			const stale = runCli(fixture.checkout, ["review-auth", "list", "--inspect", "--json"], fixture.environment);
 			expect(JSON.parse(stale.stdout).sessions[0].publication).toBe("published");
-			const refreshed = runCli(fixture.checkout, ["review-auth", "status", "--refresh", "--json"], fixture.environment);
+			const refreshed = runCli(fixture.checkout, ["review-auth", "list", "--inspect", "--refresh", "--json"], fixture.environment);
 			expect(refreshed.status).toBe(0);
 			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("behind");
 			expect(runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment).status).toBe(0);
@@ -4404,7 +4405,7 @@ describe("independent work from a PR", () => {
 				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(sourceConfig);
 				expect(readFileSync(join(occupied, "local-review.txt"), "utf8")).toBe("keep my review\n");
 				expect(git(occupied, "rev-parse", "HEAD")).toBe(fixture.head);
-				const status = runCli(metadata.worktreePath, [".", "status", "--json"], fixture.environment);
+				const status = runCli(metadata.worktreePath, [".", "list", "--inspect", "--json"], fixture.environment);
 				expect(status.status).toBe(0);
 				expect(JSON.parse(status.stdout).sessions[0].publication).toBe("unpublished");
 				expect(runCli(fixture.checkout, ["followup", "finish", "--yes"], fixture.environment).status).toBe(1);
@@ -4429,7 +4430,7 @@ describe("independent work from a PR", () => {
 			expect(metadata.pr.sourceRemote).toBe(undefined);
 			expect(git(fixture.checkout, "remote")).toBe("origin");
 			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(before);
-			const refreshed = runCli(fixture.checkout, ["followup", "status", "--refresh", "--json"], fixture.environment);
+			const refreshed = runCli(fixture.checkout, ["followup", "list", "--inspect", "--refresh", "--json"], fixture.environment);
 			expect(refreshed.status).toBe(0);
 			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("unpublished");
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -4559,7 +4560,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 				expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
 				let branch = fixture.branch;
 				if (mode === "renamed") { branch = "fix/renamed-borrowed"; git(metadata.worktreePath, "branch", "-m", branch); }
-				const status = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+				const status = runCli(fixture.checkout, ["review-auth", "list", "--inspect", "--json"], fixture.environment);
 				expect(status.status).toBe(0);
 				expect(JSON.parse(status.stdout).sessions[0].ownedBranches.length).toBe(0);
 				expect(JSON.parse(status.stdout).sessions[0].state).toBe(mode === "renamed" ? "conflict" : "ready");
@@ -4646,7 +4647,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 			expect(created.status).toBe(0);
 			const worktree = JSON.parse(created.stdout).session.worktreePath;
 			createOwnedBranch(worktree, "fix/session-owned", fixture.environment);
-			const status = runCli(fixture.checkout, ["review-auth", "status", "--json"], fixture.environment);
+			const status = runCli(fixture.checkout, ["review-auth", "list", "--inspect", "--json"], fixture.environment);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("fix/session-owned");
 			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment).status).toBe(0);
 			expect(git(fixture.checkout, "branch", "--list", "fix/session-owned")).toBe("");
@@ -4702,9 +4703,14 @@ describe("historical PRs and release bases", () => {
 					const metadata = JSON.parse(created.stdout).session;
 					expect(metadata.pr.state).toBe(state);
 					expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
-					const status = runCli(fixture.checkout, ["history", "status"], fixture.environment);
+					const status = runCli(fixture.checkout, ["history", "list", "--inspect"], fixture.environment);
 					expect(status.stdout).toContain(fixture.response.url);
 					expect(status.stdout).toContain(state);
+					const collection = runCli(fixture.checkout, ["list", "--inspect"], fixture.environment);
+					expect(collection.stdout).toContain("PR");
+					expect(collection.stdout).toContain(`#123 · ${state}`);
+					const verbose = runCli(fixture.checkout, ["history", "list", "--inspect", "--verbose"], fixture.environment);
+					expect(verbose.stdout.split(fixture.response.url).length).toBe(2);
 					expect(git(fixture.remote, "show-ref")).toBe(refs);
 				} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 			});
@@ -4835,14 +4841,14 @@ exec ${tomlString(realGit)} "$@"
 				const metadata = JSON.parse(created.stdout).session;
 				expect(metadata.defaultBranch).toBe("master");
 				expect(metadata.pr.baseBranch).toBe("release/2.x");
-				const fresh = runCli(fixture.checkout, ["release-review", "status", "--json"], fixture.environment);
+				const fresh = runCli(fixture.checkout, ["release-review", "list", "--inspect", "--json"], fixture.environment);
 				expect(JSON.parse(fresh.stdout).sessions[0].fresh).toBe(true);
 				git(fixture.seed, "checkout", "release/2.x");
 				writeFileSync(join(fixture.seed, "release.txt"), "advance release\n");
 				git(fixture.seed, "add", "release.txt");
 				git(fixture.seed, "-c", "commit.gpgsign=false", "commit", "-m", "Advance release");
 				git(fixture.seed, "push", "origin", "release/2.x");
-				const stale = runCli(fixture.checkout, ["release-review", "status", "--refresh", "--json"], fixture.environment);
+				const stale = runCli(fixture.checkout, ["release-review", "list", "--inspect", "--refresh", "--json"], fixture.environment);
 				expect(JSON.parse(stale.stdout).sessions[0].fresh).toBe(false);
 				const launched = runCli(fixture.checkout, ["release-review", "launch"], fixture.environment);
 				expect(launched.status).toBe(0);
@@ -4945,10 +4951,10 @@ describe("subject-first invocation", () => {
 		try {
 			const created = runCli(fixture.checkout, ["new-task", "create"]);
 			expect(created.status).toBe(0);
-			const inspected = runCli(fixture.checkout, ["new-task", "status", "--json"]);
+			const inspected = runCli(fixture.checkout, ["new-task", "list", "--inspect", "--json"]);
 			expect(inspected.status).toBe(0);
 			expect(JSON.parse(inspected.stdout).sessions[0].slug).toBe("new-task");
-			expect(runCli(fixture.checkout, ["status", "--json"]).status).toBe(0);
+			expect(runCli(fixture.checkout, ["list", "--inspect", "--json"]).status).toBe(0);
 			expect(runCli(fixture.checkout, ["finish", "--all", "--dry-run", "--json"]).status).toBe(0);
 			expect(runCli(fixture.checkout, ["completion", "bash"]).status).toBe(0);
 		} finally {
@@ -4966,8 +4972,8 @@ describe("subject-first invocation", () => {
 				["launch", "git-hygiene"],
 				["resume", "git-hygiene"],
 				["repair", "git-hygiene"],
-				["status", "git-hygiene"],
-				["status", "--json", "git-hygiene"],
+				["list", "--inspect", "git-hygiene"],
+				["list", "--inspect", "--json", "git-hygiene"],
 				["finish", "git-hygiene", "--keep-branch", "--yes"],
 				["run", "git-hygiene", "touch", "unexpected"],
 				["cd", "git-hygiene"],
@@ -5004,20 +5010,22 @@ describe("subject-first invocation", () => {
 	it("requires an explicit escape for slugs that collide with command words", () => {
 		const fixture = createRepositoryFixture();
 		try {
-			for (const slug of ["status", "doctor", "finish", "create", "run", "completion"]) {
+			for (const slug of ["status", "list", "doctor", "finish", "create", "run", "completion"]) {
 				expect(runCli(fixture.checkout, ["--", slug, "create"]).status).toBe(0);
-				const result = runCli(fixture.checkout, ["--", slug, "status", "--json"]);
+				const result = runCli(fixture.checkout, ["--", slug, "list", "--inspect", "--json"]);
 				expect(result.status).toBe(0);
 				expect(JSON.parse(result.stdout).sessions[0].slug).toBe(slug);
 				expect(runCli(fixture.checkout, [slug, "cd"]).status).toBe(64);
 			}
 			const targets = runCli(fixture.checkout, ["__complete", "targets"]);
-			expect(targets.stdout).toContain("status\n");
+			expect(targets.stdout.split("\n").includes("status")).toBe(false);
+			expect(targets.stdout).toContain("list\n");
 			expect(targets.stdout.split("\n").includes("create")).toBe(false);
 			const escaped = runCli(fixture.checkout, ["__complete", "sessions"]);
 			expect(escaped.stdout).toContain("create\n");
+			expect(escaped.stdout).toContain("status\n");
 			git(fixture.checkout, "worktree", "remove", join(fixture.worktrees, "status"));
-			const orphaned = runCli(fixture.checkout, ["--", "status", "status", "--json"]);
+			const orphaned = runCli(fixture.checkout, ["--", "status", "list", "--inspect", "--json"]);
 			expect(orphaned.status).toBe(0);
 			expect(JSON.parse(orphaned.stdout).sessions[0].problem).toContain("agent-session -- status finish --force");
 		} finally {
@@ -5043,7 +5051,7 @@ describe("agent-session create and start", () => {
 			expect(creationReceipt.session.worktreePath).toBe(worktree);
 			const nested = join(worktree, "nested");
 			mkdirSync(nested);
-			const current = installed("as", [".", "status", "--json"], nested);
+			const current = installed("as", [".", "list", "--inspect", "--json"], nested);
 			expect(current.stderr).toBe("");
 			expect(current.status).toBe(0);
 			expect(JSON.parse(current.stdout).sessions[0].slug).toBe("installed-package");
@@ -5054,7 +5062,7 @@ describe("agent-session create and start", () => {
 			expect(installed("as", ["doctor", "cd"]).stderr).toContain("Session commands use <task-slug> <command>");
 			expect(installed("agent-session", [".", "cd"], nested).stdout).toBe(`${worktree}\n`);
 			rmSync(nested, { recursive: true });
-			const status = installed("as", ["installed-package", "status", "--json"]);
+			const status = installed("as", ["installed-package", "list", "--inspect", "--json"]);
 			expect(status.status).toBe(0);
 			const catalog = JSON.parse(status.stdout);
 			expect(catalog.sessions.length).toBe(1);
@@ -5434,7 +5442,7 @@ child.on('error', (error) => { process.stderr.write(String(error)); process.exit
 child.on('close', (code) => { process.stdout.write(Buffer.concat(chunks)); process.exitCode = code ?? 1; });
 `;
 			const results = [["node", cliScript], ["as"]].map((entry) =>
-				spawnSync("node", ["--input-type=module", "-e", slowReader, ...entry, "status", "--json"], {
+				spawnSync("node", ["--input-type=module", "-e", slowReader, ...entry, "list", "--inspect", "--json"], {
 					cwd: fixture.checkout,
 					encoding: "utf8",
 					env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) },
@@ -5895,6 +5903,264 @@ finally:
 	}
 });
 
+describe("state-first inspection output", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-inspection-output-");
+		writeConfig(fixture.checkout, "true");
+		for (const slug of ["healthy", "missing"]) expect(runCli(fixture.checkout, [slug, "create"]).status).toBe(0);
+		git(fixture.checkout, "worktree", "remove", join(fixture.worktrees, "missing"));
+		const terminal = join(fixture.root, "inspection-terminal.mjs");
+		writeFileSync(terminal, 'for (const stream of [process.stdout, process.stderr]) Object.defineProperties(stream, { isTTY: { value: true }, columns: { get: () => Number(process.env.TEST_COLUMNS || 120) } });\n');
+		return { ...fixture, terminal };
+	}
+
+	it("unifies live state under list --inspect while keeping inventory cheap and machine payloads stable", () => {
+		const fixture = setup();
+		try {
+			const inventory = runCli(fixture.checkout, ["list", "--json"]);
+			expect(inventory.status).toBe(0);
+			expect(Object.keys(JSON.parse(inventory.stdout)).sort().join(",")).toBe("command,sessions,version");
+			const inspected = runCli(fixture.checkout, ["list", "--inspect", "--json"]);
+			expect(inspected.status).toBe(0);
+			expect(inspected.stderr).toBe("");
+			const report = JSON.parse(inspected.stdout);
+			expect(Object.keys(report).sort().join(",")).toBe("operation,sessions,version");
+			expect(report.sessions.find((session) => session.slug === "missing").state).toBe("orphaned");
+			for (const args of [["healthy", "list", "--inspect"], [".", "list", "--inspect"]]) {
+				const result = runCli(join(fixture.worktrees, "healthy"), [...args, "--color=never"]);
+				expect(result.status).toBe(0);
+				expect(result.stdout).toContain("SESSION");
+				expect(result.stdout).toContain("BRANCH");
+				expect(result.stdout).toContain("STATE");
+				expect(result.stdout).toContain("Clean · Fresh · Unpublished");
+				expect(result.stdout.includes("Session ·")).toBe(false);
+			}
+			const exact = runCli(fixture.checkout, ["list", "--inspect", "--worktree", join(fixture.worktrees, "missing"), "--color=never"]);
+			expect(exact.status).toBe(0);
+			expect(exact.stdout).toContain("WORKTREE");
+			expect(exact.stdout).toContain("STATE");
+			for (const args of [["list", "--refresh"], ["list", "--worktree", fixture.worktrees], ["healthy", "list"], ["list", "--inspect", "healthy"]]) {
+				const rejected = runCli(fixture.checkout, args);
+				expect(rejected.status).toBe(64);
+				expect(rejected.stdout).toBe("");
+				expect(rejected.stderr).toContain("--inspect");
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps inspect state in a table at ordinary terminal widths instead of falling back to cards", () => {
+		const fixture = setup();
+		try {
+			const branch = "feat/a-long-current-branch-that-should-not-push-state-out-of-the-table";
+			const longName = "a-session-with-a-long-identity";
+			expect(runCli(fixture.checkout, [longName, "create"]).status).toBe(0);
+			const worktree = join(fixture.worktrees, "healthy");
+			git(worktree, "branch", "-m", branch);
+			const env = { TERM: "xterm-256color", NO_COLOR: "1", NODE_OPTIONS: `--import=${fixture.terminal}`, TEST_COLUMNS: "80" };
+			for (const args of [["list", "--inspect"], ["healthy", "list", "--inspect"]]) {
+				const result = runCli(fixture.checkout, [...args, "--color=never"], env);
+				expect(result.status).toBe(0);
+				const lines = result.stdout.split("\n"), header = lines[0];
+				expect(header.startsWith("SESSION")).toBe(true);
+				expect(header).toContain("STATE");
+				const row = lines.find((line) => line.startsWith("healthy "));
+				expect(row?.indexOf("Branch conflict")).toBe(header.indexOf("STATE"));
+				expect(row).toContain("…");
+				expect(lines.every((line) => [...line].length <= 80)).toBe(true);
+				expect(result.stdout.includes("State:")).toBe(false);
+			}
+			const verbose = runCli(fixture.checkout, ["healthy", "list", "--inspect", "--verbose", "--color=never"], env);
+			expect(verbose.stdout).toContain(branch);
+			const tiny = runCli(fixture.checkout, ["list", "--inspect", "--color=never"], { ...env, TEST_COLUMNS: "36" });
+			expect(tiny.stdout.split("\n")[0]).toContain("STATE");
+			expect(tiny.stdout.includes("State:")).toBe(false);
+			expect(tiny.stdout.split("\n").every((line) => [...line].length <= 36)).toBe(true);
+			const tinyLines = tiny.stdout.split("\n"), heading = tinyLines[0];
+			const table = tinyLines.slice(1, tinyLines.findIndex((line) => line.trim() === ""));
+			expect(table.map((line) => line.slice(heading.indexOf("STATE")).trim()).join(" ")).toContain("Branch conflict");
+			expect(table.map((line) => line.slice(0, heading.indexOf("BRANCH") - 2).trim()).join("")).toContain(longName);
+			const piped = runCli(fixture.checkout, ["healthy", "list", "--inspect", "--color=never"], { NODE_OPTIONS: "" });
+			expect(piped.stdout).toContain(branch);
+			expect(piped.stdout.includes("…")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("retires status without aliases, unsafe slug reinterpretation or completion candidates", () => {
+		const fixture = setup();
+		try {
+			const before = git(fixture.checkout, "worktree", "list", "--porcelain");
+			for (const args of [["status"], ["status", "--json"], ["healthy", "status"], [".", "status", "--json"], ["status", "create"]]) {
+				const result = runCli(fixture.checkout, args);
+				expect(result.status).toBe(64);
+				expect(result.stdout).toBe("");
+				expect(result.stderr).toContain("'status' has been removed");
+				expect(result.stderr).toContain("list --inspect");
+			}
+			for (const scope of ["commands", "current-commands", "targets"]) {
+				const completed = runCli(join(fixture.worktrees, "healthy"), ["__complete", scope]);
+				expect(completed.stdout.trim().split("\n").includes("status")).toBe(false);
+				expect(completed.stdout).toContain("list");
+			}
+			for (const scope of ["options:list", "options:global-list"]) {
+				const options = runCli(fixture.checkout, ["__complete", scope]).stdout;
+				expect(options).toContain("--inspect");
+				expect(options).toContain("--refresh");
+			}
+			expect(runCli(fixture.checkout, ["__complete", "options:global-status"]).stdout).toBe("");
+			expect(git(fixture.checkout, "worktree", "list", "--porcelain")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("shows only doctor findings by default and retains complete safe checks with verbose or JSON", () => {
+		const fixture = setup();
+		try {
+			const before = readFileSync(sessionMetadataPath(fixture.checkout, "missing"), "utf8");
+			const result = runCli(fixture.checkout, ["doctor", "--color=never"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toContain("SESSION");
+			expect(result.stdout).toContain("CHECK");
+			expect(result.stdout).toContain("STATE");
+			expect(result.stdout).toContain("missing");
+			expect(result.stdout).toContain("Worktree missing");
+			expect(result.stdout).toContain("1 error");
+			for (const detail of ["Recorded location and Git registration agree", "Module configuration and project-local paths are valid", "Installed files do not prove parent-shell integration", "OK configuration"]) expect(result.stdout.includes(detail)).toBe(false);
+			const verbose = runCli(fixture.checkout, ["doctor", "--verbose", "--color=never"]);
+			expect(verbose.status).toBe(1);
+			expect(verbose.stdout).toContain("Recorded location and Git registration agree");
+			expect(verbose.stdout).toContain("preserve remaining local branches");
+			const healthy = runCli(fixture.checkout, ["healthy", "doctor", "--color=never"]);
+			expect(healthy.status).toBe(0);
+			expect(healthy.stdout).toContain("0 errors");
+			expect(healthy.stdout.includes("SESSION")).toBe(false);
+			expect(healthy.stdout.includes("INFO")).toBe(false);
+			const json = runCli(fixture.checkout, ["doctor", "--json", "--verbose", "--color=always"]);
+			expect(json.status).toBe(1);
+			expect(json.stderr).toBe("");
+			expect(json.stdout.includes("\u001b")).toBe(false);
+			const report = JSON.parse(json.stdout);
+			expect(Object.keys(report).sort().join(",")).toBe("checks,command,ok,version");
+			expect(report.checks.some((check) => check.status === "ok" && check.slug === "healthy")).toBe(true);
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "missing"), "utf8")).toBe(before);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps collection status in one state table and moves paths and explanations behind verbose", () => {
+		const fixture = setup();
+		try {
+			const result = runCli(fixture.checkout, ["list", "--inspect", "--color=never"]);
+			expect(result.status).toBe(0);
+			expect(result.stdout).toContain("SESSION");
+			expect(result.stdout).toContain("BRANCH");
+			expect(result.stdout).toContain("STATE");
+			expect(result.stdout).toContain("Clean · Fresh · Unpublished");
+			expect(result.stdout).toContain("Worktree missing");
+			expect(result.stdout.trimEnd().endsWith("2 sessions · 1 needs attention")).toBe(true);
+			expect(result.stdout.includes(fixture.worktrees)).toBe(false);
+			expect(result.stderr.includes("Managed worktree is missing")).toBe(false);
+			const verbose = runCli(fixture.checkout, ["list", "--inspect", "--verbose", "--color=never"]);
+			expect(verbose.status).toBe(0);
+			expect(verbose.stdout).toContain(join(realpathSync(fixture.worktrees), "healthy"));
+			expect(verbose.stdout).toContain("Managed worktree is missing");
+			const named = runCli(fixture.checkout, ["healthy", "list", "--inspect", "--color=never"]);
+			expect(named.status).toBe(0);
+			expect(named.stdout).toContain("SESSION");
+			expect(named.stdout).toContain("Clean · Fresh · Unpublished");
+			const exact = runCli(fixture.checkout, ["list", "--inspect", "--worktree", join(fixture.worktrees, "missing"), "--color=never"]);
+			expect(exact.status).toBe(0);
+			expect(exact.stdout).toContain("WORKTREE");
+			const json = runCli(fixture.checkout, ["list", "--inspect", "--json", "--verbose", "--color=always"]);
+			expect(json.status).toBe(0);
+			expect(json.stderr).toBe("");
+			expect(json.stdout.includes("\u001b")).toBe(false);
+			expect(Object.keys(JSON.parse(json.stdout)).sort().join(",")).toBe("operation,sessions,version");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("groups repeated doctor findings while retaining each operation in verbose and JSON evidence", () => {
+		const fixture = setup();
+		try {
+			const path = sessionMetadataPath(fixture.checkout, "healthy");
+			const metadata = JSON.parse(readFileSync(path, "utf8"));
+			metadata.activeOperations = ["first-operation", "second-operation"].map((id) => ({ id, pid: 1, hostname: "another-host", startedAt: "2000-01-01T00:00:00Z" }));
+			writeFileSync(path, JSON.stringify(metadata));
+			const result = runCli(fixture.checkout, ["doctor", "--color=never"]);
+			expect(result.status).toBe(1);
+			expect(result.stdout).toContain("Activity ×2");
+			expect(result.stdout).toContain("3 errors");
+			expect(result.stdout.split("\n").filter((line) => line.includes("healthy") && line.includes("Activity")).length).toBe(1);
+			for (const id of ["first-operation", "second-operation"]) expect(result.stdout.includes(id)).toBe(false);
+			const verbose = runCli(fixture.checkout, ["doctor", "--verbose", "--color=never"]);
+			for (const id of ["first-operation", "second-operation"]) expect(verbose.stdout).toContain(id);
+			const json = JSON.parse(runCli(fixture.checkout, ["doctor", "--json"]).stdout);
+			expect(json.checks.filter((check) => check.id === "activity").length).toBe(2);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("announces inspection before blocked local Git discovery without emitting partial results", async () => {
+		const fixture = setup();
+		try {
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			const bin = join(fixture.root, "slow-inspection-bin"); mkdirSync(bin);
+			const marker = join(fixture.root, "inspection-started"), release = join(fixture.root, "release-inspection");
+			writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$*" in\n  *'rev-parse --git-common-dir'*) touch ${tomlString(marker)}; while [ ! -f ${tomlString(release)} ]; do sleep 0.02; done ;;\nesac\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			for (const { args, label } of [
+				{ args: ["list"], label: "Reading session inventory" },
+				{ args: ["list", "--inspect"], label: "Inspecting sessions" },
+				{ args: ["doctor"], label: "Checking session health" },
+			]) {
+				rmSync(marker, { force: true }); rmSync(release, { force: true });
+				const child = spawn("node", [cliScript, ...args, "--color=never"], {
+					cwd: fixture.checkout, env: { ...process.env, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout), PATH: `${bin}:${process.env.PATH}`, TERM: "xterm-256color", NODE_OPTIONS: `--import=${fixture.terminal}` }, stdio: ["ignore", "pipe", "pipe"],
+				});
+				let stdout = "", stderr = "";
+				child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
+				child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
+				const closed = new Promise<number | null>((resolve) => child.on("close", resolve));
+				try {
+					const deadline = Date.now() + 10000;
+					while (!existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+					expect(existsSync(marker)).toBe(true);
+					expect(stderr).toContain(label);
+					expect(stdout).toBe("");
+				} finally { writeFileSync(release, "continue\n"); expect(await closed).toBe(args[0] === "doctor" ? 1 : 0); }
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("colours inspection state without affecting plain pipes, NO_COLOR or JSON, and completes the flags", () => {
+		const fixture = setup();
+		try {
+			const env = { TERM: "xterm-256color", NO_COLOR: "", NODE_OPTIONS: `--import=${fixture.terminal}` };
+			for (const args of [["list"], ["list", "--inspect"], ["doctor"]]) {
+				const command = args[0];
+				const colour = runCli(fixture.checkout, args, env);
+				expect(/\u001b\[[0-9;]*m/.test(colour.stdout)).toBe(true);
+				const off = runCli(fixture.checkout, [...args, "--color=never"], env);
+				expect(/\u001b\[[0-9;]*m/.test(off.stdout)).toBe(false);
+				const noColor = runCli(fixture.checkout, args, { ...env, NO_COLOR: "1" });
+				expect(/\u001b\[[0-9;]*m/.test(noColor.stdout)).toBe(false);
+				const piped = runCli(fixture.checkout, args, { TERM: "xterm-256color", NO_COLOR: "", NODE_OPTIONS: "" });
+				expect((piped.stdout + piped.stderr).includes("\u001b")).toBe(false);
+				const forced = runCli(fixture.checkout, [...args, "--color=always"], { NO_COLOR: "1", NODE_OPTIONS: "" });
+				expect(/\u001b\[[0-9;]*m/.test(forced.stdout)).toBe(true);
+				const json = runCli(fixture.checkout, [...args, "--json", "--verbose", "--color=always"], env);
+				expect(json.stdout.includes("\u001b")).toBe(false);
+				expect(json.stderr).toBe("");
+				JSON.parse(json.stdout);
+				const narrow = runCli(fixture.checkout, [...args, "--color=never"], { ...env, TEST_COLUMNS: "36" });
+				expect(narrow.stdout.split("\n").every((line) => [...line].length <= 36)).toBe(true);
+				if (args.includes("--inspect")) {
+					expect(narrow.stdout.split("\n")[0]).toContain("STATE");
+					expect(narrow.stdout.includes("State:")).toBe(false);
+				} else expect(narrow.stdout.includes("…")).toBe(false);
+				const completion = runCli(fixture.checkout, ["__complete", `options:global-${command}`]);
+				for (const flag of ["--color=auto", "--color=always", "--color=never", "--verbose"]) expect(completion.stdout).toContain(flag);
+				expect(runCli(fixture.checkout, [...args, "--color=rainbow"]).status).toBe(64);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("read-only doctor", () => {
 	it("reports healthy bindings as one versioned JSON document and offers human diagnostics", () => {
 		const fixture = createRepositoryFixture();
@@ -5917,8 +6183,10 @@ describe("read-only doctor", () => {
 			expect(JSON.parse(current.stdout).slug).toBe("git-hygiene");
 			const human = runCli(fixture.checkout, ["doctor"]);
 			expect(human.status).toBe(0);
-			expect(human.stdout).toContain("Doctor: no errors");
-			expect(human.stdout).toContain("git-hygiene");
+			expect(human.stdout).toContain("Doctor · no errors");
+			expect(human.stdout).toContain("0 errors");
+			const verbose = runCli(fixture.checkout, ["doctor", "--verbose"]);
+			expect(verbose.stdout).toContain("git-hygiene");
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 
@@ -5932,6 +6200,11 @@ describe("read-only doctor", () => {
 				expect(result.status).toBe(1);
 				expect(JSON.parse(result.stdout).checks.some((check) => check.id === "configuration" && check.status === "error")).toBe(true);
 				expect((result.stdout + result.stderr).includes(secret)).toBe(false);
+				for (const flags of [["--color=always"], ["--verbose", "--color=always"]]) {
+					const human = runCli(fixture.checkout, ["doctor", ...flags]);
+					expect(human.status).toBe(1);
+					expect((human.stdout + human.stderr).includes(secret)).toBe(false);
+				}
 			}
 			const missing = runCli(fixture.checkout, ["doctor", "--json"], { AGENT_SESSION_CONFIG: join(fixture.root, "absent") });
 			expect(missing.status).toBe(1);
@@ -6123,7 +6396,7 @@ describe("explicit current-session targeting", () => {
 			writeFileSync(join(worktree, "unfinished"), "session work");
 			git(fixture.checkout, "remote", "set-url", "origin", join(fixture.root, "offline"));
 			for (const cwd of [worktree, nested]) {
-				const status = runCli(cwd, [".", "status", "--json"]);
+				const status = runCli(cwd, [".", "list", "--inspect", "--json"]);
 				expect(status.status).toBe(0);
 				const session = JSON.parse(status.stdout).sessions[0];
 				expect(session.slug).toBe("git-hygiene");
@@ -6157,8 +6430,8 @@ describe("explicit current-session targeting", () => {
 			const nestedRepo = join(worktree, "nested-repository");
 			git(worktree, "init", nestedRepo);
 			for (const cwd of [fixture.checkout, outside, sameName, nestedRepo, fixture.root]) {
-				for (const command of ["status", "cd"]) {
-					const result = runCli(cwd, [".", command]);
+				for (const args of [["list", "--inspect"], ["cd"]]) {
+					const result = runCli(cwd, [".", ...args]);
 					expect(result.status === 0).toBe(false);
 					expect(result.stdout).toBe("");
 				}
@@ -6178,7 +6451,7 @@ describe("explicit current-session targeting", () => {
 			const path = sessionMetadataPath(fixture.checkout, "git-hygiene");
 			const original = readFileSync(path, "utf8");
 			rmSync(path);
-			const unrecorded = runCli(worktree, [".", "status", "--json"]);
+			const unrecorded = runCli(worktree, [".", "list", "--inspect", "--json"]);
 			expect(unrecorded.status).toBe(1);
 			expect(unrecorded.stderr).toContain("no recorded managed session");
 			expect(existsSync(path)).toBe(false);
@@ -6590,7 +6863,7 @@ describe("agent-session status, launch, and resume", () => {
 				"refs/remotes/origin/master",
 			);
 
-			const initial = runCli(worktree, ["status", "--json"]);
+			const initial = runCli(worktree, ["list", "--inspect", "--json"]);
 			expect(initial.status).toBe(0);
 			const initialPayload = JSON.parse(initial.stdout) as {
 				sessions: Array<{
@@ -6611,18 +6884,18 @@ describe("agent-session status, launch, and resume", () => {
 				git(fixture.checkout, "rev-parse", "refs/remotes/origin/master"),
 			).toBe(trackedDefaultBefore);
 
-			const refreshed = runCli(worktree, ["status", "--refresh", "--json"]);
+			const refreshed = runCli(worktree, ["list", "--inspect", "--refresh", "--json"]);
 			expect(refreshed.status).toBe(0);
 			const refreshedPayload = JSON.parse(refreshed.stdout) as {
 				sessions: Array<{ fresh: boolean }>;
 			};
 			expect(refreshedPayload.sessions[0]?.fresh).toBe(false);
 
-			const human = runCli(worktree, ["git-hygiene", "status"]);
+			const human = runCli(worktree, ["git-hygiene", "list", "--inspect"]);
 			expect(human.status).toBe(0);
 			expect(human.stdout).toContain("git-hygiene");
-			expect(human.stdout).toContain("DIRTY");
-			expect(human.stdout).toContain("STALE");
+			expect(human.stdout).toContain("Dirty");
+			expect(human.stdout).toContain("Stale");
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
@@ -6634,19 +6907,17 @@ describe("agent-session status, launch, and resume", () => {
 			const { worktree } = startManagedSession(fixture);
 			git(fixture.checkout, "worktree", "remove", "--force", worktree);
 
-			const human = runCli(fixture.checkout, ["git-hygiene", "status"]);
+			const human = runCli(fixture.checkout, ["git-hygiene", "list", "--inspect"]);
 			expect(human.status).toBe(0);
-			expect(human.stdout).toContain(
-				"git-hygiene  agent/git-hygiene  ORPHANED",
-			);
-			expect(human.stderr).toContain("Managed worktree is missing");
-			expect(human.stderr).toContain(
-				"agent-session git-hygiene finish --force",
-			);
+			expect(human.stdout).toContain("SESSION");
+			expect(human.stdout).toContain("Worktree missing");
+			const verbose = runCli(fixture.checkout, ["git-hygiene", "list", "--inspect", "--verbose"]);
+			expect(verbose.stdout).toContain("Managed worktree is missing");
+			expect(verbose.stdout).toContain("agent-session git-hygiene finish --force");
 
 			const json = runCli(fixture.checkout, [
 				"git-hygiene",
-				"status",
+				"list", "--inspect",
 				"--json",
 			]);
 			expect(json.status).toBe(0);
@@ -6665,7 +6936,7 @@ describe("agent-session status, launch, and resume", () => {
 			rmSync(sessionMetadataPath(fixture.checkout, "unrecorded"));
 			const unrecorded = runCli(unrecordedWorktree, [
 				"unrecorded",
-				"status",
+				"list", "--inspect",
 				"--json",
 			]);
 			expect(unrecorded.status).toBe(0);
@@ -6689,7 +6960,7 @@ describe("agent-session status, launch, and resume", () => {
 			expect(repaired.stdout).toContain("Session metadata repaired");
 			const repairedStatus = runCli(fixture.checkout, [
 				"unrecorded",
-				"status",
+				"list", "--inspect",
 				"--json",
 			]);
 			const repairedPayload = JSON.parse(repairedStatus.stdout) as {
@@ -6708,21 +6979,18 @@ describe("agent-session status, launch, and resume", () => {
 			const { worktree } = startManagedSession(fixture);
 			git(worktree, "switch", "feat/pre-existing");
 
-			const result = runCli(fixture.checkout, ["git-hygiene", "status"]);
+			const result = runCli(fixture.checkout, ["git-hygiene", "list", "--inspect"]);
 
 			expect(result.status).toBe(0);
-			expect(result.stdout).toContain("CONFLICT");
-			expect(result.stderr).toContain(
-				"Saved initial branch: agent/git-hygiene",
-			);
-			expect(result.stderr).toContain("Current branch: feat/pre-existing");
-			expect(result.stderr).toContain(
-				"Session-owned branches: agent/git-hygiene",
-			);
+			expect(result.stdout).toContain("Branch conflict");
+			const verbose = runCli(fixture.checkout, ["git-hygiene", "list", "--inspect", "--verbose"]);
+			expect(verbose.stdout).toContain("Saved initial branch: agent/git-hygiene");
+			expect(verbose.stdout).toContain("Current branch: feat/pre-existing");
+			expect(verbose.stdout).toContain("Session-owned branches: agent/git-hygiene");
 
 			const json = runCli(fixture.checkout, [
 				"git-hygiene",
-				"status",
+				"list", "--inspect",
 				"--json",
 			]);
 			const payload = JSON.parse(json.stdout) as {
@@ -7542,18 +7810,22 @@ CURRENT=2
 		const bash = spawnSync("bash", ["--noprofile", "--norc", "-c", `
 source "$AGENT_SESSION_COMPLETION_ROOT/bash-completion/completions/as"
 complete -p agent-session as
-COMP_WORDS=(as stat); COMP_CWORD=1; _agent_session
-[[ " \${COMPREPLY[*]} " == *" status "* ]]
+COMP_WORDS=(as lis); COMP_CWORD=1; _agent_session
+[[ " \${COMPREPLY[*]} " == *" list "* ]] || exit 1
+COMP_WORDS=(as list --ins); COMP_CWORD=2; _agent_session
+[[ " \${COMPREPLY[*]} " == *" --inspect "* ]]
 `], { encoding: "utf8" });
 		expect(bash.status).toBe(0);
 		const fish = spawnSync("fish", ["--no-config", "-c", `
 source "$AGENT_SESSION_COMPLETION_ROOT/fish/vendor_completions.d/agent-session.fish"
 source "$AGENT_SESSION_COMPLETION_ROOT/fish/vendor_completions.d/as.fish"
-complete -C 'as stat'
-complete -C 'agent-session stat'
+complete -C 'as lis'
+complete -C 'agent-session lis'
+complete -C 'as list --ins'
 `], { encoding: "utf8" });
 		expect(fish.status).toBe(0);
-		expect(fish.stdout).toContain("status");
+		expect(fish.stdout).toContain("list");
+		expect(fish.stdout).toContain("--inspect");
 	});
 
 	it("generates Bash, Zsh, and Fish completion scripts", () => {
@@ -7649,7 +7921,7 @@ describe("agent-session hardening", () => {
 
 			const status = runCli(fixture.checkout, [
 				"agent-failure",
-				"status",
+				"list", "--inspect",
 				"--json",
 			]);
 			expect(status.status).toBe(0);
@@ -7692,7 +7964,7 @@ describe("agent-session hardening", () => {
 			metadata.worktreePath = realpathSync(fixture.checkout);
 			writeFileSync(metadataPath, `${JSON.stringify(metadata)}\n`);
 
-			const status = runCli(fixture.checkout, ["status", "--json"]);
+			const status = runCli(fixture.checkout, ["list", "--inspect", "--json"]);
 			expect(status.status).toBe(0);
 			expect(status.stdout).toContain('"state":"broken"');
 
@@ -7739,7 +8011,7 @@ describe("agent-session hardening", () => {
 				`${JSON.stringify({ pid: process.pid, command: "resume", createdAt: new Date().toISOString() })}\n`,
 			);
 
-			const status = runCli(fixture.checkout, ["status", "--json"]);
+			const status = runCli(fixture.checkout, ["list", "--inspect", "--json"]);
 			expect(status.status).toBe(0);
 			expect(status.stdout).toContain('"command":"resume"');
 

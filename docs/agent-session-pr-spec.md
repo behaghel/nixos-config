@@ -134,7 +134,7 @@ not themselves constitute adopting a new remote head.
 - [ ] AC-15: Given `create --pr ... --dry-run`, when a preview is requested, it
   performs no network calls or Git/session mutations and marks unverified PR
   identity, commit, and branch information as unresolved rather than fabricated.
-- [ ] AC-16: Given a created PR session, when creation JSON or `status --json` is
+- [ ] AC-16: Given a created PR session, when creation JSON or `list --inspect --json` is
   inspected, it exposes PR URL, number, base branch, and fetched head commit.
   Human output exposes PR identity and state. Status does not contact the network
   unless `--refresh` is requested.
@@ -161,7 +161,7 @@ not themselves constitute adopting a new remote head.
   branches require version-2 metadata with `initialBranchOwned: false` and a
   preexisting-branch snapshot containing that branch. Readers refuse inconsistent
   version/ownership combinations rather than treating them as session-owned.
-  Outer creation receipts and status envelopes remain version 1.
+  Outer creation receipts and inspection envelopes remain version 1.
 - Slug-first grammar, explicit current-session targeting, managed-path and Git
   registration validation, ignored worktree-root policy, operation locks,
   explicit local-link allowlists, and invoking-worktree cleanup protection remain.
