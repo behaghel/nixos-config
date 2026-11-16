@@ -2912,6 +2912,115 @@ describe("single-session finish activity safeguards", () => {
 	});
 });
 
+describe("personal output preferences", () => {
+	it("retains auto defaults for missing or empty settings, validates types, and advertises the personal config capability", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const xdg = join(fixture.root, "personal-config"), directory = join(xdg, "agent-session"), path = join(directory, "config.json");
+			const terminal = join(fixture.root, "terminal.mjs");
+			writeFileSync(terminal, `Object.defineProperties(process.stdout, { isTTY: { value: true }, columns: { value: 100 }, rows: { value: 30 } });`);
+			const env = { XDG_CONFIG_HOME: xdg, NODE_OPTIONS: `--import=${terminal}`, TERM: "xterm-256color", NO_COLOR: "" };
+			const missing = runCli(fixture.checkout, ["list"], env);
+			expect(missing.status).toBe(0); expect(missing.stdout.includes("\u001b[")).toBe(true);
+			mkdirSync(directory, { recursive: true }); writeFileSync(path, "{}");
+			const empty = runCli(fixture.checkout, ["list"], env);
+			expect(empty.status).toBe(0); expect(empty.stdout.includes("\u001b[")).toBe(true);
+			writeFileSync(path, '{"color":"never"}');
+			expect(runCli(fixture.checkout, ["list"], env).stdout.includes("\u001b")).toBe(false);
+			rmSync(path); mkdirSync(path);
+			const directoryError = runCli(fixture.checkout, ["list"], env);
+			expect(directoryError.status).toBe(64); expect(directoryError.stderr).toContain("EISDIR");
+			expect(runCli(fixture.checkout, [], env).stderr).toContain("agent-session/config.json");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("uses the HOME config fallback, ignores relative XDG paths, and does not read project overrides", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const home = join(fixture.root, "personal-home"), directory = join(home, ".config", "agent-session");
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "config.json"), JSON.stringify({ color: "always" }));
+			const project = join(fixture.checkout, ".config", "agent-session"); mkdirSync(project, { recursive: true });
+			writeFileSync(join(project, "config.json"), JSON.stringify({ color: "never" }));
+			for (const xdg of ["", ".config"]) {
+				const result = runCli(fixture.checkout, ["list"], { HOME: home, XDG_CONFIG_HOME: xdg, NO_COLOR: "", NODE_OPTIONS: "" });
+				expect(result.status).toBe(0);
+				expect(/\u001b\[[0-9;]*m/.test(result.stdout)).toBe(true);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("lets NO_COLOR suppress personal always colour unless the command explicitly requests always", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const xdg = join(fixture.root, "personal-config"); mkdirSync(join(xdg, "agent-session"), { recursive: true });
+			writeFileSync(join(xdg, "agent-session", "config.json"), JSON.stringify({ color: "always" }));
+			const env = { XDG_CONFIG_HOME: xdg, NO_COLOR: "1", NODE_OPTIONS: "" };
+			expect(runCli(fixture.checkout, ["list"], env).stdout.includes("\u001b")).toBe(false);
+			expect(runCli(fixture.checkout, ["list", "--color=always"], env).stdout.includes("\u001b[")).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("rejects malformed or unsupported personal settings without exposing their contents or blocking explicit overrides and protocols", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const xdg = join(fixture.root, "personal-config"), directory = join(xdg, "agent-session"); mkdirSync(directory, { recursive: true });
+			const path = join(directory, "config.json"), env = { XDG_CONFIG_HOME: xdg, NODE_OPTIONS: "" };
+			for (const contents of ['{"color": "private-value",', JSON.stringify({ force: true, token: "private-value" }), '[]', 'null', '"always"', '{"color":null}', '{"color":["always"]}', '{"color":{"toString":"always"}}', '{"color":"rainbow"}']) {
+				writeFileSync(path, contents);
+				const result = runCli(fixture.checkout, ["list"], env);
+				expect(result.status).toBe(64);
+				expect(result.stderr).toContain(path);
+				expect(result.stderr.includes("private-value")).toBe(false);
+				expect(result.stdout).toBe("");
+				expect(runCli(fixture.checkout, ["list", "--color=never"], env).status).toBe(0);
+				const json = runCli(fixture.checkout, ["list", "--json"], env);
+				expect(json.status).toBe(0); JSON.parse(json.stdout);
+				expect(runCli(fixture.checkout, ["__complete", "options:finish"], env).stdout).toContain("--keep-branch");
+				expect(readFileSync(path, "utf8")).toBe(contents);
+			}
+			expect(existsSync(fixture.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("applies colour preferences consistently to supported inspection and batch preview commands", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const xdg = join(fixture.root, "personal-config"), directory = join(xdg, "agent-session"); mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "config.json"), JSON.stringify({ color: "always" }));
+			const env = { XDG_CONFIG_HOME: xdg, NO_COLOR: "", NODE_OPTIONS: "" };
+			for (const args of [["list"], ["list", "--inspect"], ["doctor"], ["batch", "finish", "--inactive-for", "7d", "--dry-run"]]) {
+				const result = runCli(fixture.checkout, args, env);
+				expect(result.status).toBe(0);
+				expect(/\u001b\[[0-9;]*m/.test(result.stdout)).toBe(true);
+				const json = runCli(fixture.checkout, [...args, "--json"], env);
+				expect(json.status).toBe(0);
+				expect(json.stdout.includes("\u001b")).toBe(false); JSON.parse(json.stdout);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("loads XDG colour defaults while explicit flags and JSON retain precedence", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const xdg = join(fixture.root, "personal-config");
+			mkdirSync(join(xdg, "agent-session"), { recursive: true });
+			writeFileSync(join(xdg, "agent-session", "config.json"), JSON.stringify({ color: "always" }));
+			const env = { XDG_CONFIG_HOME: xdg, NO_COLOR: "", TERM: "xterm-256color", NODE_OPTIONS: "" };
+			const args = ["human", "finish", "--keep-branch", "--dry-run"];
+			const configured = runCli(fixture.checkout, args, env);
+			expect(configured.status).toBe(0);
+			expect(/\u001b\[[0-9;]*m/.test(configured.stdout)).toBe(true);
+			for (const flag of ["--color=never", "--color=auto"]) expect(runCli(fixture.checkout, [...args, flag], env).stdout.includes("\u001b")).toBe(false);
+			const json = runCli(fixture.checkout, [...args, "--json"], env);
+			expect(json.status).toBe(0);
+			expect(json.stdout.includes("\u001b")).toBe(false);
+			expect(JSON.parse(json.stdout).plan.keepBranch).toBe(true);
+			expect(existsSync(fixture.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("human finish workflow", () => {
 	it("does not rewind across an unobservable prompt echo or change confirmation semantics", () => {
 		const fixture = createHumanFinishFixture();
@@ -6213,7 +6322,15 @@ finally:
 					const branch = mode === "unrecorded-branch-change" ? "fix/changed-after-confirmation" : unrecorded ? "fix/unrecorded-terminal" : "agent/git-hygiene";
 					if (accepted && changed) expect(terminal.output.toLowerCase()).toContain(mode === "unrecorded-rebound" ? "metadata exists" : "target changed");
 					if (mode === "unrecorded-replaced") expect(existsSync(`${worktree}.moved`)).toBe(true);
-					expect(git(fixture.checkout, "branch", "--list", "--format=%(refname:short)", branch)).toBe(branch);
+					const retainedBranch = git(fixture.checkout, "branch", "--list", "--format=%(refname:short)", branch);
+					if (retainedBranch !== branch) {
+						// Observe the failed query independently; never retry it into a pass.
+						const diagnostic = spawnSync("node", ["--input-type=module", "-e", `import { spawnSync } from 'node:child_process';
+const commands = [['for-each-ref', '--format=%(refname):%(objectname)', 'refs/heads/'], ['worktree', 'list', '--porcelain'], ['-C', process.argv[2], 'symbolic-ref', 'HEAD']];
+console.log(JSON.stringify(commands.map(args => { const result = spawnSync('git', args, { cwd: process.argv[1], encoding: 'utf8' }); return { args, status: result.status, stdout: result.stdout, stderr: result.stderr }; })));`, fixture.checkout, worktree], { encoding: "utf8", env: process.env });
+						console.error(JSON.stringify({ expected: branch, actual: retainedBranch, diagnostic: diagnostic.stdout, diagnosticError: diagnostic.stderr, terminal: terminal.output }));
+					}
+					expect(retainedBranch).toBe(branch);
 					if (!accepted) expect(terminal.output).toContain(mode === "bulk" ? "Finish cancelled" : "Cleanup cancelled");
 				} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 			});
