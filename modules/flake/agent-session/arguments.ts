@@ -1,5 +1,5 @@
 import { CliError } from "./runtime.ts";
-import { personalColor } from "./preferences.ts";
+import { personalBranches, personalColor } from "./preferences.ts";
 import { validateSlug } from "./sessions.ts";
 import { parsePullRequestSelection } from "./github.ts";
 import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions, PresentationOptions } from "./types.ts";
@@ -265,6 +265,7 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 	yes: boolean;
 	force: boolean;
 	keepBranch: boolean;
+	deleteBranches: boolean;
 	all: boolean;
 	branches: boolean;
 	gone: boolean;
@@ -277,7 +278,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 	let expected: string | undefined;
 	let yes = false;
 	let force = false;
-	let keepBranch = false;
+	let explicitKeep = false;
+	let explicitDelete = false;
 	let all = false;
 	let branches = false;
 	let gone = false;
@@ -292,7 +294,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 			expected = value;
 		} else if (argument === "--yes") yes = true;
 		else if (argument === "--force") force = true;
-		else if (argument === "--keep-branch") keepBranch = true;
+		else if (argument === "--keep-branch") explicitKeep = true;
+		else if (argument === "--delete-branches") explicitDelete = true;
 		else if (argument === "--all") all = true;
 		else if (argument === "--branches") branches = true;
 		else if (argument === "--gone") gone = true;
@@ -304,6 +307,7 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 				"--yes",
 				"--force",
 				"--keep-branch",
+				"--delete-branches",
 				"--expected",
 				"--all",
 				"--branches",
@@ -322,6 +326,10 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 			"Choose a finish selector: <task-slug> [--all], --all, or --gone.",
 		);
 	}
+	const automated = yes || expected !== undefined;
+	const usePersonal = !automated && Boolean(slug) && (dryRun || Boolean(process.stdin.isTTY));
+	const keepBranch = explicitKeep || (!explicitDelete && (!usePersonal || personalBranches() === "preserve"));
+	if (yes && !explicitKeep && !explicitDelete) throw argumentError("Automated finish requires an explicit branch disposition: --keep-branch or --delete-branches.");
 	if (slug && all && force) throw argumentError("Session-scoped --all does not accept --force.");
 	if (slug && all && !dryRun && (expected || yes) && (!keepBranch || !expected || !yes)) {
 		throw argumentError("Recursive finish requires --keep-branch, --expected <tree-receipt> and --yes.");
@@ -331,11 +339,11 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 	if (json && !dryRun && !(slug && all)) {
 		throw new CliError("finish --json requires --dry-run.", 64);
 	}
-	if (expected && (!slug || force || !keepBranch))
+	if (expected && (!slug || force || !explicitKeep))
 		throw argumentError(
 			"finish --expected requires one slug, --keep-branch and non-forced cleanup.",
 		);
-	return { slug, yes, force, keepBranch, all, branches, gone, dryRun, json, expected, color, verbose };
+	return { slug, yes, force, keepBranch, deleteBranches: explicitDelete && !explicitKeep, all, branches, gone, dryRun, json, expected, color, verbose };
 }
 
 export function parseBatchArguments(args: string[]): BatchFinishOptions {
@@ -461,10 +469,10 @@ function usage(): string {
 		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",
 		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",
 		"  agent-session <task-slug> repair",
-		"  agent-session <task-slug> finish [--keep-branch [--expected <receipt>]] [--force] [--yes] [--dry-run [--json]] [--color=auto|always|never] [--verbose]",
-		"  agent-session <task-slug> finish --branches [--keep-branch] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
-		"  agent-session <task-slug> finish --all [--keep-branch] (preview recorded descendants, choose eligible branch deletion and confirm)",
-		"  agent-session <task-slug> finish --all --dry-run [--keep-branch] [--json] (preview recorded descendants before their parent)",
+		"  agent-session <task-slug> finish [--keep-branch|--delete-branches] [--expected <receipt>] [--force] [--yes] [--dry-run [--json]] [--color=auto|always|never] [--verbose]",
+		"  agent-session <task-slug> finish --branches [--keep-branch|--delete-branches] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
+		"  agent-session <task-slug> finish --all [--keep-branch|--delete-branches] (review recorded descendants and confirm once; branches preserved by default)",
+		"  agent-session <task-slug> finish --all --dry-run [--keep-branch|--delete-branches] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] (guarded branch-preserving recursive cleanup)",
 		"  agent-session . <cd|run|branch|ownership|activity|launch|resume|list|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] [--color=auto|always|never] [--verbose] (read-only diagnostics)",
@@ -473,10 +481,11 @@ function usage(): string {
 		"  agent-session batch finish --inactive-for <duration> [--exclude <slug>] [--keep-branch] (--dry-run | --expected <receipt> --yes) [--json] [--color=auto|always|never] [--verbose] (presentation flags apply to previews)",
 		"  agent-session list --inspect [--json] [--refresh] [--color=auto|always|never] [--verbose] (live Git/binding table)",
 		"  agent-session list --inspect --worktree <path> [--json] [--color=auto|always|never] [--verbose] (read-only exact inspection)",
-		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session finish (--all | --gone) [--keep-branch|--delete-branches] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session completion <bash|zsh|fish>",
 		"",
-		"Personal colour defaults: $XDG_CONFIG_HOME/agent-session/config.json (fallback ~/.config/agent-session/config.json).",
-		"Only commands advertising --color use these settings; flags override them and JSON ignores them.",
+		"Personal colour and interactive branch defaults: $XDG_CONFIG_HOME/agent-session/config.json (fallback ~/.config/agent-session/config.json).",
+		"Personal keys: color=auto|always|never; branches=preserve|delete (reviewed interactive cleanup and previews only).",
+		"Branches default to preserve; --keep-branch wins. Automated finish --yes requires an explicit branch flag. JSON ignores colour preferences.",
 	].join("\n");
 }

@@ -155,6 +155,7 @@ and candidates for the actual operations, for example:
 | Guarded branch-preserving finish | `finish` with `--keep-branch`, `--dry-run` and `--expected` in usage and session completion options. |
 | Single-session cleanup presentation | Requested `--color=auto|always|never` and `--verbose` in single-session usage and `options:finish`. This does not establish support on other cleanup selectors. |
 | Personal colour defaults | Usage explicitly documents `$XDG_CONFIG_HOME/agent-session/config.json`, and colour flags appear for the requested command in usage/completions. Colour flags alone on an older provider do not establish file support. |
+| Safe branch defaults and interactive preferences | Usage advertises preserved branches by default and personal interactive branch defaults; `--delete-branches` and `--keep-branch` appear in the relevant finish completion scope. Verify automation still requires explicit disposition and the selected mode actually supports deletion; a personal request supplies no consent. |
 | Interrupted activity acknowledgement | `activity reconcile [--dry-run [--json]]` in usage and `reconcile`/preview flags in `options:activity`; no acknowledgement apply during capability checks. |
 | Inactive batch retirement | Global `batch finish` plus requested window/exclusion/receipt/apply flags, including `--inactive-for`, `--expected` and `--yes`, in usage and `options:global-batch`. |
 

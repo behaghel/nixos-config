@@ -6,13 +6,14 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [mode = "create", ...flags] = process.argv.slice(2);
-if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never"].includes(flag))) {
-  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences] [--verbose] [--color=auto|always|never]");
+const branchFlags = ["preview", "finish", "preferences", "branches"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
+if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags].includes(flag))) {
+  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
 }
 const root = mkdtempSync(join(tmpdir(), "as-output-demo-"));
 const checkout = join(root, "checkout");
 const remote = join(root, "remote.git");
-const env = { ...process.env, PI_SESSION_FILE: "", PI_SESSION_ID: "" };
+const env = { ...process.env, PI_SESSION_FILE: "", PI_SESSION_ID: "", XDG_CONFIG_HOME: join(root, "personal-config") };
 let worker;
 function git(cwd, ...args) {
   const result = spawnSync("git", args, { cwd, env, encoding: "utf8" });
@@ -36,20 +37,20 @@ try {
   writeFileSync(config, JSON.stringify({
     version: 1, worktree_root: ".worktrees", local_links: [], disposable_paths: [".cache"], generated_links: {},
     agent_command: [process.execPath, "-e", "console.log('Agent stdout remains visible'); console.error('Agent stderr remains visible');"],
-    prepare_command: ["busy", "preview", "finish", "partial", "preferences"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
+    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
   }));
   const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../modules/flake/agent-session/cli.ts");
   const options = { cwd: checkout, env: { ...env, AGENT_SESSION_CONFIG: config } };
-  if (["busy", "preview", "finish", "partial", "preferences"].includes(mode)) {
+  if (["busy", "preview", "finish", "partial", "preferences", "branches"].includes(mode)) {
     const prepared = spawnSync(process.execPath, [cli, "demo", "create", "--json"], { ...options, encoding: "utf8" });
     if (prepared.status !== 0) throw new Error(prepared.stderr || "Cannot prepare demo fixture");
     const worktree = JSON.parse(prepared.stdout).session.worktreePath;
-    if (mode === "preferences") {
+    if (mode === "preferences" || mode === "branches") {
       const personal = join(root, "personal-config");
       mkdirSync(join(personal, "agent-session"), { recursive: true });
-      writeFileSync(join(personal, "agent-session", "config.json"), JSON.stringify({ color: "always" }));
+      writeFileSync(join(personal, "agent-session", "config.json"), JSON.stringify(mode === "branches" ? { branches: "delete" } : { color: "always" }));
       options.env = { ...options.env, XDG_CONFIG_HOME: personal };
-      process.stdout.write("Temporary personal preference: color=always. Flags and NO_COLOR still apply.\n\n");
+      process.stdout.write(mode === "branches" ? "Temporary personal preference: branches=delete. Eligible deletion still requires your approval.\n\n" : "Temporary personal preference: color=always. Flags and NO_COLOR still apply.\n\n");
     }
     if (mode === "busy") {
       const nested = join(worktree, "nested"); mkdirSync(nested);
@@ -71,7 +72,7 @@ try {
         options.env = { ...options.env, PATH: `${bin}:${env.PATH}` };
       }
       if (mode === "partial") process.stdout.write("Approve to demonstrate an injected branch-deletion failure after native worktree removal.\n\n");
-      const result = spawnSync(process.execPath, [cli, "demo", "finish", ...(mode === "partial" ? [] : ["--keep-branch"]), ...(["preview", "preferences"].includes(mode) ? ["--dry-run"] : []), ...flags], { ...options, stdio: "inherit" });
+      const result = spawnSync(process.execPath, [cli, "demo", "finish", ...(mode === "partial" ? ["--delete-branches"] : []), ...(["preview", "preferences"].includes(mode) ? ["--dry-run"] : []), ...flags], { ...options, stdio: "inherit" });
       if (result.error) throw result.error;
       process.exitCode = result.status ?? 1;
     }

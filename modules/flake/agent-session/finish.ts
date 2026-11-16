@@ -94,7 +94,7 @@ function forceFinishUnrecorded(root: string, invocationRoot: string, slug: strin
 	else process.stderr.write(`Force-remove unrecorded worktree, including uncommitted and ignored local files:\n  worktree: ${target.worktreePath}\n  current branch: ${target.currentBranch ?? "detached HEAD"}\n  HEAD: ${target.head}\nAll branches will be preserved; no ownership metadata will be invented.\n`);
 	if (!output && target.currentBranch === null) process.stderr.write("Warning: detached HEAD commits may become unreachable. Create a branch first if you need to retain them.\n");
 	if (!yes) {
-		if (!process.stdin.isTTY) throw new CliError(`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`);
+		if (!process.stdin.isTTY) throw new CliError(`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --keep-branch --yes`);
 		if (!(output ? output.confirm(true) : confirm("Discard this unrecorded worktree and preserve all branches? [y/N]"))) throw new CliError("Cleanup cancelled.");
 	}
 	// Recheck absence and physical/Git identity after the confirmation wait. Do
@@ -147,7 +147,7 @@ function forceFinishUnlocked(
 	if (!yes) {
 		if (!process.stdin.isTTY) {
 			throw new CliError(
-				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force --yes`,
+				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --force ${keepBranch ? "--keep-branch" : "--delete-branches"} --yes`,
 			);
 		}
 		if (!(output ? output.confirm(true) : confirm("Discard local session assets? [y/N]"))) {
@@ -234,7 +234,7 @@ function finishUnlocked(
 	const ignoredData = inspectIgnoredData(root, metadata.worktreePath, config.local_links, config.disposable_paths, metadataProgress, config.generated_links);
 	if (!ignoredData.safe) throw new CliError(`Non-forced cleanup refused: ${ignoredDataProblem(ignoredData)}`);
 	const interactive = !yes && Boolean(process.stdin.isTTY);
-	if (ignoredData.approvedArtifacts.length && !expected && !interactive) throw new CliError("Artifact disposal requires terminal confirmation or a matching preview receipt: use finish --keep-branch --dry-run, then --expected <receipt>.");
+	if (ignoredData.approvedArtifacts.length && !expected && !interactive) throw new CliError("Artifact disposal requires terminal confirmation or a matching preview receipt: use finish --keep-branch --dry-run --json, then --keep-branch --expected <receipt> --yes.");
 	const approval = interactive ? finishApprovalFingerprint(root, metadata, status, ignoredData) : undefined;
 	if (expected && previewFinish(root, invocationRoot, slug, false, keepBranch, () => {}, null, ignoredData).receipt !== expected) throw new CliError("Finish target changed; obtain a fresh preview before cleanup.");
 	const diffCheck = run("git", ["diff", "--check"], metadata.worktreePath);
@@ -288,7 +288,7 @@ function finishUnlocked(
 	if (!yes) {
 		if (!process.stdin.isTTY) {
 			throw new CliError(
-				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} --yes`,
+				`Confirmation required. Re-run: ${sessionCommand(slug, "finish")} ${keepBranch ? "--keep-branch" : "--delete-branches"} --yes`,
 			);
 		}
 		if (!(output ? output.confirm() : confirm(keepBranch ? "Remove local worktree and preserve branches? [y/N]" : "Delete local worktree and branch? [y/N]"))) {
@@ -411,7 +411,7 @@ export function finish(
 	dryRun: boolean,
 	json: boolean,
 	expected?: string,
-	options: PresentationOptions = {},
+	options: PresentationOptions & { deleteBranches?: boolean } = {},
 ): void {
 	withInspection("Inspecting cleanup", json, options, (progress) => {
 		const output = json ? undefined : new FinishOutput(options);
@@ -419,8 +419,12 @@ export function finish(
 		const report = json || options.verbose ? progressReporter("finish", json) : Object.assign(((phase: string, status: string) => {
 			if (!output?.started && (status === "started" || phase.startsWith("inspect-metadata-chunk:"))) progress.update("Inspecting cleanup");
 		}) as ProgressReporter, { flush: () => progress.flush() });
+		const assertUnrecordedChoice = () => {
+			if (options.deleteBranches) throw new CliError("--delete-branches is unsupported for unrecorded cleanup; all local branches must be preserved.", 64);
+		};
 		try {
 			if (dryRun) {
+				if (force && !sessionRecordExists(root, slug)) assertUnrecordedChoice();
 				const plan = force && !sessionRecordExists(root, slug)
 					? runPhase(report, "inspect-finish", () => previewUnrecordedFinish(root, invocationRoot, slug))
 					: previewFinish(root, invocationRoot, slug, force, keepBranch, report);
@@ -433,6 +437,7 @@ export function finish(
 				if (force) {
 					progress.flush();
 					if (!sessionRecordExists(root, slug)) {
+						assertUnrecordedChoice();
 						if (expected) throw new CliError("Forced unrecorded cleanup does not accept a recorded-session receipt.");
 						return forceFinishUnrecorded(root, invocationRoot, slug, yes, output, options.verbose);
 					}
@@ -506,7 +511,7 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 	const receipt = decodeTreeReceipt(root, slug, preview.token);
 	const branches = inspectTreeBranches(root, receipt.targets);
 	process.stderr.write(treeBranchSummary(branches, false));
-	const deleteBranches = !keepBranch && branches.some((branch) => !branch.reason) && confirm("Also delete eligible local branches? [y/N]");
+	const deleteBranches = !keepBranch && branches.some((branch) => !branch.reason);
 	process.stderr.write(`Final removal plan (descendants first):\n${preview.summary}${treeBranchSummary(branches, deleteBranches)}Remote assets will not be modified.\n`);
 	if (!confirm("Remove these local session assets? [y/N]")) throw new CliError("Cleanup cancelled. No resources changed.");
 	return applySessionTree(root, invocationRoot, slug, preview.token, false, deleteBranches ? branches.filter((branch) => !branch.reason) : undefined);
@@ -573,7 +578,7 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 			slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources, sharedBranches,
 			...(token ? { receipt: token } : {}), keepBranch, remoteAssetsModified: false },
 		token, summary,
-		text: `Recursive preview only. ${summary}No resources changed.${token ? `\nReceipt: ${token}\nApply: ${sessionCommand(slug, "finish")} --all --keep-branch --expected ${token} --yes` : "\nNo execution receipt: use --keep-branch with a fully resolved, safe tree."}\n`,
+		text: `Recursive preview only. ${summary}No resources changed.\n`,
 	};
 }
 
@@ -726,11 +731,11 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 	return success ? 0 : 1;
 }
 
-function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean) {
+function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean, keepBranch: boolean) {
 	if (yes || count === 0) return;
 	if (!process.stdin.isTTY) {
 		throw new CliError(
-			`Confirmation required. Re-run: agent-session finish --${mode} --yes`,
+			`Confirmation required. Re-run: agent-session finish --${mode} ${keepBranch ? "--keep-branch" : "--delete-branches"} --yes`,
 		);
 	}
 	if (!confirm(`Finish ${count} local session(s)? [y/N]`)) {
@@ -827,7 +832,7 @@ export function finishBulk(
 					.filter((record) => branchUpstreamIsGone(root, record.branch))
 					.map((record) => record.slug);
 			}
-			confirmBulkFinish(mode, candidates.length, yes);
+			confirmBulkFinish(mode, candidates.length, yes, keepBranch);
 			let finished = 0;
 			const skipped = [...preflightSkipped];
 			for (const slug of candidates) {

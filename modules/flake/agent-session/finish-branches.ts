@@ -81,13 +81,13 @@ export function finishWorktreeBranches(root: string, invocationRoot: string, slu
 		writeCommandResult({ version: 1, command: "finish", mode: "worktree-branches", dryRun: true, slug,
 			worktreePath: plan.metadata.worktreePath, branches: plan.branches, historyComplete: false, limitation,
 			executionSupported: Boolean(plan.candidate.snapshot), inspection: plan.candidate, remoteAssetsModified: false }, json,
-			`${describe(plan)}No resources changed.\n`);
+			`${describe(plan, !keepBranch)}No resources changed.\n`);
 		return 0;
 	}
 	process.stderr.write(describe(plan));
 	const approvedTarget = plan.candidate.snapshot;
 	if (!approvedTarget) throw new CliError("Cleanup blocked. No resources changed.");
-	const deleteEligible = !keepBranch && plan.branches.some((branch) => !branch.reason) && confirm("Also delete the listed eligible local branches, including those without recorded ownership? [y/N]");
+	const deleteEligible = !keepBranch && plan.branches.some((branch) => !branch.reason);
 	process.stderr.write(`Final removal plan:\n${describe(plan, deleteEligible)}All remote assets and other worktrees will be preserved.\n`);
 	if (!confirm("Remove these local session assets? [y/N]")) throw new CliError("Cleanup cancelled. No resources changed.");
 	return withOperationLock(root, "finish --branches", () => {

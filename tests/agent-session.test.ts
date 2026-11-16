@@ -875,7 +875,7 @@ describe("explicit session branch ownership", () => {
 			expect(JSON.parse(status.stdout).sessions[0].state).toBe("conflict");
 			const preview = runCli(fixture.checkout, ["owner", "finish", "--all", "--dry-run", "--json"]);
 			expect(JSON.parse(preview.stdout).plans[0].unresolvedBranches.join(",")).toBe("agent/owner,feat/expired");
-			expect(runCli(fixture.checkout, ["owner", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["owner", "finish", "--force", "--delete-branches", "--yes"]).status).toBe(1);
 			expect(existsSync(cwd)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
@@ -910,7 +910,7 @@ describe("explicit session branch ownership", () => {
 			git(fixture.session.worktreePath, "switch", "-c", "feat/unclaimed");
 			const status = runCli(fixture.checkout, ["owner", "list", "--inspect", "--json"]);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("agent/owner");
-			const finish = runCli(fixture.checkout, ["owner", "finish", "--force", "--yes"]);
+			const finish = runCli(fixture.checkout, ["owner", "finish", "--force", "--delete-branches", "--yes"]);
 			expect(finish.status).toBe(1);
 			expect(git(fixture.checkout, "show-ref", "--verify", "refs/heads/feat/unclaimed").length > 0).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -1139,9 +1139,10 @@ describe("receipt-bound recursive finish", () => {
 	it("finishes a tree interactively while preserving branches by default", () => {
 		const fixture = setup();
 		try {
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["\n", "y\n"], "", fixture.environment);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], "y\n", "", fixture.environment);
 			expect(result.status).toBe(0);
-			expect(result.output).toContain("Also delete eligible local branches?");
+			expect(result.output.includes("Also delete eligible local branches?")).toBe(false);
+			expect(result.output.split("[y/N]").length).toBe(2);
 			expect(result.output).toContain("Final removal plan");
 			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) {
 				expect(existsSync(session.worktreePath)).toBe(false);
@@ -1156,7 +1157,7 @@ describe("receipt-bound recursive finish", () => {
 			const unrelated = fixture.createAt(fixture.checkout, "unrelated");
 			writeFileSync(join(fixture.child.worktreePath, "README.md"), "unmerged work\n");
 			git(fixture.child.worktreePath, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-am", "Unmerged work");
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "yes\n"], "", fixture.environment);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "yes\n", "", fixture.environment);
 			expect(result.status).toBe(0);
 			expect(result.output).toContain("unmerged");
 			expect(result.output).toContain(`delete: ${fixture.parent.branch}`);
@@ -1179,20 +1180,20 @@ describe("receipt-bound recursive finish", () => {
 					baseBranch: "master", headBranch: fixture.parent.branch, headCommit: tip, trustedHeadCommit: tip,
 					state: "OPEN", isDraft: false, mode: "review" },
 			}));
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "", fixture.environment);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "y\n", "", fixture.environment);
 			if (result.status !== 0) throw new Error(result.output);
 			expect(result.output).toContain("unclaimed or unresolved ownership");
 			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toContain(fixture.parent.branch);
 			expect(git(fixture.checkout, "branch", "--list", fixture.child.branch)).toBe("");
 			expect(existsSync(fixture.parent.worktreePath)).toBe(false);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
-	}, 90000); // Includes three worktree preparations and two terminal prompts.
+	}, 90000); // Includes three worktree preparations and final approval.
 
 	for (const answer of ["\n", "n\n", "EOF"]) {
 		it(`cancels recursive cleanup without effects on final answer ${JSON.stringify(answer)}`, () => {
 			const fixture = setup();
 			try {
-				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", answer], "", fixture.environment);
+				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], answer, "", fixture.environment);
 				expect(result.status).toBe(1);
 				expect(result.output).toContain("cancelled");
 				expect(existsSync(fixture.log)).toBe(false);
@@ -1214,7 +1215,7 @@ describe("receipt-bound recursive finish", () => {
 	it("rechecks the tree after interactive branch approval before any removal", () => {
 		const fixture = setup();
 		try {
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "head", fixture.environment, fixture.child.worktreePath);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "y\n", "head", fixture.environment, fixture.child.worktreePath);
 			expect(result.status).toBe(1);
 			expect(existsSync(fixture.log)).toBe(false);
 			expect(existsSync(fixture.parent.worktreePath)).toBe(true);
@@ -1235,7 +1236,7 @@ describe("receipt-bound recursive finish", () => {
 	it("refuses changed merge-base evidence before removing any worktree", () => {
 		const fixture = setup();
 		try {
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "base", fixture.environment);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "y\n", "base", fixture.environment);
 			expect(result.status).toBe(1);
 			expect(result.output).toContain("merge base changed");
 			expect(existsSync(fixture.log)).toBe(false);
@@ -1247,7 +1248,7 @@ describe("receipt-bound recursive finish", () => {
 		try {
 			const path = join(fixture.bin, "git"), original = readFileSync(path, "utf8");
 			writeFileSync(path, original.replace("exec ", `if [ "$1" = worktree ] && [ "$2" = remove ] && [ "$4" = ${tomlString(fixture.child.worktreePath)} ]; then exit 1; fi\nexec `));
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "", fixture.environment);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "y\n", "", fixture.environment);
 			expect(result.status).toBe(1);
 			expect(existsSync(fixture.grandchild.worktreePath)).toBe(false);
 			expect(existsSync(fixture.parent.worktreePath)).toBe(true);
@@ -1265,7 +1266,7 @@ describe("receipt-bound recursive finish", () => {
 			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 			const racedRef = raceTarget === "tip" ? `refs/heads/${fixture.grandchild.branch}` : "refs/heads/master";
 			writeFileSync(path, original.replace("exec ", `if [ "$1" = update-ref ]; then ${tomlString(executable)} update-ref ${tomlString(racedRef)} ${moved}; fi\nexec `));
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all"], ["y\n", "y\n"], "", fixture.environment);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "y\n", "", fixture.environment);
 			expect(result.status).toBe(1);
 			expect(result.output).toContain("refused");
 			expect(git(fixture.checkout, "branch", "--list", fixture.grandchild.branch)).toContain(fixture.grandchild.branch);
@@ -1467,7 +1468,7 @@ describe("worktree branch history finish", () => {
 		writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
 		const environment = { PATH: `${bin}:${process.env.PATH}` };
 		const args = ["human", "finish", "--branches"];
-		const terminal = (answers: string[], mutation = "") => runFixtureOnTerminal(fixture, ["node", cliScript, ...args], answers, mutation, environment, session.worktreePath);
+		const terminal = (deleteBranches: boolean, answer: string, mutation = "") => runFixtureOnTerminal(fixture, ["node", cliScript, ...args, ...(deleteBranches ? ["--delete-branches"] : ["--keep-branch"])], answer, mutation, environment, session.worktreePath);
 		const preview = () => runCli(fixture.checkout, [...args, "--dry-run", "--json"], environment);
 		return { ...fixture, session, environment, args, terminal, preview };
 	}
@@ -1483,8 +1484,8 @@ describe("worktree branch history finish", () => {
 			expect(plan.branches.map((branch: { name: string }) => branch.name).sort().join(",")).toBe("agent/human,feat/one,feat/two");
 			expect(plan.historyComplete).toBe(false);
 			const text = runCli(fixture.checkout, [...fixture.args, "--dry-run"], fixture.environment);
-			expect(text.stdout).toContain("  branch: agent/human @");
-			expect(text.stdout.includes("  preserve: agent/human")).toBe(false);
+			expect(text.stdout).toContain("  preserve: agent/human @");
+			expect(text.stdout).toContain("deletion not requested");
 			expect(readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8")).toBe(old);
 			expect(existsSync(fixture.session.worktreePath)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -1496,7 +1497,7 @@ describe("worktree branch history finish", () => {
 			try {
 				const outside = runCli(fixture.checkout, ["outside", "create", "--json"], fixture.environment);
 				expect(outside.status).toBe(0);
-				const result = fixture.terminal([deleteBranches ? "y\n" : "\n", "y\n"]);
+				const result = fixture.terminal(deleteBranches, "y\n");
 				if (result.status !== 0) throw new Error(result.output);
 				expect(result.output).toContain("Final removal plan");
 				expect(result.output).toContain("history does not establish ownership");
@@ -1514,7 +1515,7 @@ describe("worktree branch history finish", () => {
 			git(fixture.session.worktreePath, "switch", "feat/two");
 			git(fixture.checkout, "worktree", "add", join(fixture.root, "external"), "feat/one");
 			git(fixture.session.worktreePath, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Retain unmerged work");
-			const result = fixture.terminal(["y\n", "y\n"]);
+			const result = fixture.terminal(true, "y\n");
 			if (result.status !== 0) throw new Error(result.output);
 			expect(result.output).toContain("unmerged");
 			expect(result.output).toContain("protected");
@@ -1533,7 +1534,7 @@ describe("worktree branch history finish", () => {
 				branches: [...outside.branches, { ...fixture.session.branches[0], name: "feat/two" }] }));
 			git(fixture.checkout, "branch", "untouched");
 			git(fixture.checkout, "branch", "-d", "feat/one");
-			const result = fixture.terminal(["y\n", "y\n"]);
+			const result = fixture.terminal(true, "y\n");
 			if (result.status !== 0) throw new Error(result.output);
 			expect(result.output).toContain("shared branch preserved");
 			expect(result.output).toContain("local branch absent");
@@ -1608,7 +1609,7 @@ describe("worktree branch history finish", () => {
 				writeFileSync(join(fixture.root, "bin/git"), `#!/bin/sh\n${failure === "worktree"
 					? 'if [ "$1" = worktree ] && [ "$2" = remove ]; then echo simulated-removal-failure >&2; exit 1; fi'
 					: `if [ "$1" = update-ref ]; then ${tomlString(executable)} update-ref refs/heads/agent/human ${moved}; fi`}\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
-				const result = fixture.terminal(["y\n", "y\n"]);
+				const result = fixture.terminal(true, "y\n");
 				expect(result.status).toBe(1);
 				expect(existsSync(fixture.session.worktreePath)).toBe(failure === "worktree");
 				for (const branch of ["agent/human", "feat/one", "feat/two"]) expect(git(fixture.checkout, "branch", "--list", branch)).toContain(branch);
@@ -1621,7 +1622,7 @@ describe("worktree branch history finish", () => {
 		it(`cancels branch-history cleanup on final answer ${JSON.stringify(answer)}`, () => {
 			const fixture = setup();
 			try {
-				const result = fixture.terminal(["y\n", answer]);
+				const result = fixture.terminal(true, answer);
 				expect(result.status).toBe(1);
 				expect(result.output).toContain("cancelled");
 				expect(existsSync(fixture.session.worktreePath)).toBe(true);
@@ -1634,7 +1635,7 @@ describe("worktree branch history finish", () => {
 		it(`refuses changed ${mutation} evidence after confirmation without removal`, () => {
 			const fixture = setup();
 			try {
-				const result = fixture.terminal(["y\n", "y\n"], mutation);
+				const result = fixture.terminal(true, "y\n", mutation);
 				expect(result.status).toBe(1);
 				expect(result.output).toContain("changed");
 				expect(existsSync(fixture.session.worktreePath)).toBe(true);
@@ -2088,7 +2089,13 @@ describe("session-scoped recursive preview", () => {
 			const preview = JSON.parse(result.stdout);
 			expect(preview.mode).toBe("session-all");
 			expect(preview.sessionId).toBe(parent.sessionId);
-			expect(preview.executionSupported).toBe(false);
+			expect(preview.keepBranch).toBe(true);
+			expect(preview.executionSupported).toBe(true);
+			expect(preview.receipt.startsWith("tree-v1.")).toBe(true);
+			const deletion = runCli(fixture.checkout, ["parent", "finish", "--all", "--delete-branches", "--dry-run", "--json"]);
+			expect(deletion.status).toBe(0);
+			expect(JSON.parse(deletion.stdout).executionSupported).toBe(false);
+			expect(JSON.parse(deletion.stdout).receipt).toBe(undefined);
 			expect(preview.plans.map((plan: { slug: string }) => plan.slug).join(",")).toBe("grandchild,child,parent");
 			for (const session of [parent, child, grandchild, unrelated]) {
 				expect(existsSync(session.worktreePath)).toBe(true);
@@ -2096,7 +2103,7 @@ describe("session-scoped recursive preview", () => {
 			const global = runCli(fixture.checkout, ["finish", "--all", "--dry-run", "--json"]);
 			expect(global.status).toBe(0);
 			expect(JSON.parse(global.stdout).plans.length).toBe(4);
-			const apply = runCli(fixture.checkout, ["parent", "finish", "--all", "--yes"]);
+			const apply = runCli(fixture.checkout, ["parent", "finish", "--all", "--delete-branches", "--yes"]);
 			expect(apply.status).toBe(64);
 			expect(apply.stderr).toContain("requires --keep-branch");
 			expect(existsSync(child.worktreePath)).toBe(true);
@@ -2912,6 +2919,162 @@ describe("single-session finish activity safeguards", () => {
 	});
 });
 
+describe("safe cleanup branch defaults", () => {
+	it("keeps colour validation out of structured branch-disposition previews", () => {
+		const fixture = setupPreference();
+		try {
+			for (const [color, branches] of [["rainbow", "preserve"], [{}, "delete"]]) {
+				writeFileSync(fixture.path, JSON.stringify({ color, branches }));
+				const json = runCli(fixture.checkout, ["human", "finish", "--dry-run", "--json"], fixture.env);
+				expect(json.status).toBe(0); expect(json.stdout.includes("\u001b")).toBe(false);
+				expect(JSON.parse(json.stdout).plan.keepBranch).toBe(branches === "preserve");
+				expect(runCli(fixture.checkout, ["human", "finish", "--dry-run"], fixture.env).status).toBe(64);
+			}
+			expect(existsSync(fixture.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("advertises explicit branch choices without offering unsupported batch deletion", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			for (const scope of ["options:finish", "options:global-finish"]) {
+				const options = runCli(fixture.checkout, ["__complete", scope]).stdout;
+				for (const flag of ["--keep-branch", "--delete-branches"]) expect(options).toContain(flag);
+			}
+			expect(runCli(fixture.checkout, ["__complete", "options:global-batch"]).stdout.includes("--delete-branches")).toBe(false);
+			const help = runCli(fixture.checkout, []).stderr;
+			expect(help).toContain("Branches default to preserve");
+			expect(help).toContain("branches=preserve|delete");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves branches in repository-wide previews without inheriting personal deletion", () => {
+		const fixture = setupPreference();
+		try {
+			const args = ["finish", "--all", "--dry-run", "--json"];
+			const preserved = runCli(fixture.checkout, args, fixture.env);
+			expect(preserved.status).toBe(0);
+			const plans = JSON.parse(preserved.stdout).plans;
+			expect(plans.length).toBe(1); expect(plans[0].keepBranch).toBe(true);
+			const requested = runCli(fixture.checkout, [...args, "--delete-branches"], fixture.env);
+			expect(requested.status).toBe(0); expect(JSON.parse(requested.stdout).plans[0].keepBranch).toBe(false);
+			expect(existsSync(fixture.worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const answer of ["no\n", "\n", "EOF"]) it(`does not treat personal deletion as consent on ${JSON.stringify(answer)}`, () => {
+		const fixture = setupPreference();
+		try {
+			const record = sessionMetadataPath(fixture.checkout, "human"), before = readFileSync(record, "utf8");
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish"], answer, "", fixture.env);
+			expect(result.status).toBe(1); expect(result.output.split("[y/N]").length).toBe(2);
+			expect(existsSync(fixture.worktree)).toBe(true);
+			expect(readFileSync(record, "utf8")).toBe(before);
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	function setupPreference() {
+		const fixture = createHumanFinishFixture();
+		const xdg = join(fixture.root, "branch-preferences"), directory = join(xdg, "agent-session");
+		mkdirSync(directory, { recursive: true });
+		const path = join(directory, "config.json");
+		writeFileSync(path, JSON.stringify({ branches: "delete" }));
+		return { ...fixture, path, env: { XDG_CONFIG_HOME: xdg, NO_COLOR: "", NODE_OPTIONS: "" } };
+	}
+
+	for (const flags of [["--delete-branches"], ["--delete-branches", "--keep-branch"], ["--keep-branch", "--delete-branches"]]) {
+		it(`honours explicit branch disposition ${flags.join(" ")} through one confirmation`, () => {
+			const fixture = createHumanFinishFixture();
+			try {
+				const keep = flags.includes("--keep-branch");
+				const result = finishOnTerminal(fixture, ["human", "finish", ...flags], "yes\n");
+				expect(result.status).toBe(0);
+				expect(result.output.split("[y/N]").length).toBe(2);
+				expect(result.output).toContain(keep ? "Would preserve" : "Would delete");
+				expect(existsSync(fixture.worktree)).toBe(false);
+				expect(Boolean(git(fixture.checkout, "branch", "--list", "agent/human"))).toBe(keep);
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("uses personal deletion requests in previews and interactive approval without rewriting preferences", () => {
+		const fixture = setupPreference();
+		try {
+			const original = readFileSync(fixture.path, "utf8");
+			const preview = runCli(fixture.checkout, ["human", "finish", "--dry-run", "--json"], fixture.env);
+			expect(preview.status).toBe(0); expect(JSON.parse(preview.stdout).plan.keepBranch).toBe(false);
+			const kept = runCli(fixture.checkout, ["human", "finish", "--keep-branch", "--dry-run", "--json"], fixture.env);
+			expect(kept.status).toBe(0); expect(JSON.parse(kept.stdout).plan.keepBranch).toBe(true);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish"], "yes\n", "", fixture.env);
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			expect(result.output).toContain("Would delete");
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toBe("");
+			expect(readFileSync(fixture.path, "utf8")).toBe(original);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("requires an explicit automated branch choice and ignores personal deletion when keeping a receipt-approved branch", () => {
+		const fixture = setupPreference();
+		try {
+			const missing = runCli(fixture.checkout, ["human", "finish", "--yes"], fixture.env);
+			expect(missing.status).toBe(64); expect(missing.stderr).toContain("explicit branch disposition");
+			expect(existsSync(fixture.worktree)).toBe(true);
+			const preview = runCli(fixture.checkout, ["human", "finish", "--keep-branch", "--dry-run", "--json"], fixture.env);
+			expect(preview.status).toBe(0);
+			const receipt = JSON.parse(preview.stdout).plan.receipt;
+			expect(runCli(fixture.checkout, ["human", "finish", "--expected", receipt, "--yes"], fixture.env).status).toBe(64);
+			const applied = runCli(fixture.checkout, ["human", "finish", "--keep-branch", "--expected", receipt, "--yes"], fixture.env);
+			expect(applied.status).toBe(0); expect(existsSync(fixture.worktree)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not turn explicit automated deletion into authority to dispose of artifacts without a receipt", () => {
+		const fixture = setupPreference();
+		try {
+			const result = runCli(fixture.checkout, ["human", "finish", "--delete-branches", "--yes"], fixture.env);
+			expect(result.status).toBe(1); expect(result.stderr).toContain("Artifact disposal requires");
+			expect(existsSync(fixture.worktree)).toBe(true);
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("cannot request unrecorded or inactive-batch branch deletion through flags or preferences", () => {
+		const fixture = setupPreference();
+		try {
+			rmSync(sessionMetadataPath(fixture.checkout, "human"));
+			for (const flags of [["--dry-run"], ["--yes"]]) {
+				const explicit = runCli(fixture.checkout, ["human", "finish", "--force", "--delete-branches", ...flags], fixture.env);
+				expect(explicit.status).toBe(64); expect(existsSync(fixture.worktree)).toBe(true);
+			}
+			const unrecorded = runCli(fixture.checkout, ["human", "finish", "--force", "--dry-run", "--json"], fixture.env);
+			expect(unrecorded.status).toBe(0); expect(JSON.parse(unrecorded.stdout).plan.allBranchesPreserved).toBe(true);
+			const batch = runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--json"], fixture.env);
+			expect(batch.status).toBe(0); expect(JSON.parse(batch.stdout).keepBranch).toBe(true);
+			expect(runCli(fixture.checkout, ["batch", "finish", "--inactive-for", "7d", "--dry-run", "--delete-branches"], fixture.env).status).toBe(64);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("preserves the local branch by default in preview and after terminal approval", () => {
+		const fixture = createHumanFinishFixture();
+		try {
+			const env = { XDG_CONFIG_HOME: join(fixture.root, "personal-config"), NO_COLOR: "", NODE_OPTIONS: "" };
+			const preview = runCli(fixture.checkout, ["human", "finish", "--dry-run", "--json"], env);
+			expect(preview.status).toBe(0);
+			const plan = JSON.parse(preview.stdout).plan;
+			expect(plan.keepBranch).toBe(true);
+			expect(plan.receipt.length).toBe(64);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish"], "yes\n", "", env);
+			expect(result.status).toBe(0);
+			expect(result.output).toContain("Would preserve");
+			expect(result.output).toContain("Preserved");
+			expect(existsSync(fixture.worktree)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toContain("agent/human");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("personal output preferences", () => {
 	it("retains auto defaults for missing or empty settings, validates types, and advertises the personal config capability", () => {
 		const fixture = createHumanFinishFixture();
@@ -2966,7 +3129,7 @@ describe("personal output preferences", () => {
 		try {
 			const xdg = join(fixture.root, "personal-config"), directory = join(xdg, "agent-session"); mkdirSync(directory, { recursive: true });
 			const path = join(directory, "config.json"), env = { XDG_CONFIG_HOME: xdg, NODE_OPTIONS: "" };
-			for (const contents of ['{"color": "private-value",', JSON.stringify({ force: true, token: "private-value" }), '[]', 'null', '"always"', '{"color":null}', '{"color":["always"]}', '{"color":{"toString":"always"}}', '{"color":"rainbow"}']) {
+			for (const contents of ['{"color": "private-value",', JSON.stringify({ force: true, token: "private-value" }), '[]', 'null', '"always"', '{"color":null}', '{"color":["always"]}', '{"color":{"toString":"always"}}', '{"color":"rainbow"}', '{"branches":"force"}', '{"branches":true}']) {
 				writeFileSync(path, contents);
 				const result = runCli(fixture.checkout, ["list"], env);
 				expect(result.status).toBe(64);
@@ -3197,7 +3360,7 @@ write(JSON.stringify({ resize, output: chunks.join('') }));`;
 			const bin = join(fixture.root, "partial-bin"); mkdirSync(bin);
 			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
 			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = branch ] && [ "$2" = -D ]; then printf 'fixture branch deletion failed\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
-			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish", "--color=never"], "yes\n", "", { PATH: `${bin}:${process.env.PATH}` });
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish", "--delete-branches", "--color=never"], "yes\n", "", { PATH: `${bin}:${process.env.PATH}` });
 			expect(result.status).toBe(1);
 			expect(result.output).toContain("Removed");
 			expect(result.output).toContain("Uncertain");
@@ -3243,7 +3406,7 @@ write(JSON.stringify({ resize, output: chunks.join('') }));`;
 		it(`finishes from one terminal confirmation, keeping branch disposition ${keepBranch ? "preserved" : "deleted"}`, () => {
 			const fixture = createHumanFinishFixture();
 			try {
-				const result = finishOnTerminal(fixture, ["human", "finish", ...(keepBranch ? ["--keep-branch"] : [])], "yes\n");
+				const result = finishOnTerminal(fixture, ["human", "finish", ...(keepBranch ? ["--keep-branch"] : ["--delete-branches"])], "yes\n");
 				expect(result.answered).toBe(true);
 				if (result.status !== 0) throw new Error(result.output);
 				expect(result.status).toBe(0);
@@ -4525,7 +4688,7 @@ exec ${tomlString(realGit)} "$@"
 		const fixture = createPullRequestFixture();
 		try {
 			expect(runCli(fixture.checkout, ["review-auth", "create", "--pr", "123", "--trust-pr"], fixture.environment).status).toBe(0);
-			const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment);
+			const finished = runCli(fixture.checkout, ["review-auth", "finish", "--delete-branches", "--yes"], fixture.environment);
 			expect(finished.status).toBe(0);
 			expect(existsSync(join(fixture.worktrees, "review-auth"))).toBe(false);
 			expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
@@ -4542,7 +4705,7 @@ exec ${tomlString(realGit)} "$@"
 			writeFileSync(join(worktree, "fix.txt"), "review fix\n");
 			git(worktree, "add", "fix.txt");
 			git(worktree, "-c", "user.name=Review", "-c", "user.email=review@example.invalid", "-c", "commit.gpgsign=false", "commit", "-m", "Review fix");
-			const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment);
+			const finished = runCli(fixture.checkout, ["review-auth", "finish", "--delete-branches", "--yes"], fixture.environment);
 			expect(finished.status).toBe(1);
 			expect(finished.stderr).toContain("unpushed commits");
 			expect(existsSync(worktree)).toBe(true);
@@ -4668,7 +4831,7 @@ describe("PR URLs and fork sources", () => {
 		try {
 			const numbered = runCli(fixture.checkout, ["number-review", "create", "--pr", "123", "--trust-pr", "--json"], fixture.environment);
 			expect(numbered.status).toBe(0);
-			expect(runCli(fixture.checkout, ["number-review", "finish", "--yes"], fixture.environment).status).toBe(0);
+			expect(runCli(fixture.checkout, ["number-review", "finish", "--delete-branches", "--yes"], fixture.environment).status).toBe(0);
 			const byUrl = runCli(fixture.checkout, ["url-review", "create", "--pr", "https://github.com/FIXTURE/REPO/pull/123", "--trust-pr", "--json"], fixture.environment);
 			expect(byUrl.status).toBe(0);
 			expect(JSON.stringify(JSON.parse(byUrl.stdout).session.pr)).toBe(JSON.stringify(JSON.parse(numbered.stdout).session.pr));
@@ -4730,7 +4893,7 @@ describe("PR URLs and fork sources", () => {
 			const refreshed = runCli(fixture.checkout, ["review-auth", "list", "--inspect", "--refresh", "--json"], fixture.environment);
 			expect(refreshed.status).toBe(0);
 			expect(JSON.parse(refreshed.stdout).sessions[0].publication).toBe("behind");
-			expect(runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment).status).toBe(0);
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--delete-branches", "--yes"], fixture.environment).status).toBe(0);
 			expect(existsSync(metadata.worktreePath)).toBe(false);
 			expect(git(fixture.fork, "rev-parse", `refs/heads/${fixture.branch}`)).toBe(git(fixture.seed, "rev-parse", "HEAD"));
 			expect(git(fixture.checkout, "remote")).toContain(metadata.pr.sourceRemote);
@@ -4835,7 +4998,7 @@ describe("independent work from a PR", () => {
 				const status = runCli(metadata.worktreePath, [".", "list", "--inspect", "--json"], fixture.environment);
 				expect(status.status).toBe(0);
 				expect(JSON.parse(status.stdout).sessions[0].publication).toBe("unpublished");
-				expect(runCli(fixture.checkout, ["followup", "finish", "--yes"], fixture.environment).status).toBe(1);
+				expect(runCli(fixture.checkout, ["followup", "finish", "--delete-branches", "--yes"], fixture.environment).status).toBe(1);
 				expect(existsSync(metadata.worktreePath)).toBe(true);
 				expect(runCli(fixture.checkout, ["followup", "finish", "--keep-branch", "--yes"], fixture.environment).status).toBe(0);
 				expect(git(fixture.checkout, "rev-parse", "agent/followup")).toBe(fixture.head);
@@ -4992,7 +5155,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 				expect(JSON.parse(status.stdout).sessions[0].ownedBranches.length).toBe(0);
 				expect(JSON.parse(status.stdout).sessions[0].state).toBe(mode === "renamed" ? "conflict" : "ready");
 				if (mode === "renamed") {
-					const refused = runCli(fixture.checkout, ["review-auth", "finish", "--yes"], fixture.environment);
+					const refused = runCli(fixture.checkout, ["review-auth", "finish", "--delete-branches", "--yes"], fixture.environment);
 					expect(refused.status).toBe(1);
 					expect(existsSync(metadata.worktreePath)).toBe(true);
 					expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
@@ -5000,7 +5163,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 				}
 				if (mode === "orphaned-force") rmSync(metadata.worktreePath, { recursive: true, force: true });
 				if (mode === "force") writeFileSync(join(metadata.worktreePath, "dirty.txt"), "discard checkout files only\n");
-				const finished = runCli(fixture.checkout, ["review-auth", "finish", "--yes", ...(mode.includes("force") ? ["--force"] : [])], fixture.environment);
+				const finished = runCli(fixture.checkout, ["review-auth", "finish", "--keep-branch", "--yes", ...(mode.includes("force") ? ["--force"] : [])], fixture.environment);
 				expect(finished.status).toBe(0);
 				expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
 				expect(existsSync(sessionMetadataPath(fixture.checkout, "review-auth"))).toBe(false);
@@ -5032,13 +5195,13 @@ describe("PR launch, reuse and borrowed branches", () => {
 				if (corruption === "downgrade") corrupt.version = 1;
 				else delete corrupt.initialBranchOwned;
 				writeFileSync(record, JSON.stringify(corrupt));
-				const refused = runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment);
+				const refused = runCli(fixture.checkout, ["review-auth", "finish", "--force", "--delete-branches", "--yes"], fixture.environment);
 				expect(refused.status).toBe(1);
 				expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
 				expect(existsSync(receipt.session.worktreePath)).toBe(true);
 			}
 			writeFileSync(record, before);
-			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment).status).toBe(0);
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--delete-branches", "--yes"], fixture.environment).status).toBe(0);
 			expect(git(fixture.checkout, "rev-parse", branch)).toBe(fixture.head);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
@@ -5076,7 +5239,7 @@ describe("PR launch, reuse and borrowed branches", () => {
 			createOwnedBranch(worktree, "fix/session-owned", fixture.environment);
 			const status = runCli(fixture.checkout, ["review-auth", "list", "--inspect", "--json"], fixture.environment);
 			expect(JSON.parse(status.stdout).sessions[0].ownedBranches.join(",")).toBe("fix/session-owned");
-			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--yes"], fixture.environment).status).toBe(0);
+			expect(runCli(fixture.checkout, ["review-auth", "finish", "--force", "--delete-branches", "--yes"], fixture.environment).status).toBe(0);
 			expect(git(fixture.checkout, "branch", "--list", "fix/session-owned")).toBe("");
 			expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(fixture.head);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -5157,7 +5320,7 @@ describe("historical PRs and release bases", () => {
 				expect(git(metadata.worktreePath, "rev-parse", "HEAD")).toBe(fixture.head);
 				expect(git(metadata.worktreePath, "config", `branch.${fixture.branch}.merge`)).toBe(`refs/heads/${fixture.branch}`);
 				expect(git(metadata.worktreePath, "for-each-ref", "--format=%(upstream:track)", `refs/heads/${fixture.branch}`)).toBe("[gone]");
-				const finished = runCli(fixture.checkout, ["history", "finish", "--yes"], fixture.environment);
+				const finished = runCli(fixture.checkout, ["history", "finish", "--delete-branches", "--yes"], fixture.environment);
 				expect(finished.status).toBe(state === "MERGED" ? 0 : 1);
 				if (state === "CLOSED") expect(runCli(fixture.checkout, ["history", "finish", "--keep-branch", "--yes"], fixture.environment).status).toBe(0);
 				expect(git(fixture.remote, "show-ref")).toBe(refs);
@@ -5178,7 +5341,7 @@ describe("historical PRs and release bases", () => {
 			expect(metadata.version).toBe(3);
 			expect(metadata.initialBranchOwned).toBe(false);
 			expect(metadata.pr.sourceBranchMissing).toBe(true);
-			expect(runCli(fixture.checkout, ["history", "finish", "--yes"], fixture.environment).status).toBe(0);
+			expect(runCli(fixture.checkout, ["history", "finish", "--delete-branches", "--yes"], fixture.environment).status).toBe(0);
 			expect(git(fixture.checkout, "rev-parse", fixture.branch)).toBe(fixture.head);
 			expect(readFileSync(join(fixture.checkout, ".git", "config"), "utf8")).toBe(config);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -5283,7 +5446,7 @@ exec ${tomlString(realGit)} "$@"
 				git(fixture.seed, "-c", "commit.gpgsign=false", "merge", "--no-ff", fixture.branch, "-m", "Merge into release");
 				git(fixture.seed, "push", "origin", "release/2.x");
 				git(fixture.remote, "update-ref", "-d", `refs/heads/${fixture.branch}`);
-				expect(runCli(fixture.checkout, ["release-review", "finish", "--yes"], fixture.environment).status).toBe(0);
+				expect(runCli(fixture.checkout, ["release-review", "finish", "--delete-branches", "--yes"], fixture.environment).status).toBe(0);
 				expect(existsSync(metadata.worktreePath)).toBe(false);
 			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 		});
@@ -5421,10 +5584,10 @@ describe("subject-first invocation", () => {
 		try {
 			const { worktree } = startManagedSession(fixture);
 			for (const args of [
-				["--all", "finish", "--yes"],
-				["--gone", "finish", "--yes"],
+				["--all", "finish", "--delete-branches", "--yes"],
+				["--gone", "finish", "--delete-branches", "--yes"],
 				["--json", "status"],
-				["--", "--all", "finish", "--yes"],
+				["--", "--all", "finish", "--delete-branches", "--yes"],
 			]) {
 				expect(runCli(fixture.checkout, args).status).toBe(64);
 				expect(existsSync(worktree)).toBe(true);
@@ -6091,7 +6254,7 @@ describe("explicit unrecorded-worktree retirement", () => {
 			expect(readFileSync(join(worktree, "uncommitted"), "utf8")).toBe("discard only after explicit force");
 			const human = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--dry-run"]);
 			expect(human.stdout).toContain("preserve all branches");
-			const result = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]);
+			const result = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]);
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("uncommitted and ignored local files");
 			expect(existsSync(worktree)).toBe(false);
@@ -6112,7 +6275,7 @@ describe("explicit unrecorded-worktree retirement", () => {
 			expect(preview.status).toBe(0);
 			expect(JSON.parse(preview.stdout).plan.currentBranch).toBe(null);
 			expect(JSON.parse(preview.stdout).plan.detachedHeadMayBecomeUnreachable).toBe(true);
-			const result = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]);
+			const result = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]);
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("Detached HEAD commits may become unreachable");
 			expect(git(fixture.checkout, "for-each-ref", "--format=%(refname) %(objectname)")).toBe(refs);
@@ -6126,24 +6289,24 @@ describe("explicit unrecorded-worktree retirement", () => {
 			rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
 			git(worktree, "branch", "-m", "fix/unrecorded-work");
 			for (const flags of [["--yes"], ["--dry-run"], ["--force"]]) {
-				expect(runCli(fixture.checkout, ["git-hygiene", "finish", ...flags]).status).toBe(1);
+				expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--keep-branch", ...flags]).status).toBe(1);
 				expect(existsSync(worktree)).toBe(true);
 			}
 			for (const selector of ["--all", "--gone"]) {
 				for (const flags of [["--dry-run", "--json"], ["--yes"]]) {
-					expect(runCli(fixture.checkout, ["finish", selector, "--force", ...flags]).status).toBe(0);
+					expect(runCli(fixture.checkout, ["finish", selector, "--force", "--keep-branch", ...flags]).status).toBe(0);
 					expect(existsSync(worktree)).toBe(true);
 				}
 			}
 			const nested = join(worktree, "nested"); mkdirSync(nested);
 			for (const flags of [["--yes"], ["--dry-run", "--json"]]) {
-				const result = runCli(nested, ["git-hygiene", "finish", "--force", ...flags]);
+				const result = runCli(nested, ["git-hygiene", "finish", "--force", "--keep-branch", ...flags]);
 				expect(result.status).toBe(1);
 				expect(result.stderr).toContain("current shell");
 				expect(existsSync(worktree)).toBe(true);
 			}
 			writeFileSync(join(fixture.checkout, ".gitignore"), "");
-			const ignored = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"], {
+			const ignored = runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"], {
 				GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_COUNT: "1", GIT_CONFIG_KEY_0: "core.excludesFile", GIT_CONFIG_VALUE_0: "/dev/null",
 			});
 			expect(ignored.status).toBe(1);
@@ -6160,25 +6323,25 @@ describe("explicit unrecorded-worktree retirement", () => {
 			const original = JSON.parse(readFileSync(path, "utf8"));
 			for (const contents of ["not JSON", "null", JSON.stringify({ ...original, worktreePath: fixture.seed })]) {
 				writeFileSync(path, contents);
-				expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+				expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 				expect(existsSync(worktree)).toBe(true);
 				expect(readFileSync(path, "utf8")).toBe(contents);
 			}
 			rmSync(path); symlinkSync(join(fixture.root, "missing-record"), path);
 			for (const command of ["finish", "repair"]) {
-				const flags = command === "finish" ? ["--force", "--yes"] : [];
+				const flags = command === "finish" ? ["--force", "--keep-branch", "--yes"] : [];
 				expect(runCli(fixture.checkout, ["git-hygiene", command, ...flags]).status).toBe(1);
 				expect(lstatSync(path).isSymbolicLink()).toBe(true);
 			}
 			rmSync(path); mkdirSync(path);
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			rmSync(path, { recursive: true });
 			rmSync(join(path, ".."), { recursive: true });
 			writeFileSync(join(path, ".."), "invalid metadata directory");
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			rmSync(join(path, ".."));
 			symlinkSync(join(fixture.root, "missing-store"), join(path, ".."));
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			expect(existsSync(worktree)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
@@ -6189,24 +6352,24 @@ describe("explicit unrecorded-worktree retirement", () => {
 			const { worktree } = startManagedSession(fixture);
 			rmSync(sessionMetadataPath(fixture.checkout, "git-hygiene"));
 			git(fixture.checkout, "worktree", "lock", worktree);
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			git(fixture.checkout, "worktree", "unlock", worktree);
 			const moved = join(fixture.root, "moved");
 			git(fixture.checkout, "worktree", "move", worktree, moved);
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			symlinkSync(moved, worktree);
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			rmSync(worktree); mkdirSync(worktree);
 			writeFileSync(join(worktree, "preserve"), "not registered");
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			expect(readFileSync(join(worktree, "preserve"), "utf8")).toBe("not registered");
 			git(worktree, "init");
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			expect(existsSync(moved)).toBe(true);
 			rmSync(worktree, { recursive: true });
 			git(fixture.checkout, "worktree", "move", moved, worktree);
 			writeFileSync(join(worktree, ".git"), `gitdir: ${join(fixture.seed, ".git")}\n`);
-			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--yes"]).status).toBe(1);
+			expect(runCli(fixture.checkout, ["git-hygiene", "finish", "--force", "--keep-branch", "--yes"]).status).toBe(1);
 			expect(existsSync(worktree)).toBe(true);
 			expect(existsSync(fixture.seed)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -6930,7 +7093,7 @@ describe("explicit current-session targeting", () => {
 			const { worktree } = startManagedSession(fixture);
 			const nested = join(worktree, "nested");
 			mkdirSync(nested);
-			for (const flags of [[], ["--dry-run", "--json"], ["--keep-branch", "--yes"], ["--force", "--yes"]]) {
+			for (const flags of [[], ["--dry-run", "--json"], ["--keep-branch", "--yes"], ["--force", "--keep-branch", "--yes"]]) {
 				const result = runCli(nested, [".", "finish", ...flags]);
 				expect(result.status).toBe(1);
 				expect(result.stderr).toContain("Cannot remove the worktree containing the current shell");
@@ -7528,7 +7691,7 @@ describe("agent-session finish", () => {
 				["--all", "--keep-branch", "--expected", "a".repeat(64)],
 			]) {
 				const invocation = args[0]?.startsWith("--")
-					? ["finish", ...args, "--yes"]
+					? ["finish", ...args, "--delete-branches", "--yes"]
 					: [args[0] ?? "", "finish", ...args.slice(1), "--yes"];
 				const result = runCli(fixture.checkout, invocation);
 				expect(result.status).toBe(64);
@@ -7548,6 +7711,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -7571,6 +7735,7 @@ describe("agent-session finish", () => {
 				"git-hygiene",
 				"finish",
 				"--force",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -7603,6 +7768,7 @@ describe("agent-session finish", () => {
 				"git-hygiene",
 				"finish",
 				"--force",
+				"--delete-branches",
 				"--yes",
 			]);
 			expect(forced.status).toBe(0);
@@ -7631,6 +7797,7 @@ describe("agent-session finish", () => {
 				"git-hygiene",
 				"finish",
 				"--force",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -7704,6 +7871,7 @@ describe("agent-session finish", () => {
 			const unpublished = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 			expect(unpublished.status).toBe(1);
@@ -7786,7 +7954,7 @@ describe("agent-session finish", () => {
 		});
 
 		it("finishes all safe sessions while skipping dirty work", () => {
-			const result = runCli(fixture.checkout, ["finish", "--all", "--yes"]);
+			const result = runCli(fixture.checkout, ["finish", "--all", "--delete-branches", "--yes"]);
 
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("Finished 2 session(s); skipped 1");
@@ -7799,6 +7967,7 @@ describe("agent-session finish", () => {
 				"finish",
 				"--all",
 				"--force",
+				"--delete-branches",
 				"--yes",
 			]);
 			expect(forced.status).toBe(0);
@@ -7818,6 +7987,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -7861,7 +8031,7 @@ describe("agent-session finish", () => {
 		});
 
 		it("finishes all sessions whose upstream branches are gone", () => {
-			const result = runCli(fixture.checkout, ["finish", "--gone", "--yes"]);
+			const result = runCli(fixture.checkout, ["finish", "--gone", "--delete-branches", "--yes"]);
 
 			expect(result.status).toBe(0);
 			expect(result.stdout).toContain("Finished 1 session(s); skipped 0");
@@ -7881,6 +8051,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -7924,6 +8095,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -7981,6 +8153,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -8016,6 +8189,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -8054,6 +8228,7 @@ describe("agent-session finish", () => {
 				"git-hygiene",
 				"finish",
 				"--force",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -8113,6 +8288,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 
@@ -8405,6 +8581,7 @@ describe("agent-session hardening", () => {
 			const finish = runCli(fixture.checkout, [
 				"git-hygiene",
 				"finish",
+				"--delete-branches",
 				"--yes",
 			]);
 			expect(finish.status).toBe(1);
@@ -8414,6 +8591,7 @@ describe("agent-session hardening", () => {
 				"git-hygiene",
 				"finish",
 				"--force",
+				"--delete-branches",
 				"--yes",
 			]);
 			expect(forced.status).toBe(1);
