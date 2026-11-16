@@ -6,8 +6,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [mode = "create", ...flags] = process.argv.slice(2);
-if (!["create", "start", "failure", "busy", "preview", "finish", "partial"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never"].includes(flag))) {
-  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial] [--verbose] [--color=auto|always|never]");
+if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never"].includes(flag))) {
+  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences] [--verbose] [--color=auto|always|never]");
 }
 const root = mkdtempSync(join(tmpdir(), "as-output-demo-"));
 const checkout = join(root, "checkout");
@@ -36,14 +36,21 @@ try {
   writeFileSync(config, JSON.stringify({
     version: 1, worktree_root: ".worktrees", local_links: [], disposable_paths: [".cache"], generated_links: {},
     agent_command: [process.execPath, "-e", "console.log('Agent stdout remains visible'); console.error('Agent stderr remains visible');"],
-    prepare_command: ["busy", "preview", "finish", "partial"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
+    prepare_command: ["busy", "preview", "finish", "partial", "preferences"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
   }));
   const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../modules/flake/agent-session/cli.ts");
   const options = { cwd: checkout, env: { ...env, AGENT_SESSION_CONFIG: config } };
-  if (["busy", "preview", "finish", "partial"].includes(mode)) {
+  if (["busy", "preview", "finish", "partial", "preferences"].includes(mode)) {
     const prepared = spawnSync(process.execPath, [cli, "demo", "create", "--json"], { ...options, encoding: "utf8" });
     if (prepared.status !== 0) throw new Error(prepared.stderr || "Cannot prepare demo fixture");
     const worktree = JSON.parse(prepared.stdout).session.worktreePath;
+    if (mode === "preferences") {
+      const personal = join(root, "personal-config");
+      mkdirSync(join(personal, "agent-session"), { recursive: true });
+      writeFileSync(join(personal, "agent-session", "config.json"), JSON.stringify({ color: "always" }));
+      options.env = { ...options.env, XDG_CONFIG_HOME: personal };
+      process.stdout.write("Temporary personal preference: color=always. Flags and NO_COLOR still apply.\n\n");
+    }
     if (mode === "busy") {
       const nested = join(worktree, "nested"); mkdirSync(nested);
       worker = spawn(process.execPath, ["-e", "console.log('ready'); setInterval(() => {}, 1000)"], { cwd: nested, stdio: ["ignore", "pipe", "ignore"] });
@@ -56,7 +63,7 @@ try {
     } else {
       mkdirSync(join(worktree, ".cache"));
       writeFileSync(join(worktree, ".cache", "tasks.sqlite"), "Disposable fixture database contents\n");
-      if (mode !== "preview") {
+      if (!["preview", "preferences"].includes(mode)) {
         const bin = join(checkout, ".git", "demo-bin"); mkdirSync(bin);
         const executable = spawnSync("sh", ["-c", "command -v git"], { env, encoding: "utf8" }).stdout.trim();
         // Slow only this fixture's native cleanup so intermediate rows are visible.
@@ -64,7 +71,7 @@ try {
         options.env = { ...options.env, PATH: `${bin}:${env.PATH}` };
       }
       if (mode === "partial") process.stdout.write("Approve to demonstrate an injected branch-deletion failure after native worktree removal.\n\n");
-      const result = spawnSync(process.execPath, [cli, "demo", "finish", ...(mode === "partial" ? [] : ["--keep-branch"]), ...(mode === "preview" ? ["--dry-run"] : []), ...flags], { ...options, stdio: "inherit" });
+      const result = spawnSync(process.execPath, [cli, "demo", "finish", ...(mode === "partial" ? [] : ["--keep-branch"]), ...(["preview", "preferences"].includes(mode) ? ["--dry-run"] : []), ...flags], { ...options, stdio: "inherit" });
       if (result.error) throw result.error;
       process.exitCode = result.status ?? 1;
     }

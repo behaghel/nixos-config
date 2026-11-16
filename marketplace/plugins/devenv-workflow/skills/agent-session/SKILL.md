@@ -282,6 +282,17 @@ advertising single-session presentation flags in usage and `options:finish`,
 Neither flag changes scope or approval. Do not assume the flags work on other
 cleanup selectors without verifying their installed support.
 A preview is not cleanup authorization.
+
+On providers whose usage explicitly documents personal colour defaults, the
+optional file is `$XDG_CONFIG_HOME/agent-session/config.json`, falling back to
+`~/.config/agent-session/config.json`; relative XDG paths are ignored. It accepts
+`color: auto|always|never`. Explicit colour flags override it, and only an explicit
+`--color=always` overrides nonempty `NO_COLOR`. JSON and protocol output ignore
+the file. Do not infer this capability from older colour flags alone, write a
+user's personal file without permission, or put force/consent/project policy in
+it. Malformed settings stop normal presentation commands; explicit colour flags
+can bypass the file for diagnosis. These colour preferences do not authorize
+branch deletion or retirement.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 

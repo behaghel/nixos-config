@@ -404,6 +404,33 @@ its generated completion source and CLI help explain the distinction without
 inserting description text into commands. Fish registration replaces stale
 assembler completions for the installed `as` alias.
 
+## Personal colour preferences
+
+Commands advertising `--color` read optional personal defaults from
+`$XDG_CONFIG_HOME/agent-session/config.json`, or
+`~/.config/agent-session/config.json` when XDG is unset, empty or relative.
+No project-level override is searched. The file is read-only to the CLI and
+currently supports one optional key:
+
+```json
+{
+  "color": "auto"
+}
+```
+
+Values are `auto`, `always` and `never`; an absent file or key defaults to `auto`.
+Explicit `--color` flags override the file. Nonempty `NO_COLOR` suppresses personal
+colour settings, including configured `always`; only explicit `--color=always`
+opts back in. Configured `always` can colour redirected human output when
+`NO_COLOR` is empty. Colour never changes state words or cleanup scope.
+
+JSON and completion/protocol output do not consult this presentation file.
+Malformed JSON, invalid types, unsupported settings and unreadable files stop
+ordinary presentation commands before work, without printing file contents.
+An explicit `--color` flag bypasses the file, allowing diagnosis while it is
+being corrected. This file cannot configure verbosity, branch deletion, force,
+consent, project policy or agent/child commands.
+
 ## Human inspection output
 
 `list` (including `--inspect`) and `doctor` accept `--color=auto|always|never` and `--verbose`.

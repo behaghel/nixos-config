@@ -1,4 +1,5 @@
 import { CliError } from "./runtime.ts";
+import { personalColor } from "./preferences.ts";
 import { validateSlug } from "./sessions.ts";
 import { parsePullRequestSelection } from "./github.ts";
 import type { BatchFinishOptions, PullRequestSelection, OwnershipOptions, PresentationOptions } from "./types.ts";
@@ -170,7 +171,7 @@ export function parseBranchArguments(args: string[]): { slug: string; name: stri
 }
 
 function presentationArguments(input: string[]): PresentationOptions & { args: string[] } {
-	let color: PresentationOptions["color"] = "auto";
+	let color: PresentationOptions["color"];
 	let verbose = false;
 	const args = input.filter((argument) => {
 		if (argument === "--verbose") { verbose = true; return false; }
@@ -180,7 +181,7 @@ function presentationArguments(input: string[]): PresentationOptions & { args: s
 		color = value as PresentationOptions["color"];
 		return false;
 	});
-	return { args, color, verbose };
+	return { args, color: personalColor(color, args.includes("--json")), verbose };
 }
 
 export function parseCreateArguments(input: string[]): PresentationOptions & {
@@ -346,7 +347,7 @@ export function parseBatchArguments(args: string[]): BatchFinishOptions {
 	let yes = false;
 	let expected: string | undefined;
 	const exclusions: string[] = [];
-	let color: BatchFinishOptions["color"] = "auto";
+	let color: BatchFinishOptions["color"];
 	let verbose = false;
 	for (let index = 1; index < args.length; index++) {
 		const argument = args[index] ?? "";
@@ -380,7 +381,7 @@ export function parseBatchArguments(args: string[]): BatchFinishOptions {
 	if (!inactiveFor) throw argumentError("batch finish requires --inactive-for.");
 	if (dryRun && (expected || yes)) throw argumentError("Batch preview does not accept --expected or --yes.");
 	if (!dryRun && (!expected || !yes)) throw argumentError("Batch apply requires --expected <preview-receipt> and --yes.");
-	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json, dryRun, yes, expected, color, verbose };
+	return { inactiveFor, inactiveMs, exclusions: [...new Set(exclusions)].sort(), json, dryRun, yes, expected, color: personalColor(color, json), verbose };
 }
 
 export function parseListArguments(input: string[], scoped = false): PresentationOptions & {
@@ -474,5 +475,8 @@ function usage(): string {
 		"  agent-session list --inspect --worktree <path> [--json] [--color=auto|always|never] [--verbose] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch] [--force] [--yes] [--dry-run [--json]]",
 		"  agent-session completion <bash|zsh|fish>",
+		"",
+		"Personal colour defaults: $XDG_CONFIG_HOME/agent-session/config.json (fallback ~/.config/agent-session/config.json).",
+		"Only commands advertising --color use these settings; flags override them and JSON ignores them.",
 	].join("\n");
 }
