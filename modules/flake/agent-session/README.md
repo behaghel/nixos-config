@@ -798,13 +798,12 @@ viewport and show the current inspection/count; the final output includes all
 results. Resizing starts a fresh display block rather than risking unrelated
 scrollback. Piped output is append-only with full text and no cursor controls.
 
-Preview colour uses `--color=auto|always|never` (default `auto`). Automatic colour
+Batch colour uses `--color=auto|always|never`. Automatic colour
 requires a capable terminal and respects nonempty `NO_COLOR`; explicit `always`
 opts in even for redirected output or when `NO_COLOR` is set. Colour supplements
 state words, never replaces them. `--color=never` disables colour, not in-place
-terminal updates. JSON results and progress events are never styled. These colour
-controls and `--verbose` currently apply to batch previews, create/start
-preparation and list/doctor inspection, not other commands or batch execution.
+terminal updates. JSON results and progress events are never styled. Both human preview and receipt-approved apply use these colour controls and
+`--verbose`.
 
 The raw approval receipt is not printed in human mode. Add `--json` for the full
 receipt and structured inspection evidence. This performs a fresh preview, so review that selection
@@ -832,6 +831,20 @@ receipt=$(printf '%s' "$preview" | jq -r .receipt)
 as batch finish --inactive-for 7d --exclude retained-task \
   --expected "$receipt" --yes --json
 ```
+
+Human apply announces inspection before checking the approved context, then shows
+stable `SESSION`, `STATE` and `REASON` rows. Approved targets move from `Waiting`
+through `Checking` and, only when native removal is attempted, `Removing`.
+Durable outcomes are `Removed`, `Already absent`, `Refused` or `Uncertain`, with
+counts and an explicit branch-preservation summary. Default output omits routine
+STARTED/COMPLETED messages, raw receipts and replay hints; `--verbose` adds approved
+paths and successful check progress. Actual failures retain original diagnostic
+wording in plain text, with terminal instructions removed and credential-like URL
+userinfo/authorization values redacted. Live views stay bounded, fall back safely
+on resize, and retain all identities in the final output; pipes are append-only.
+No additional prompt or approval is introduced: the same receipt and explicit
+`--yes` remain mandatory. JSON envelopes, progress events and journal/replay
+semantics remain unchanged.
 
 The receipt binds repository/configuration identity, exact selected paths,
 metadata digests, checkout/Git-directory identity, HEAD, branch refs and observed
@@ -920,13 +933,13 @@ information; apply captures fresh process evidence after the target's metadata
 inspection, before removal. A preview snapshot is not a reservation against
 unmanaged activity.
 
-Progress is emitted on stderr. Human batch previews use one updating inspection
-line, cleared before the final table. Redirected human preview progress is a
-bounded plain line without terminal escapes; routine STARTED/COMPLETED pairs and
-metadata chunks do not bury the review. Failures remain visible. Devenv shell/task
-startup messages belong to the outer launcher and are unaffected.
+Human batch preview/apply use updating resource rows on capable terminals and
+bounded plain startup feedback when redirected; routine STARTED/COMPLETED pairs
+and metadata chunks do not bury the review. `--verbose` exposes detailed check
+progress. Failures remain visible. Devenv shell/task startup messages belong to
+the outer launcher and are unaffected.
 
-Other cleanup commands/apply paths retain their progress behavior. With `--json`,
+With `--json`,
 per-resource and every metadata-scan chunk event remain versioned progress
 records; stdout remains one unchanged result document. Progress completion means
 a scan/chunk completed, not that a workspace was removed—only the final explicit
