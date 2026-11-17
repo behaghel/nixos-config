@@ -147,7 +147,7 @@ export function main(args: string[]): number {
 				return finishWorktreeBranches(root, invocationRoot, resolveSessionTarget(options.slug!, invocationRoot), options.keepBranch, options.dryRun, options.json);
 			} else if (options.slug && options.all) {
 				return finishSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
-					options.keepBranch, options.dryRun, options.json, options.expected);
+					options.keepBranch, options.dryRun, options.json, options.expected, options);
 			} else if (options.all || options.gone) {
 				finishBulk(
 					root,
