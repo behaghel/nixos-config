@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { FinishOutput } from "./finish-output.ts";
+import { BatchOutput } from "./batch-output.ts";
 import { inspectTreeBranches, treeBranchSummary, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
 import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
@@ -43,6 +44,7 @@ import {
 	runPhase,
 	writeCommandResult,
 	withInspection,
+	type InspectionProgress,
 	run,
 } from "./runtime.ts";
 import type { SessionMetadata, SessionStatus, ProgressReporter, BatchFinishOptions, PresentationOptions } from "./types.ts";
@@ -498,8 +500,9 @@ function selectSessionTree(root: string, slug: string) {
 	return { target, selected, records, skipped, sharedBranches };
 }
 
-export function finishSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, expected?: string): number {
-	if (expected && !dryRun) return applySessionTree(root, invocationRoot, slug, expected, json);
+export function finishSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, expected?: string, options: PresentationOptions = {}): number {
+	if (expected && !dryRun) return withInspection("Checking approved recursive cleanup", json, options,
+		(progress) => applySessionTree(root, invocationRoot, slug, expected, json, undefined, options, progress));
 	if (!dryRun && !process.stdin.isTTY) throw new CliError("Recursive finish requires a terminal, or --keep-branch --expected <tree-receipt> --yes after a dry-run preview.");
 	const preview = previewSessionTree(root, invocationRoot, slug, dryRun ? keepBranch : true, json);
 	if (dryRun) {
@@ -624,9 +627,11 @@ function decodeTreeReceipt(root: string, slug: string, token: string): TreeRecei
 	} catch (error) { throw new CliError(`Invalid or mismatched tree receipt; obtain a fresh preview. ${String(error)}`, 64); }
 }
 
-function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean, branchesToDelete?: TreeBranch[]): number {
+function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean, branchesToDelete?: TreeBranch[], options?: PresentationOptions, progress?: InspectionProgress): number {
 	const receipt = decodeTreeReceipt(root, slug, token);
-	const report = progressReporter("recursive finish", json);
+	const display = options && !json ? new BatchOutput(receipt.targets, options, "Recursive cleanup") : undefined;
+	progress?.flush(); display?.start();
+	const report: ProgressReporter = !options || json || options.verbose ? progressReporter("recursive finish", json) : () => {};
 	const branchResources: { name: string; outcome: "deleted" | "refused"; problem?: string }[] = [];
 	let resources: Outcome[];
 	try {
@@ -667,6 +672,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 			for (const branch of branchesToDelete ?? []) assertTreeBranchUnchanged(root, branch, new Set(receipt.targets.map((target) => target.worktreePath)));
 			for (const state of initial.states) {
 				if (state.kind !== "present") continue;
+				display?.checking(state.target.slug);
 				const candidate = inspectCandidate(root, invocationRoot, state.target.slug, treeInspectionOptions,
 					Date.now(), undefined, report, initial.context, false);
 				if (candidate.snapshot?.fingerprint !== state.target.fingerprint) throw new CliError(`${state.target.slug}: ${candidate.problem ?? "changed since preview"}`);
@@ -675,7 +681,11 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 			let stopped = false;
 			for (const target of receipt.targets) {
 				const base = { slug: target.slug, worktreePath: target.worktreePath };
-				if (stopped) { outcomes.push({ ...base, outcome: "refused", reason: "earlier-target-not-finished" }); continue; }
+				if (stopped) {
+					const outcome: Outcome = { ...base, outcome: "refused", reason: "earlier-target-not-finished" };
+					outcomes.push(outcome); display?.complete(outcome); continue;
+				}
+				display?.checking(target.slug);
 				let outcome: Outcome;
 				let cleanupStarted = false;
 				try {
@@ -692,13 +702,15 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 						scope();
 						journal.start(target);
 						cleanupStarted = true;
+						display?.removing(target.slug);
 						const removed = run("git", ["worktree", "remove", "--", target.worktreePath], root);
 						outcome = removed.status === 0 ? completeRemoval(root, target, false)
-							: { ...base, outcome: "uncertain", reason: "native-removal-unconfirmed", problem: removed.stderr };
+							: { ...base, outcome: "uncertain", reason: "native-removal-unconfirmed", problem: [removed.stdout, removed.stderr, removed.errorCode].filter(Boolean).join("\n") };
 					}
 				} catch (error) { outcome = { ...base, outcome: cleanupStarted ? "uncertain" : "refused",
 					reason: cleanupStarted ? "cleanup-not-confirmed" : "revalidation-failed", problem: String(error) }; }
 				outcomes.push(outcome);
+				display?.complete(outcome);
 				stopped = !["finished", "absent"].includes(outcome.outcome);
 				report(`apply:${target.slug}`, stopped ? "failed" : "completed", outcome.reason);
 			}
@@ -727,7 +739,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 	const partial = !success && resources.some((resource) => ["finished", "absent"].includes(resource.outcome));
 	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: false, keepBranch: branchesToDelete === undefined,
 		branchesModified: branchResources.some((branch) => branch.outcome === "deleted"), remoteAssetsModified: false, success, partial, resources, branchResources }, json,
-		`${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n${branchResources.map((branch) => `${branch.name}: ${branch.outcome}${branch.problem ? `: ${branch.problem}` : ""}\n`).join("")}`);
+		display?.finish(resources) ?? `${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n${branchResources.map((branch) => `${branch.name}: ${branch.outcome}${branch.problem ? `: ${branch.problem}` : ""}\n`).join("")}`);
 	return success ? 0 : 1;
 }
 

@@ -281,6 +281,21 @@ as parent finish --all --keep-branch --dry-run --json
 as parent finish --all --keep-branch --expected <receipt> --yes --json
 ```
 
+Receipt-approved human apply uses live `SESSION`, `STATE` and `REASON` rows,
+then retains every outcome and aggregate counts. `Removed` confirms cleanup;
+`Already absent` confirms observed absence. An uncertain effect is `Uncertain`,
+and ancestors left untouched after it are `Not attempted`, not failed removals.
+A changed tree is refused before native effects. Shared failure evidence is shown
+once in plain text, with credential redaction; the table identifies every affected
+resource. Default output omits routine phase logs and raw receipt/replay hints.
+`--color=auto|always|never` and `--verbose` are supported on this receipt-approved
+apply path; verbose output includes approved paths and check details. Narrow and
+resized live views stay bounded and retain full final identities; pipes remain
+append-only. The receipt plus explicit `--yes` still supplies approval, without
+an extra prompt. JSON schemas/events, preflight, replay and branch-preservation
+rules are unchanged. Interactive tree cleanup and tree previews retain their
+separate presentation; these flags do not yet apply to those paths.
+
 A fully resolved metadata-v3 tree with no blockers receives a top-level
 `receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no
 execution receipt is issued. Preview with `--delete-branches` remains available

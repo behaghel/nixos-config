@@ -1136,6 +1136,104 @@ describe("receipt-bound recursive finish", () => {
 		return { ...fixture, parent, child, grandchild, bin, log, environment, createAt, preview, apply };
 	}
 
+	it("state-first recursive apply announces inspection before a blocked receipt-context query", async () => {
+		const fixture = setup(), release = join(fixture.root, "release"), marker = join(fixture.root, "checking");
+		try {
+			const preview = fixture.preview(), path = join(fixture.bin, "git"), original = readFileSync(path, "utf8");
+			writeFileSync(path, original.replace("exec ", `case "$*" in *'rev-parse --git-common-dir'*) touch ${tomlString(marker)}; while [ ! -f ${tomlString(release)} ]; do sleep 0.02; done ;; esac\nexec `));
+			const child = spawn("node", [cliScript, "parent", "finish", "--all", "--keep-branch", "--expected", preview.receipt, "--yes"], { cwd: fixture.checkout, env: { ...process.env, ...fixture.environment, NO_COLOR: "1", AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) }, stdio: ["ignore", "pipe", "pipe"] });
+			let stdout = "", stderr = ""; child.stdout.on("data", (data) => stdout += data); child.stderr.on("data", (data) => stderr += data);
+			const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+			try {
+				const deadline = Date.now() + 15000;
+				while (!existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+				expect(existsSync(marker)).toBe(true); expect(stderr).toContain("Checking approved recursive cleanup"); expect(stdout).toBe("");
+			} finally { writeFileSync(release, "continue\n"); expect(await closed).toBe(0); }
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("state-first recursive apply distinguishes removed, uncertain and unattempted resources with original failure evidence", () => {
+		const fixture = setup();
+		try {
+			const preview = fixture.preview(), path = join(fixture.bin, "git"), original = readFileSync(path, "utf8");
+			const parentRecord = readFileSync(sessionMetadataPath(fixture.checkout, "parent"), "utf8");
+			writeFileSync(path, original.replace("exec ", `if [ "$1" = worktree ] && [ "$2" = remove ] && [ "$4" = ${tomlString(fixture.child.worktreePath)} ]; then rm "$4/README.md"; printf 'recursive stdout evidence\\n'; printf 'recursive native failure\\n' >&2; exit 1; fi\nexec `));
+			const result = runCli(fixture.checkout, ["parent", "finish", "--all", "--keep-branch", "--expected", preview.receipt, "--yes"], { ...fixture.environment, NO_COLOR: "1" });
+			expect(result.status).toBe(1);
+			for (const word of ["Removed", "Uncertain", "Not attempted", "1 removed", "1 uncertain", "1 not attempted"]) expect(result.stdout).toContain(word);
+			expect(result.stderr).toContain("recursive stdout evidence"); expect(result.stderr).toContain("recursive native failure");
+			expect(readFileSync(fixture.log, "utf8").trim().split("\n").join(",")).toBe([fixture.grandchild, fixture.child].map((session) => session.worktreePath).join(","));
+			expect(existsSync(fixture.grandchild.worktreePath)).toBe(false);
+			expect(existsSync(fixture.child.worktreePath)).toBe(true); expect(existsSync(join(fixture.child.worktreePath, "README.md"))).toBe(false);
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "parent"), "utf8")).toBe(parentRecord);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("state-first recursive apply refuses a changed tree without native effects and reports shared failure evidence once", () => {
+		const fixture = setup();
+		try {
+			const preview = fixture.preview(); writeFileSync(join(fixture.child.worktreePath, "README.md"), "new local work\n");
+			const result = runCli(fixture.checkout, ["parent", "finish", "--all", "--keep-branch", "--expected", preview.receipt, "--yes"], { ...fixture.environment, NO_COLOR: "1" });
+			expect(result.status).toBe(1); expect(result.stdout).toContain("3 refused");
+			expect(result.stdout).toContain("0 removed"); expect(existsSync(fixture.log)).toBe(false);
+			expect(result.stderr.split("Error: child: dirty").length).toBe(2);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("state-first recursive apply supports explicit colour and verbose flags without changing JSON schemas or progress events", () => {
+		const fixture = setup();
+		try {
+			const preview = fixture.preview(), args = ["parent", "finish", "--all", "--keep-branch", "--expected", preview.receipt, "--yes"];
+			const json = runCli(fixture.checkout, [...args, "--json", "--color=always", "--verbose"], fixture.environment);
+			expect(json.status).toBe(0);
+			expect((json.stdout + json.stderr).includes("\u001b")).toBe(false);
+			const value = JSON.parse(json.stdout);
+			expect(Object.keys(value).sort().join(",")).toBe("branchResources,branchesModified,command,dryRun,keepBranch,mode,partial,remoteAssetsModified,resources,success,version");
+			expect(value.success).toBe(true); expect(value.branchesModified).toBe(false);
+			expect(json.stderr.trim().split("\n").map((line) => JSON.parse(line)).every((event) => event.type === "progress" && event.command === "recursive finish")).toBe(true);
+			const forced = runCli(fixture.checkout, [...args, "--color=always"], { ...fixture.environment, NO_COLOR: "1" });
+			expect(forced.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(forced.stdout)).toBe(true);
+			expect(/\u001b\[\d+A/.test(forced.stdout)).toBe(false); expect(forced.stdout).toContain("3 already absent");
+			const verbose = runCli(fixture.checkout, [...args, "--verbose", "--color=never"], fixture.environment);
+			expect(verbose.status).toBe(0); expect(verbose.stdout).toContain(fixture.child.worktreePath);
+			expect((verbose.stdout + verbose.stderr).includes("\u001b")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("state-first recursive apply updates live on a narrow terminal without adding an approval prompt", () => {
+		const fixture = setup();
+		try {
+			const preview = fixture.preview();
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch", "--expected", preview.receipt, "--yes"], "", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "10", TEST_PTY_COLUMNS: "36" });
+			expect(result.status).toBe(0); expect(result.answered).toBe(false);
+			for (const word of ["Checking", "Removing", "Removed", "3 removed", "Recursive cleanup complete"]) expect(result.output).toContain(word);
+			expect(/\u001b\[\d+A/.test(result.output)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("renders receipt-approved recursive apply as plain state rows and counts without changing descendants-first removal", () => {
+		const fixture = setup();
+		try {
+			const preview = fixture.preview();
+			expect(preview.executionSupported).toBe(true);
+			const result = runCli(fixture.checkout, ["parent", "finish", "--all", "--keep-branch", "--expected", preview.receipt, "--yes"], { ...fixture.environment, NO_COLOR: "1" });
+			expect(result.status).toBe(0);
+			const sessions = [fixture.grandchild, fixture.child, fixture.parent];
+			expect(readFileSync(fixture.log, "utf8").trim().split("\n").join(",")).toBe(sessions.map((session) => session.worktreePath).join(","));
+			for (const session of sessions) {
+				expect(existsSync(session.worktreePath)).toBe(false);
+				expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+			}
+			for (const word of ["SESSION", "STATE", "grandchild", "child", "parent", "Removed", "3 removed"]) expect(result.stdout).toContain(word);
+			expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+			expect((result.stdout + result.stderr).includes(preview.receipt)).toBe(false);
+			expect(result.stderr.includes("STARTED")).toBe(false);
+			expect(result.stderr.includes("COMPLETED")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
 	it("finishes a tree interactively while preserving branches by default", () => {
 		const fixture = setup();
 		try {

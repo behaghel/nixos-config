@@ -368,6 +368,12 @@ an explicitly reviewed mapping; no automatic migration is implied. Without a
 matching receipt, `--keep-branch` and explicit approval, an agent must not execute
 recursion. The human terminal flow above is not an automation exception.
 Repository-wide `as finish --all` remains a different, broader selection.
+Providers advertising state output and presentation flags on the receipt-approved
+recursive apply line also offer live human outcome rows and final counts.
+`Uncertain` marks an unsettled effect; `Not attempted` identifies ancestors left
+untouched after cleanup stops. Neither supplies retry authority. `--verbose`
+exposes approved paths/checks; JSON and approval contracts remain unchanged.
+These flags do not imply support on interactive tree cleanup or tree previews.
 
 On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.
