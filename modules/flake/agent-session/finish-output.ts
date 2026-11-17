@@ -3,6 +3,8 @@ import { fstatSync } from "node:fs";
 import { confirm, formatLines, formatStateTable, styleText } from "./runtime.ts";
 import { ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import type { PresentationOptions } from "./types.ts";
+import type { Outcome } from "./batch.ts";
+import { writeCleanupDiagnostics } from "./batch-output.ts";
 
 export interface CleanupScope {
 	slug: string;
@@ -18,6 +20,7 @@ export interface CleanupScope {
 }
 
 interface Asset {
+	slug?: string;
 	id: string;
 	kind: string;
 	detail: string;
@@ -32,7 +35,8 @@ export class FinishOutput {
 	private frame: string[] = [];
 	private frameWidth = 0;
 	private frameRows = 0;
-	private current?: string;
+	private current?: Asset;
+	private tree = false;
 	private review?: { height: number; columns: number; rows: number };
 	private reusingReview = false;
 	private finished = false;
@@ -45,33 +49,38 @@ export class FinishOutput {
 
 	private setScope(scope: CleanupScope): void {
 		this.scope = scope;
-		this.assets = [{ id: "worktree", kind: "Worktree", detail: scope.worktreePath, preserve: false, state: "Pending" }];
-		for (const branch of scope.ownedBranches) this.assets.push({ id: `branch:${branch}`, kind: "Branch", detail: branch, preserve: scope.keepBranch, state: "Pending" });
-		if (scope.unrecorded) this.assets.push({ id: "all-branches", kind: "Branches", detail: "All local branches; no ownership inferred", preserve: true, state: "Pending" });
-		else if (scope.currentBranch && !scope.ownedBranches.includes(scope.currentBranch)) this.assets.push({ id: "borrowed", kind: "Borrowed branch", detail: scope.currentBranch, preserve: true, state: "Pending" });
+		this.assets = this.scopeAssets(scope);
+	}
+
+	private scopeAssets(scope: CleanupScope): Asset[] {
+		const assets: Asset[] = [{ id: "worktree", kind: "Worktree", detail: scope.worktreePath, preserve: false, state: "Pending" }];
+		for (const branch of scope.ownedBranches) assets.push({ id: `branch:${branch}`, kind: "Branch", detail: branch, preserve: scope.keepBranch, state: "Pending" });
+		if (scope.unrecorded) assets.push({ id: "all-branches", kind: "Branches", detail: "All local branches; no ownership inferred", preserve: true, state: "Pending" });
+		else if (scope.currentBranch && !scope.ownedBranches.includes(scope.currentBranch)) assets.push({ id: "borrowed", kind: "Borrowed branch", detail: scope.currentBranch, preserve: true, state: "Pending" });
 		for (const path of scope.ignoredData?.approvedArtifacts ?? []) {
 			const tree = scope.ignoredData?.policyRoots.find((root) => root.path === path)?.tree ?? scope.ignoredData?.ignoredPaths.find((entry) => entry.path === path);
 			const note = tree?.type === "directory" ? `; entire subtree, ${tree.size.entries} entries, including logs and task databases` : tree?.type === "symlink" ? "; link only, target preserved" : "";
-			this.assets.push({ id: `artifact:${path}`, kind: "Artifact", detail: path + note, preserve: false, state: "Pending" });
+			assets.push({ id: `artifact:${path}`, kind: "Artifact", detail: path + note, preserve: false, state: "Pending" });
 		}
-		if (!scope.unrecorded && scope.metadataPath) this.assets.push({ id: "record", kind: "Session record", detail: scope.metadataPath, preserve: false, state: "Pending" });
+		if (!scope.unrecorded && scope.metadataPath) assets.push({ id: "record", kind: "Session record", detail: scope.metadataPath, preserve: false, state: "Pending" });
+		return assets;
 	}
 
 	private render(plan: boolean, preview = false, blocked?: string): string {
 		const scope = this.scope!;
 		const title = plan ? `${preview ? "Preview" : "Cleanup plan"} · ${scope.slug}` : `${this.failed ? "Cleanup incomplete" : this.finished ? "Finished" : "Cleaning up"} · ${scope.slug}`;
-		const rows = this.assets.map((asset) => [asset.kind,
+		const rows = this.assets.map((asset) => [...(this.tree ? [asset.slug!] : []), asset.kind,
 			(plan ? asset.preserve ? "Would preserve" : blocked ? "Blocked" : asset.id.startsWith("branch:") ? "Would delete" : "Would remove" : asset.state).padEnd(14), asset.detail]);
 		const colour = (index: number) => {
 			const asset = this.assets[index];
 			return plan ? asset.preserve ? 2 : blocked ? 31 : 33
-				: ["Removed", "Deleted"].includes(asset.state) ? 32 : asset.state === "Preserved" ? 2 : asset.state === "Uncertain" ? 31 : 36;
+				: ["Removed", "Deleted"].includes(asset.state) ? 32 : asset.state === "Preserved" ? 2 : ["Uncertain", "Refused"].includes(asset.state) ? 31 : 36;
 		};
 		let text = formatLines([styleText(title, this.failed || blocked ? 31 : this.finished ? 32 : 1, this.options.color), ""]);
-		text += formatStateTable(["ASSET", "ACTION", "DETAIL"], rows, this.options, (row, column) => column === 1 ? colour(row) : undefined, { table: !process.stdout.isTTY || (process.stdout.columns || 80) >= 24 });
+		text += formatStateTable([...(this.tree ? ["SESSION"] : []), "ASSET", "ACTION", "DETAIL"], rows, this.options, (row, column) => column === (this.tree ? 2 : 1) ? colour(row) : undefined, { table: !process.stdout.isTTY || (process.stdout.columns || 80) >= (this.tree ? 80 : 24) });
 		if (plan) {
 			const notes = ["", ...(scope.force ? [`Force discards uncommitted and ignored local files.${scope.unrecorded ? "" : " Deleting branches can also discard unpublished commits."}`] : []),
-				...(scope.head ? [`HEAD: ${scope.head}`] : []), ...(scope.unrecorded ? ["Force will preserve all branches; no ownership metadata is inferred."] : []),
+				...(!this.tree && scope.head ? [`HEAD: ${scope.head}`] : []), ...(scope.unrecorded ? ["Force will preserve all branches; no ownership metadata is inferred."] : []),
 				...(scope.unrecorded && !scope.currentBranch ? ["Detached HEAD commits may become unreachable; create a branch first if needed."] : []),
 				"Link targets and remote assets are preserved.", ...(blocked ? [`Cleanup blocked: ${blocked}`] : []),
 				...(preview ? ["Nothing changed"] : [])];
@@ -96,6 +105,42 @@ export class FinishOutput {
 		const text = this.render(true);
 		this.review = { height: text.split("\n").length - 1, columns: process.stdout.columns || 80, rows: process.stdout.rows || 24 };
 		process.stdout.write(text);
+	}
+
+	planTree(slug: string, scopes: CleanupScope[], branches: { slug: string; name: string; preserve: boolean; detail: string }[]): void {
+		this.scope = { ...scopes[0]!, slug };
+		this.assets = scopes.flatMap((scope) => this.scopeAssets(scope).map((asset) => ({ ...asset, slug: scope.slug })));
+		this.tree = true;
+		for (const asset of this.assets) {
+			if (!asset.id.startsWith("branch:") && asset.id !== "borrowed") continue;
+			const branch = branches.find((branch) => branch.slug === asset.slug && branch.name === asset.detail);
+			if (branch) { asset.preserve = branch.preserve; asset.detail = branch.detail; }
+		}
+		const text = this.render(true);
+		this.review = { height: text.split("\n").length - 1, columns: process.stdout.columns || 80, rows: process.stdout.rows || 24 };
+		process.stdout.write(text);
+	}
+
+	treeResource(outcome: Outcome, redraw = true): void {
+		for (const asset of this.assets) {
+			if (asset.slug !== outcome.slug || asset.id.startsWith("branch:") || asset.id === "borrowed") continue;
+			asset.state = outcome.outcome === "finished" ? "Removed" : outcome.outcome === "absent" ? "Absent" : outcome.outcome === "uncertain" ? "Uncertain" : "Not attempted";
+		}
+		this.current = undefined; if (redraw) this.update();
+	}
+
+	finishTree(outcomes: Outcome[], branches: { name: string; outcome: "deleted" | "refused"; problem?: string }[]): string {
+		for (const outcome of outcomes) this.treeResource(outcome, false);
+		for (const asset of this.assets) {
+			if (!asset.id.startsWith("branch:") && asset.id !== "borrowed") continue;
+			const branch = branches.find((branch) => asset.id === `branch:${branch.name}`);
+			asset.state = branch?.outcome === "deleted" ? "Deleted" : branch && !branch.problem?.startsWith("Earlier branch deletion failed;") ? "Refused" : "Preserved";
+		}
+		this.failed = outcomes.some((outcome) => !["finished", "absent"].includes(outcome.outcome)) || branches.some((branch) => branch.outcome === "refused");
+		this.finished = !this.failed; this.summary = this.counts();
+		this.clear();
+		writeCleanupDiagnostics([...outcomes, ...branches.filter((branch) => branch.problem && !branch.problem.startsWith("Earlier branch deletion failed;")).map((branch): Outcome => ({ slug: branch.name, worktreePath: "", outcome: "refused", reason: "branch-deletion-refused", problem: branch.problem }))], this.options);
+		return this.render(false);
 	}
 
 	/** Observe terminal layout, never change its settings or infer consent. */
@@ -140,9 +185,9 @@ export class FinishOutput {
 		this.update();
 	}
 
-	starting(id: string, state: string): void {
-		this.current = id;
-		const asset = this.assets.find((entry) => entry.id === id);
+	starting(id: string, state: string, slug?: string): void {
+		const asset = this.assets.find((entry) => entry.id === id && (!slug || entry.slug === slug));
+		this.current = asset;
 		if (asset) asset.state = state;
 		this.update();
 	}
@@ -153,8 +198,8 @@ export class FinishOutput {
 		this.update();
 	}
 
-	completed(id: string, state: string): void {
-		const asset = this.assets.find((entry) => entry.id === id);
+	completed(id: string, state: string, slug?: string): void {
+		const asset = this.assets.find((entry) => entry.id === id && (!slug || entry.slug === slug));
 		if (asset) asset.state = state;
 		this.current = undefined;
 		this.update();
@@ -163,6 +208,14 @@ export class FinishOutput {
 	private counts(): string {
 		const count = (test: (asset: Asset) => boolean) => this.assets.filter(test).length;
 		const branch = (state: string) => count((asset) => (asset.id.startsWith("branch:") || asset.id === "borrowed") && asset.state === state);
+		if (this.tree) {
+			const total = (id: string, state: string, noun: string) => { const value = count((asset) => (id === "artifact:" ? asset.id.startsWith(id) : asset.id === id) && asset.state === state); return value ? `${value} ${noun}${value === 1 ? "" : "s"} ${state.toLowerCase()}` : ""; };
+			return [total("worktree", "Removed", "worktree") || "0 worktrees removed", total("worktree", "Absent", "worktree"), `${branch("Preserved")} branch${branch("Preserved") === 1 ? "" : "es"} preserved`,
+				...(branch("Deleted") ? [`${branch("Deleted")} branch${branch("Deleted") === 1 ? "" : "es"} deleted`] : []), total("artifact:", "Removed", "artifact"), total("record", "Removed", "record"),
+				...(count((asset) => asset.state === "Refused") ? [`${count((asset) => asset.state === "Refused")} branch deletion${count((asset) => asset.state === "Refused") === 1 ? "" : "s"} refused`] : []),
+				...(count((asset) => asset.state === "Uncertain") ? [`${count((asset) => asset.state === "Uncertain")} uncertain`] : []),
+				...(count((asset) => asset.state === "Not attempted") ? [`${count((asset) => asset.state === "Not attempted")} not attempted`] : [])].filter(Boolean).join(" · ");
+		}
 		const worktree = this.assets.find((asset) => asset.id === "worktree")?.state;
 		return [worktree === "Removed" ? "1 worktree removed" : worktree === "Unregistered" ? "1 registration removed" : worktree === "Absent" ? "worktree already absent" : "",
 			...(this.scope?.unrecorded ? ["all branches preserved", "no session record changed"] : []),
@@ -184,7 +237,7 @@ export class FinishOutput {
 		if (!this.started) return;
 		this.failed = true;
 		for (const asset of this.assets) {
-			if (asset.id === this.current || (this.current === "worktree" && asset.id.startsWith("artifact:"))) asset.state = "Uncertain";
+			if (asset === this.current || (this.current?.id === "worktree" && asset.slug === this.current.slug && asset.id.startsWith("artifact:"))) asset.state = "Uncertain";
 			else if (asset.state === "Pending") asset.state = "Not attempted";
 		}
 		this.summary = `${this.counts()}\nCleanup could not be fully confirmed; inspect remaining resources before retrying.`;
@@ -201,7 +254,7 @@ export class FinishOutput {
 		if (!process.stdout.isTTY || process.env.TERM === "dumb" || this.options.verbose) return;
 		this.clear();
 		if ((process.stdout.columns || 80) < 24) {
-			const asset = this.assets.find((entry) => entry.id === this.current) ?? this.assets[0];
+			const asset = this.current ?? this.assets[0];
 			this.frame = [[...`${asset.state} · ${asset.kind}`].slice(0, Math.max(1, (process.stdout.columns || 80) - 1)).join("")];
 			this.frameWidth = process.stdout.columns;
 			this.frameRows = process.stdout.rows;
@@ -212,9 +265,9 @@ export class FinishOutput {
 		const height = Math.max(3, (process.stdout.rows || 24) - 2);
 		if (lines.length > height) {
 			const size = Math.max(1, Math.floor((height - 5) / 2));
-			const start = Math.max(0, Math.min(this.assets.findIndex((asset) => asset.id === this.current), this.assets.length - size));
+			const start = Math.max(0, Math.min(this.assets.findIndex((asset) => asset === this.current), this.assets.length - size));
 			const visible = this.assets.slice(start, start + size);
-			const text = formatLines([`Cleaning up · ${this.scope!.slug}`, ""]) + formatStateTable(["ASSET", "ACTION"], visible.map((asset) => [asset.kind, asset.state]), this.options, undefined, { table: true });
+			const text = formatLines([`Cleaning up · ${this.scope!.slug}`, ""]) + formatStateTable([...(this.tree ? ["SESSION"] : []), "ASSET", "ACTION"], visible.map((asset) => [...(this.tree ? [asset.slug!] : []), asset.kind, asset.state]), this.options, undefined, { table: true });
 			lines = text.trimEnd().split("\n");
 			if (lines.length < height && visible.length < this.assets.length) lines.push(...formatLines([`${this.assets.length - visible.length} more; full result follows`]).trimEnd().split("\n"));
 		}

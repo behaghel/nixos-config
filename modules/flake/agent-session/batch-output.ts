@@ -31,6 +31,20 @@ function diagnostic(text: string): string {
 		.replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s]+/gi, "$1[redacted]");
 }
 
+export function writeCleanupDiagnostics(outcomes: Outcome[], options: PresentationOptions): void {
+	const evidence = new Map<string, Outcome[]>();
+	for (const outcome of outcomes) {
+		if (!outcome.problem || outcome.problem === outcome.reason) continue;
+		const affected = evidence.get(outcome.problem);
+		if (affected) affected.push(outcome); else evidence.set(outcome.problem, [outcome]);
+	}
+	for (const [problem, affected] of evidence) {
+		const label = affected.length === 1 ? displayText(affected[0].slug) : `${affected.length} resources`;
+		const state = [...new Set(affected.map(outcomeState))].join(" / ");
+		process.stderr.write(`${styleText(`${label}: ${state}`, 31, options.color, process.stderr.isTTY)}\n${diagnostic(problem)}\n`);
+	}
+}
+
 /** Displays already-approved targets; never selects, approves or removes them. */
 export class BatchOutput {
 	private readonly outcomes = new Map<string, Outcome>();
@@ -124,17 +138,7 @@ export class BatchOutput {
 	finish(outcomes: Outcome[]): string {
 		for (const outcome of outcomes) this.outcomes.set(outcome.slug, outcome);
 		this.clear();
-		const evidence = new Map<string, Outcome[]>();
-		for (const outcome of outcomes) {
-			if (!outcome.problem || outcome.problem === outcome.reason) continue;
-			const affected = evidence.get(outcome.problem);
-			if (affected) affected.push(outcome); else evidence.set(outcome.problem, [outcome]);
-		}
-		for (const [problem, affected] of evidence) {
-			const label = affected.length === 1 ? displayText(affected[0].slug) : `${affected.length} resources`;
-			const state = [...new Set(affected.map(outcomeState))].join(" / ");
-			process.stderr.write(`${styleText(`${label}: ${state}`, 31, this.options.color, process.stderr.isTTY)}\n${diagnostic(problem)}\n`);
-		}
+		writeCleanupDiagnostics(outcomes, this.options);
 		let text = this.render(true);
 		if (this.options.verbose) {
 			for (const outcome of outcomes) {

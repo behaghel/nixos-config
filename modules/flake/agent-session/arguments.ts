@@ -319,8 +319,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
-	const guardedTreeApply = Boolean(slug && all && expected && yes && !dryRun);
-	if ((all || branches || gone) && !guardedTreeApply && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session finish selector or receipt-approved recursive apply.");
+	const treeApply = Boolean(slug && all && !dryRun);
+	if ((all || branches || gone) && !treeApply && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session finish selector or recursive apply.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -472,7 +472,7 @@ function usage(): string {
 		"  agent-session <task-slug> repair",
 		"  agent-session <task-slug> finish [--keep-branch|--delete-branches] [--expected <receipt>] [--force] [--yes] [--dry-run [--json]] [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> finish --branches [--keep-branch|--delete-branches] [--dry-run [--json]] (review branches used in this worktree; no descendants)",
-		"  agent-session <task-slug> finish --all [--keep-branch|--delete-branches] (review recorded descendants and confirm once; branches preserved by default)",
+		"  agent-session <task-slug> finish --all [--keep-branch|--delete-branches] [--color=auto|always|never] [--verbose] (review recorded descendants, confirm once and reuse the asset plan; branches preserved by default)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch|--delete-branches] [--json] (preview recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] [--color=auto|always|never] [--verbose] (guarded branch-preserving recursive cleanup; state output)",
 		"  agent-session . <cd|run|branch|ownership|activity|launch|resume|list|doctor|finish> (current managed worktree)",

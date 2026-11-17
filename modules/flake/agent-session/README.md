@@ -243,10 +243,28 @@ as parent finish --all
 # Review the selected tree and eligible/preserved branches.
 # Branches are preserved by default; --delete-branches requests eligible deletion.
 # Review the final removal plan.
-# Remove these local session assets? [y/N]
+# Remove these assets? [y/N]
 ```
 
-There is no separate branch question: `--delete-branches` or the effective
+Interactive inspection stays quiet by default, then presents one exact
+`SESSION`, `ASSET`, `ACTION`, `DETAIL` table: worktrees, session records, approved
+artifact roots (including subtree/database scope), and deleted/preserved branches
+with local merge evidence or preservation reasons. There is no earlier duplicate
+plan or separate branch question. After Yes, the same table changes from proposals
+to observed outcomes when its review/prompt fit and shared-terminal geometry and
+simple echo are observable. Oversized/resized/unobservable terminals retain the
+review and append a bounded live display instead; no terminal modes are changed.
+The final view retains every asset and resource/branch/artifact counts. Partial
+cleanup distinguishes removed assets, uncertain effects and untouched ancestors;
+no worktree failure grants branch-deletion authority. Original failure evidence
+remains visible in plain text with credential redaction.
+
+`--color=auto|always|never` and `--verbose` work on interactive recursive cleanup;
+verbose mode exposes checks and keeps the review append-only. Narrow displays may
+stack full asset identities and states rather than truncating them. Tree previews
+retain their existing presentation and do not yet accept these flags.
+
+`--delete-branches` or the effective
 personal preference requests eligible deletion, and `--keep-branch` always wins.
 The final confirmation defaults to cancellation; empty input,
 EOF and failed confirmation never approve removal. Non-terminal calls cannot
@@ -293,8 +311,8 @@ apply path; verbose output includes approved paths and check details. Narrow and
 resized live views stay bounded and retain full final identities; pipes remain
 append-only. The receipt plus explicit `--yes` still supplies approval, without
 an extra prompt. JSON schemas/events, preflight, replay and branch-preservation
-rules are unchanged. Interactive tree cleanup and tree previews retain their
-separate presentation; these flags do not yet apply to those paths.
+rules are unchanged. Interactive cleanup uses the exact asset-plan table described
+above; tree previews retain their separate presentation.
 
 A fully resolved metadata-v3 tree with no blockers receives a top-level
 `receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no

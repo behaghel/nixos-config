@@ -6,9 +6,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [mode = "create", ...flags] = process.argv.slice(2);
-const branchFlags = ["preview", "finish", "preferences", "branches"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
-if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags].includes(flag))) {
-  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches|batch|batch-failure|tree|tree-failure] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
+const branchFlags = ["preview", "finish", "preferences", "branches", "tree-review", "tree-review-failure"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
+if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags].includes(flag))) {
+  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches|batch|batch-failure|tree|tree-failure|tree-review|tree-review-failure] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
 }
 const root = mkdtempSync(join(tmpdir(), "as-output-demo-"));
 const checkout = join(root, "checkout");
@@ -38,11 +38,11 @@ try {
   writeFileSync(config, JSON.stringify({
     version: 1, worktree_root: ".worktrees", local_links: [], disposable_paths: [".cache"], generated_links: {},
     agent_command: [process.execPath, "-e", "console.log('Agent stdout remains visible'); console.error('Agent stderr remains visible');"],
-    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
+    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
   }));
   const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../modules/flake/agent-session/cli.ts");
   const options = { cwd: checkout, env: { ...env, AGENT_SESSION_CONFIG: config } };
-  if (["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure"].includes(mode)) {
+  if (["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode)) {
     const prepared = spawnSync(process.execPath, [cli, "demo", "create", "--json"], { ...options, encoding: "utf8" });
     if (prepared.status !== 0) throw new Error(prepared.stderr || "Cannot prepare demo fixture");
     const worktree = JSON.parse(prepared.stdout).session.worktreePath;
@@ -53,28 +53,36 @@ try {
       options.env = { ...options.env, XDG_CONFIG_HOME: personal };
       process.stdout.write(mode === "branches" ? "Temporary personal preference: branches=delete. Eligible deletion still requires your approval.\n\n" : "Temporary personal preference: color=always. Flags and NO_COLOR still apply.\n\n");
     }
-    if (mode === "tree" || mode === "tree-failure") {
+    if (["tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode)) {
+      const interactive = mode.startsWith("tree-review");
       const create = (cwd, slug) => {
         const result = spawnSync(process.execPath, [cli, slug, "create", "--json"], { ...options, cwd, encoding: "utf8" });
         if (result.status !== 0) throw new Error(result.stderr || "Cannot prepare tree fixture");
         return JSON.parse(result.stdout).session;
       };
       const child = create(worktree, "child"), grandchild = create(child.worktreePath, "grandchild"), retained = create(checkout, "retained");
-      const common = ["demo", "finish", "--all", "--keep-branch"];
+      if (interactive) {
+        mkdirSync(join(grandchild.worktreePath, ".cache"));
+        writeFileSync(join(grandchild.worktreePath, ".cache", "tasks.sqlite"), "Disposable task database\n");
+      }
+      const common = ["demo", "finish", "--all", ...(!interactive ? ["--keep-branch"] : [])];
       const preview = spawnSync(process.execPath, [cli, ...common, "--dry-run", "--json"], { ...options, encoding: "utf8" });
       if (preview.status !== 0) throw new Error(preview.stderr || "Cannot approve tree fixture");
       const approved = JSON.parse(preview.stdout);
       if (!approved.executionSupported || approved.resources.length !== 3) throw new Error("Expected one executable three-resource fixture tree");
       const bin = join(checkout, ".git", "demo-bin"); mkdirSync(bin);
       const executable = spawnSync("sh", ["-c", "command -v git"], { env, encoding: "utf8" }).stdout.trim();
-      const fail = mode === "tree-failure" ? `if [ "$4" = ${JSON.stringify(child.worktreePath)} ]; then rm "$4/README.md"; printf 'Demo native removal stdout\\n'; printf 'Demo native removal failed after a partial effect\\n' >&2; exit 1; fi\n` : "";
+      const fail = mode.endsWith("failure") ? `if [ "$4" = ${JSON.stringify(child.worktreePath)} ]; then rm "$4/README.md"; printf 'Demo native removal stdout\\n'; printf 'Demo native removal failed after a partial effect\\n' >&2; exit 1; fi\n` : "";
       writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then ${JSON.stringify(process.execPath)} -e 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900)'; ${fail}fi\nexec ${JSON.stringify(executable)} "$@"\n`, { mode: 0o755 });
-      process.stdout.write("Applying an approved disposable tree, descendants first. The unrelated retained worktree and all branches stay preserved.\n\n");
-      const result = spawnSync(process.execPath, [cli, ...common, "--expected", approved.receipt, "--yes", ...flags], { ...options, env: { ...options.env, PATH: `${bin}:${env.PATH}` }, stdio: "inherit" });
+      process.stdout.write(interactive ? "Review the disposable tree and its branch disposition below. The unrelated retained worktree is outside the selection.\n\n" : "Applying an approved disposable tree, descendants first. The unrelated retained worktree and all branches stay preserved.\n\n");
+      const result = spawnSync(process.execPath, [cli, ...common, ...(!interactive ? ["--expected", approved.receipt, "--yes"] : []), ...flags], { ...options, env: { ...options.env, PATH: `${bin}:${env.PATH}` }, stdio: "inherit" });
       if (result.error) throw result.error;
-      const failed = mode === "tree-failure";
+      const failed = mode.endsWith("failure");
       if (result.status !== (failed ? 1 : 0) || existsSync(grandchild.worktreePath) || existsSync(child.worktreePath) !== failed || existsSync(worktree) !== failed || !existsSync(retained.worktreePath)) throw new Error("Unexpected disposable tree outcome");
-      for (const slug of ["demo", "child", "grandchild", "retained"]) if (!git(checkout, "branch", "--list", `agent/${slug}`).includes(`agent/${slug}`)) throw new Error("Disposable branch was not preserved");
+      for (const slug of ["demo", "child", "grandchild", "retained"]) {
+        const preserved = slug === "retained" || failed || !interactive || !flags.includes("--delete-branches") || flags.includes("--keep-branch");
+        if (git(checkout, "branch", "--list", `agent/${slug}`).includes(`agent/${slug}`) !== preserved) throw new Error("Unexpected disposable branch disposition");
+      }
       process.exitCode = result.status ?? 1;
     } else if (mode === "batch" || mode === "batch-failure") {
       for (const slug of ["other", "retained"]) {

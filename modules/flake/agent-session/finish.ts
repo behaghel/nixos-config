@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { FinishOutput } from "./finish-output.ts";
 import { BatchOutput } from "./batch-output.ts";
-import { inspectTreeBranches, treeBranchSummary, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
+import { inspectTreeBranches, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
 import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
@@ -504,26 +504,36 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 	if (expected && !dryRun) return withInspection("Checking approved recursive cleanup", json, options,
 		(progress) => applySessionTree(root, invocationRoot, slug, expected, json, undefined, options, progress));
 	if (!dryRun && !process.stdin.isTTY) throw new CliError("Recursive finish requires a terminal, or --keep-branch --expected <tree-receipt> --yes after a dry-run preview.");
-	const preview = previewSessionTree(root, invocationRoot, slug, dryRun ? keepBranch : true, json);
 	if (dryRun) {
+		const preview = previewSessionTree(root, invocationRoot, slug, keepBranch, json);
 		writeCommandResult(preview.value, json, preview.text);
 		return 0;
 	}
-	process.stderr.write(preview.summary);
-	if (!preview.token) throw new CliError("Recursive cleanup blocked; resolve the reported blockers first. No resources changed.");
-	const receipt = decodeTreeReceipt(root, slug, preview.token);
-	const branches = inspectTreeBranches(root, receipt.targets);
-	process.stderr.write(treeBranchSummary(branches, false));
-	const deleteBranches = !keepBranch && branches.some((branch) => !branch.reason);
-	process.stderr.write(`Final removal plan (descendants first):\n${preview.summary}${treeBranchSummary(branches, deleteBranches)}Remote assets will not be modified.\n`);
-	if (!confirm("Remove these local session assets? [y/N]")) throw new CliError("Cleanup cancelled. No resources changed.");
-	return applySessionTree(root, invocationRoot, slug, preview.token, false, deleteBranches ? branches.filter((branch) => !branch.reason) : undefined);
+	return withInspection("Inspecting recursive cleanup", false, options, (progress) => {
+		const report: ProgressReporter = options.verbose ? progressReporter("finish", false) : () => {};
+		if (options.verbose) progress.flush();
+		const preview = previewSessionTree(root, invocationRoot, slug, true, false, report);
+		if (!preview.token) { progress.flush(); process.stderr.write(preview.summary); throw new CliError("Recursive cleanup blocked; resolve the reported blockers first. No resources changed."); }
+		const receipt = decodeTreeReceipt(root, slug, preview.token);
+		const branches = inspectTreeBranches(root, receipt.targets);
+		const deleteBranches = !keepBranch && branches.some((branch) => !branch.reason);
+		const output = new FinishOutput(options);
+		const scopes = preview.value.plans.map((plan) => ({ slug: String(plan.slug), worktreePath: String(plan.worktreePath), metadataPath: String(plan.metadataPath),
+			currentBranch: plan.currentBranch as string | null, ownedBranches: plan.ownedBranches as string[], keepBranch: true, ignoredData: plan.ignoredData as IgnoredDataInspection }));
+		progress.flush();
+		output.planTree(slug, scopes, branches.map((branch) => ({ slug: branch.metadata.slug, name: branch.name, preserve: !deleteBranches || Boolean(branch.reason),
+			detail: `${branch.name} (${branch.reason ?? (deleteBranches ? `merged into ${branch.baseRef} @ ${options.verbose ? branch.baseRevision : branch.baseRevision.slice(0, 12)}; branch @ ${options.verbose ? branch.revision : branch.revision.slice(0, 12)}` : "branch preservation requested")})` })));
+		if (!output.confirm()) throw new CliError("Cleanup cancelled. No resources changed.");
+		output.begin();
+		try { return applySessionTree(root, invocationRoot, slug, preview.token, false, deleteBranches ? branches.filter((branch) => !branch.reason) : undefined, options, undefined, output); }
+		catch (error) { output.abort(); throw error; }
+	});
 }
 
-function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, json: boolean) {
+function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, json: boolean, reporter?: ProgressReporter) {
 	const { target, selected, skipped, sharedBranches } = selectSessionTree(root, slug);
 	const plans: Record<string, unknown>[] = [];
-	const report = progressReporter("finish", json);
+	const report = reporter ?? progressReporter("finish", json);
 	for (const record of selected) {
 		try {
 			const plan = previewFinish(root, invocationRoot, record.slug, false, keepBranch, report);
@@ -627,9 +637,9 @@ function decodeTreeReceipt(root: string, slug: string, token: string): TreeRecei
 	} catch (error) { throw new CliError(`Invalid or mismatched tree receipt; obtain a fresh preview. ${String(error)}`, 64); }
 }
 
-function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean, branchesToDelete?: TreeBranch[], options?: PresentationOptions, progress?: InspectionProgress): number {
+function applySessionTree(root: string, invocationRoot: string, slug: string, token: string, json: boolean, branchesToDelete?: TreeBranch[], options?: PresentationOptions, progress?: InspectionProgress, treeOutput?: FinishOutput): number {
 	const receipt = decodeTreeReceipt(root, slug, token);
-	const display = options && !json ? new BatchOutput(receipt.targets, options, "Recursive cleanup") : undefined;
+	const display = options && !json && !treeOutput ? new BatchOutput(receipt.targets, options, "Recursive cleanup") : undefined;
 	progress?.flush(); display?.start();
 	const report: ProgressReporter = !options || json || options.verbose ? progressReporter("recursive finish", json) : () => {};
 	const branchResources: { name: string; outcome: "deleted" | "refused"; problem?: string }[] = [];
@@ -683,7 +693,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 				const base = { slug: target.slug, worktreePath: target.worktreePath };
 				if (stopped) {
 					const outcome: Outcome = { ...base, outcome: "refused", reason: "earlier-target-not-finished" };
-					outcomes.push(outcome); display?.complete(outcome); continue;
+					outcomes.push(outcome); display?.complete(outcome); treeOutput?.treeResource(outcome); continue;
 				}
 				display?.checking(target.slug);
 				let outcome: Outcome;
@@ -703,6 +713,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 						journal.start(target);
 						cleanupStarted = true;
 						display?.removing(target.slug);
+						treeOutput?.starting("worktree", "Removing", target.slug);
 						const removed = run("git", ["worktree", "remove", "--", target.worktreePath], root);
 						outcome = removed.status === 0 ? completeRemoval(root, target, false)
 							: { ...base, outcome: "uncertain", reason: "native-removal-unconfirmed", problem: [removed.stdout, removed.stderr, removed.errorCode].filter(Boolean).join("\n") };
@@ -710,7 +721,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 				} catch (error) { outcome = { ...base, outcome: cleanupStarted ? "uncertain" : "refused",
 					reason: cleanupStarted ? "cleanup-not-confirmed" : "revalidation-failed", problem: String(error) }; }
 				outcomes.push(outcome);
-				display?.complete(outcome);
+				display?.complete(outcome); treeOutput?.treeResource(outcome);
 				stopped = !["finished", "absent"].includes(outcome.outcome);
 				report(`apply:${target.slug}`, stopped ? "failed" : "completed", outcome.reason);
 			}
@@ -724,8 +735,10 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 					}
 					try {
 						if (receipt.rootKey !== rootKey(root)) throw new CliError("Tree configuration changed; branch preserved.");
+						treeOutput?.starting(`branch:${branch.name}`, "Deleting", branch.metadata.slug);
 						deleteTreeBranch(root, branch);
 						branchResources.push({ name: branch.name, outcome: "deleted" });
+						treeOutput?.completed(`branch:${branch.name}`, "Deleted", branch.metadata.slug);
 					} catch (error) { branchResources.push({ name: branch.name, outcome: "refused", problem: String(error) }); }
 				}
 			}
@@ -739,7 +752,7 @@ function applySessionTree(root: string, invocationRoot: string, slug: string, to
 	const partial = !success && resources.some((resource) => ["finished", "absent"].includes(resource.outcome));
 	writeCommandResult({ version: 1, command: "finish", mode: "session-all", dryRun: false, keepBranch: branchesToDelete === undefined,
 		branchesModified: branchResources.some((branch) => branch.outcome === "deleted"), remoteAssetsModified: false, success, partial, resources, branchResources }, json,
-		display?.finish(resources) ?? `${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n${branchResources.map((branch) => `${branch.name}: ${branch.outcome}${branch.problem ? `: ${branch.problem}` : ""}\n`).join("")}`);
+		treeOutput?.finishTree(resources, branchResources) ?? display?.finish(resources) ?? `${resources.map((resource) => `${resource.slug}: ${resource.outcome} (${resource.reason})${resource.problem ? `: ${resource.problem}` : ""}`).join("\n")}\n${branchResources.map((branch) => `${branch.name}: ${branch.outcome}${branch.problem ? `: ${branch.problem}` : ""}\n`).join("")}`);
 	return success ? 0 : 1;
 }
 

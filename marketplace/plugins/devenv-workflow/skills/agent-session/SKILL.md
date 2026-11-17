@@ -373,7 +373,12 @@ recursive apply line also offer live human outcome rows and final counts.
 `Uncertain` marks an unsettled effect; `Not attempted` identifies ancestors left
 untouched after cleanup stops. Neither supplies retry authority. `--verbose`
 exposes approved paths/checks; JSON and approval contracts remain unchanged.
-These flags do not imply support on interactive tree cleanup or tree previews.
+On providers whose interactive recursive usage advertises asset-plan reuse and
+presentation flags, one exact worktree/record/artifact/branch plan precedes one
+final approval. The plan updates with observed outcomes when terminal review and
+echo are safely observable; otherwise it stays in scrollback with append-only
+fallback. Unknown or uncertain effects never become successful completion.
+Tree previews retain separate presentation; do not assume these flags apply.
 
 On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.

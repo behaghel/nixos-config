@@ -1136,6 +1136,109 @@ describe("receipt-bound recursive finish", () => {
 		return { ...fixture, parent, child, grandchild, bin, log, environment, createAt, preview, apply };
 	}
 
+	it("closes the recursive asset table honestly when policy changes after approval", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch"], "yes\n", "policy", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "200" });
+			expect(result.status).toBe(64); expect(existsSync(fixture.log)).toBe(false);
+			for (const word of ["Cleanup incomplete", "Not attempted", "0 worktrees removed", "Invalid or mismatched tree receipt"]) expect(result.output).toContain(word);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("supports colour and verbose diagnostics for interactive recursive cleanup without changing its single approval", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch", "--color=always", "--verbose"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			expect(/\u001b\[[0-9;]*m/.test(result.output)).toBe(true);
+			expect(result.output).toContain("STARTED inspect-finish");
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("does not rewind the recursive review when prompt echo is unobservable", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_NO_ECHO: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "200" });
+			expect(result.status).toBe(0);
+			expect(/\u001b\[\d+A/.test(result.output.slice(0, result.output.indexOf("Cleaning up")))).toBe(false);
+			expect(result.output).toContain("3 worktrees removed");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("bounds recursive asset updates on an oversized narrow terminal and retains every final identity", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "10", TEST_PTY_COLUMNS: "36" });
+			expect(result.status).toBe(0);
+			expect([...result.output.matchAll(/\u001b\[(\d+)A/g)].every((match) => Number(match[1]) <= 8)).toBe(true);
+			const final = result.output.slice(result.output.lastIndexOf("Finished"));
+			for (const word of ["parent", "child", "grandchild", "Removed", "Preserved"]) expect(final).toContain(word);
+			expect(final.includes("…")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reviews exact recursive assets and eligible branch deletions before one interactive approval", () => {
+		const fixture = setup();
+		try {
+			mkdirSync(join(fixture.grandchild.worktreePath, ".cache"));
+			writeFileSync(join(fixture.grandchild.worktreePath, ".cache", "tasks.sqlite"), "disposable fixture data");
+			writeFileSync(join(fixture.child.worktreePath, "README.md"), "unmerged work\n");
+			git(fixture.child.worktreePath, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-am", "Unmerged work");
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]"));
+			for (const word of ["ASSET", "Would remove", "Would delete", "Would preserve", "Artifact", "Session record", "task databases", ".cache", "unmerged"]) expect(plan).toContain(word);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) { expect(plan).toContain(session.worktreePath); expect(existsSync(session.worktreePath)).toBe(false); }
+			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toBe("");
+			expect(git(fixture.checkout, "branch", "--list", fixture.child.branch)).toContain(fixture.child.branch);
+			expect(git(fixture.checkout, "branch", "--list", fixture.grandchild.branch)).toBe("");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps recursive partial effects and unattempted ancestors visible in the approved asset table", () => {
+		const fixture = setup();
+		try {
+			const path = join(fixture.bin, "git"), original = readFileSync(path, "utf8");
+			writeFileSync(path, original.replace("exec ", `if [ "$1" = worktree ] && [ "$2" = remove ] && [ "$4" = ${tomlString(fixture.child.worktreePath)} ]; then rm "$4/README.md"; printf 'interactive native removal failed\\n' >&2; exit 1; fi\nexec `));
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "200" });
+			expect(result.status).toBe(1);
+			for (const word of ["ASSET", "Uncertain", "Not attempted", "1 worktree removed", "interactive native removal failed"]) expect(result.output).toContain(word);
+			expect(existsSync(fixture.grandchild.worktreePath)).toBe(false);
+			expect(existsSync(fixture.parent.worktreePath)).toBe(true);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("reuses one approved recursive asset table in place after a single confirmation", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--keep-branch"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "200" });
+			expect(result.status).toBe(0); expect(result.answered).toBe(true);
+			expect(result.output.split("[y/N]").length).toBe(2);
+			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) {
+				expect(existsSync(session.worktreePath)).toBe(false);
+				expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+			}
+			const screen: string[][] = []; let row = 0, column = 0;
+			for (const token of result.output.match(/\u001b\[[0-9;]*[A-Za-z]|[\s\S]/g) ?? []) {
+				if (token.startsWith("\u001b[")) {
+					if (token.endsWith("A")) row = Math.max(0, row - Number(token.slice(2, -1)));
+					else if (token.endsWith("K")) screen[row] = [];
+				} else if (token === "\r") column = 0;
+				else if (token === "\n") row++;
+				else { (screen[row] ??= [])[column++] = token; }
+			}
+			const visible = screen.map((line) => line.join("")).join("\n");
+			expect(visible.split("ASSET").length).toBe(2);
+			for (const word of ["Removed", "Preserved", "3 worktrees removed"]) expect(visible).toContain(word);
+			expect(visible.includes("Would remove")).toBe(false);
+			expect(visible.includes("[y/N]")).toBe(false);
+			expect(result.output.includes("STARTED")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
 	it("state-first recursive apply announces inspection before a blocked receipt-context query", async () => {
 		const fixture = setup(), release = join(fixture.root, "release"), marker = join(fixture.root, "checking");
 		try {
@@ -1241,7 +1344,7 @@ describe("receipt-bound recursive finish", () => {
 			expect(result.status).toBe(0);
 			expect(result.output.includes("Also delete eligible local branches?")).toBe(false);
 			expect(result.output.split("[y/N]").length).toBe(2);
-			expect(result.output).toContain("Final removal plan");
+			expect(result.output).toContain("Cleanup plan");
 			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) {
 				expect(existsSync(session.worktreePath)).toBe(false);
 				expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
@@ -1258,7 +1361,8 @@ describe("receipt-bound recursive finish", () => {
 			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "yes\n", "", fixture.environment);
 			expect(result.status).toBe(0);
 			expect(result.output).toContain("unmerged");
-			expect(result.output).toContain(`delete: ${fixture.parent.branch}`);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]")).replace(/\u001b\[[0-9;]*m/g, "");
+			expect(plan).toMatch(/parent\s+Branch\s+Would delete\s+agent\/parent/);
 			for (const session of [fixture.parent, fixture.child, fixture.grandchild]) expect(existsSync(session.worktreePath)).toBe(false);
 			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toBe("");
 			expect(git(fixture.checkout, "branch", "--list", fixture.grandchild.branch)).toBe("");
@@ -1280,7 +1384,7 @@ describe("receipt-bound recursive finish", () => {
 			}));
 			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish", "--all", "--delete-branches"], "y\n", "", fixture.environment);
 			if (result.status !== 0) throw new Error(result.output);
-			expect(result.output).toContain("unclaimed or unresolved ownership");
+			expect(result.output.replace(/\u001b\[[0-9;]*m/g, "")).toMatch(/unclaimed or\s+unresolved ownership/);
 			expect(git(fixture.checkout, "branch", "--list", fixture.parent.branch)).toContain(fixture.parent.branch);
 			expect(git(fixture.checkout, "branch", "--list", fixture.child.branch)).toBe("");
 			expect(existsSync(fixture.parent.worktreePath)).toBe(false);
