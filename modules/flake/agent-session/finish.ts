@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { FinishOutput, type CleanupScope } from "./finish-output.ts";
-import { BatchOutput, type CleanupOutcome } from "./batch-output.ts";
+import { BatchOutput, cleanupDiagnostic, type CleanupOutcome } from "./batch-output.ts";
+import { CleanupPreview, type CleanupProposal } from "./cleanup-preview.ts";
 import { inspectTreeBranches, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
 import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
 import { existsSync, lstatSync, unlinkSync } from "node:fs";
@@ -823,6 +824,47 @@ function reviewBulkScope(root: string, invocationRoot: string, slug: string, for
 	}
 }
 
+function bulkPreviewProposal(slug: string, plan: Record<string, unknown>): CleanupProposal {
+	const ignored = plan.ignoredData as IgnoredDataInspection | undefined;
+	const force = plan.force === true;
+	const ready = ["ready", "stale"].includes(String(plan.state));
+	const forceBinding = force && (!existsSync(String(plan.worktreePath)) || !["broken", "orphaned", "unrecorded", "conflict"].includes(String(plan.state)));
+	const remove = forceBinding || !force && ready && plan.clean === true && ignored?.safe !== false && !ignored?.approvedArtifacts.length;
+	const reason = force ? forceBinding ? "Force proposal; apply rechecks" : "Binding needs inspection" : plan.clean === false ? "Uncommitted changes" : !ready ? "Binding needs inspection"
+		: plan.clean !== true ? "Cleanliness unknown" : ignored?.safe === false ? "Ignored data needs review" : ignored?.approvedArtifacts.length ? "Artifact approval required"
+		: plan.keepBranch === true ? "Clean; branches preserved" : "Clean; apply checks branch safety";
+	return { slug, remove, reason, details: [String(plan.worktreePath), `State: ${String(plan.state)}`,
+		`Recorded owned branches: ${(plan.ownedBranches as string[]).join(", ") || "none"}`,
+		...(ignored && !ignored.safe ? [ignoredDataProblem(ignored)] : []),
+		...(ignored?.approvedArtifacts.map((path) => `Artifact scope: ${path}; bulk disposal requires a separate supported approval`) ?? [])] };
+}
+
+function inspectBulkPreview(root: string, invocationRoot: string, mode: "all" | "gone", force: boolean, keepBranch: boolean, report: ProgressReporter,
+	observer?: { start(slugs: string[]): void; checking(slug: string): void; complete(result: CleanupProposal): void }) {
+	const plans: Record<string, unknown>[] = [], skipped: string[] = [];
+	runPhase(report, "inspect-bulk-finish", () => {
+		const slugs = metadataSlugs(root); observer?.start(slugs);
+		for (const slug of slugs) {
+			observer?.checking(slug);
+			try {
+				const metadata = readMetadata(root, slug);
+				if (mode === "gone" && !branchUpstreamIsGone(root, metadata.branch)) {
+					observer?.complete({ slug, remove: false, reason: "Upstream not gone", details: [metadata.worktreePath, "Based on local refs; no fetch performed"] });
+					continue;
+				}
+				const plan = previewFinish(root, invocationRoot, slug, force, keepBranch, report, null);
+				plans.push(plan); observer?.complete(bulkPreviewProposal(slug, plan));
+			} catch (error) {
+				const detail = error instanceof Error ? error.message : String(error);
+				const problem = `${slug}: ${detail}`; skipped.push(problem);
+				report(`inspect-finish:${slug}`, "skipped", problem);
+				observer?.complete({ slug, remove: false, reason: detail.includes("current shell") ? "Current worktree" : detail.startsWith("Non-forced cleanup blocked.") ? "Activity blocks cleanup" : "Inspection incomplete", details: [detail] });
+			}
+		}
+	});
+	return { plans, skipped };
+}
+
 export function finishBulk(
 	root: string,
 	invocationRoot: string,
@@ -837,49 +879,35 @@ export function finishBulk(
 	const stateFirst = !dryRun;
 	const report: ProgressReporter = !stateFirst || options.verbose ? progressReporter("finish", json) : () => {};
 	if (dryRun) {
-		const plans: Record<string, unknown>[] = [];
-		const skipped: string[] = [];
-		runPhase(report, "inspect-bulk-finish", () => {
-			for (const slug of metadataSlugs(root)) {
-				try {
-					const metadata = readMetadata(root, slug);
-					if (mode === "gone" && !branchUpstreamIsGone(root, metadata.branch)) {
-						continue;
-					}
-					plans.push(
-						previewFinish(
-							root,
-							invocationRoot,
-							slug,
-							force,
-							keepBranch,
-							report,
-							null,
-						),
-					);
-				} catch (error) {
-					const problem = `${slug}: ${error instanceof Error ? error.message : String(error)}`;
-					skipped.push(problem);
-					report(`inspect-finish:${slug}`, "skipped", problem);
-				}
+		const inspect = (progress?: InspectionProgress) => {
+			if (options.verbose) progress?.flush();
+			let display: CleanupPreview | undefined;
+			const observer = json ? undefined : {
+				start(slugs: string[]) {
+					progress?.flush();
+					display = new CleanupPreview(slugs, options, mode === "gone" ? "gone-upstream cleanup" : "repository-wide cleanup", [
+						keepBranch ? "Branches preserved" : "Branch deletion requested; apply rechecks eligibility",
+						...(mode === "gone" ? ["Based on local refs; no fetch performed"] : []),
+						...(force ? ["Force proposal discards uncommitted and ignored data; deleting branches may discard unpublished work"] : []),
+					]); display.start();
+				},
+				checking(slug: string) { display?.checking(slug); },
+				complete(result: CleanupProposal) { display?.complete(result); },
+			};
+			try {
+				const previewReport: ProgressReporter = json ? report : options.verbose
+					? (phase, status, detail) => report(phase, status, detail === undefined ? undefined : cleanupDiagnostic(detail)) : () => {};
+				const { plans, skipped } = inspectBulkPreview(root, invocationRoot, mode, force, keepBranch, previewReport, observer);
+				writeCommandResult({ version: 1, command: "finish", dryRun: true, mode, plans, skipped, basedOnLocalRefs: mode === "gone" }, json, display?.finish() ?? "");
+			} catch (error) {
+				display?.abort();
+				if (json) throw error;
+				const failure = new CliError(cleanupDiagnostic(error instanceof Error ? error.message : String(error)), error instanceof CliError ? error.exitCode : 1);
+				failure.cause = error; failure.color = options.color;
+				throw failure;
 			}
-		});
-		const skippedText = skipped.length
-			? `\nSkipped:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}\n`
-			: "";
-		writeCommandResult(
-			{
-				version: 1,
-				command: "finish",
-				dryRun: true,
-				mode,
-				plans,
-				skipped,
-				basedOnLocalRefs: mode === "gone",
-			},
-			json,
-			`Previewed cleanup plans for ${plans.length} session(s); skip ${skipped.length}. Apply rechecks all guards; no resources changed.${skippedText}`,
-		);
+		};
+		if (json) inspect(); else withInspection("Inspecting cleanup preview", false, options, inspect);
 		return;
 	}
 	const apply = (progress?: InspectionProgress) => runPhase(report, "bulk-cleanup", () =>

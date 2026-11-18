@@ -320,7 +320,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 		}
 	}
 	const presentedApply = !dryRun && Boolean(slug ? all || branches : all || gone);
-	if ((all || branches || gone) && !presentedApply && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session selector or recursive/history/bulk apply.");
+	const bulkPreview = dryRun && !slug && (all || gone);
+	if ((all || branches || gone) && !presentedApply && !bulkPreview && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session selector, recursive/history apply, or bulk apply/preview.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -484,7 +485,7 @@ function usage(): string {
 		"  agent-session list --inspect [--json] [--refresh] [--color=auto|always|never] [--verbose] (live Git/binding table)",
 		"  agent-session list --inspect --worktree <path> [--json] [--color=auto|always|never] [--verbose] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch|--delete-branches] [--force] [--color=auto|always|never] [--verbose] (review exact bulk assets, confirm once and reuse the plan)",
-		"  agent-session finish (--all | --gone) --dry-run [--keep-branch|--delete-branches] [--force] [--json] (read-only bulk preview)",
+		"  agent-session finish (--all | --gone) --dry-run [--keep-branch|--delete-branches] [--force] [--json] [--verbose] [--color=auto|always|never] (read-only bulk proposal table; no fetch)",
 		"  agent-session finish (--all | --gone) (--keep-branch | --delete-branches) --yes [--force] [--color=auto|always|never] [--verbose] (explicit --yes bulk state output; legacy exit behaviour)",
 		"  agent-session completion <bash|zsh|fish>",
 		"",
