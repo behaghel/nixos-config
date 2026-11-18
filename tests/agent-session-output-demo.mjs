@@ -6,9 +6,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [mode = "create", ...flags] = process.argv.slice(2);
-const branchFlags = ["preview", "finish", "preferences", "branches", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
-if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags].includes(flag))) {
-  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches|batch|batch-failure|tree|tree-failure|tree-review|tree-review-failure|history|history-failure|bulk|bulk-failure] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
+const branchFlags = ["preview", "finish", "preferences", "branches", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure", "bulk-review", "bulk-review-failure"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
+if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure", "bulk-review", "bulk-review-failure"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags, ...(["bulk", "bulk-failure", "bulk-review", "bulk-review-failure"].includes(mode) ? ["--force"] : [])].includes(flag))) {
+  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches|batch|batch-failure|tree|tree-failure|tree-review|tree-review-failure|history|history-failure|bulk|bulk-failure|bulk-review|bulk-review-failure] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
 }
 const root = mkdtempSync(join(tmpdir(), "as-output-demo-"));
 const checkout = join(root, "checkout");
@@ -38,11 +38,11 @@ try {
   writeFileSync(config, JSON.stringify({
     version: 1, worktree_root: ".worktrees", local_links: [], disposable_paths: [".cache"], generated_links: {},
     agent_command: [process.execPath, "-e", "console.log('Agent stdout remains visible'); console.error('Agent stderr remains visible');"],
-    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
+    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure", "bulk-review", "bulk-review-failure"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
   }));
   const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../modules/flake/agent-session/cli.ts");
   const options = { cwd: checkout, env: { ...env, AGENT_SESSION_CONFIG: config } };
-  if (["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure"].includes(mode)) {
+  if (["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure", "bulk", "bulk-failure", "bulk-review", "bulk-review-failure"].includes(mode)) {
     const prepared = spawnSync(process.execPath, [cli, "demo", "create", "--json"], { ...options, encoding: "utf8" });
     if (prepared.status !== 0) throw new Error(prepared.stderr || "Cannot prepare demo fixture");
     const worktree = JSON.parse(prepared.stdout).session.worktreePath;
@@ -53,7 +53,9 @@ try {
       options.env = { ...options.env, XDG_CONFIG_HOME: personal };
       process.stdout.write(mode === "branches" ? "Temporary personal preference: branches=delete. Eligible deletion still requires your approval.\n\n" : "Temporary personal preference: color=always. Flags and NO_COLOR still apply.\n\n");
     }
-    if (mode === "bulk" || mode === "bulk-failure") {
+    if (["bulk", "bulk-failure", "bulk-review", "bulk-review-failure"].includes(mode)) {
+      const interactive = mode.startsWith("bulk-review");
+      const forced = flags.includes("--force");
       const targets = new Map([["demo", worktree]]);
       for (const slug of ["second", "dirty"]) {
         const created = spawnSync(process.execPath, [cli, slug, "create", "--json"], { ...options, encoding: "utf8" });
@@ -61,16 +63,17 @@ try {
         targets.set(slug, JSON.parse(created.stdout).session.worktreePath);
       }
       writeFileSync(join(targets.get("dirty"), "unfinished.txt"), "Retain this local fixture work\n");
-      const failed = mode === "bulk-failure";
+      const failed = mode.endsWith("failure");
       const bin = join(checkout, ".git", "demo-bin"); mkdirSync(bin);
       const executable = spawnSync("sh", ["-c", "command -v git"], { env, encoding: "utf8" }).stdout.trim();
-      const fail = failed ? `if [ "$3" = ${JSON.stringify(worktree)} ]; then rm "$3/README.md"; printf 'Demo bulk stdout evidence\\n'; printf 'Demo bulk native removal failed\\n' >&2; exit 1; fi\n` : "";
+      const fail = failed ? `target="$3"; if [ "$3" = --force ]; then target="$4"; fi; if [ "$target" = ${JSON.stringify(worktree)} ]; then rm "$target/README.md"; printf 'Demo bulk stdout evidence\\n'; printf 'Demo bulk native removal failed\\n' >&2; exit 1; fi\n` : "";
       writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then ${JSON.stringify(process.execPath)} -e 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900)'; ${fail}fi\nexec ${JSON.stringify(executable)} "$@"\n`, { mode: 0o755 });
       const disposition = flags.some((flag) => ["--keep-branch", "--delete-branches"].includes(flag)) ? [] : ["--keep-branch"];
-      process.stdout.write("Applying the existing explicit --yes bulk protocol to disposable resources. Dirty work is refused. Legacy bulk exits 0 even for refused/uncertain targets; inspect the outcome table.\n\n");
-      const result = spawnSync(process.execPath, [cli, "finish", "--all", "--yes", ...disposition, ...flags], { ...options, env: { ...options.env, PATH: `${bin}:${env.PATH}` }, stdio: "inherit" });
+      process.stdout.write(interactive ? "Review this disposable repository-wide plan. Blocked targets remain unapproved; legacy bulk still exits 0 for per-target failures after Yes.\n\n" : "Applying the existing explicit --yes bulk protocol to disposable resources. Dirty work is refused unless force is explicit. Legacy bulk exits 0 even for refused/uncertain targets; inspect the outcome table.\n\n");
+      const result = spawnSync(process.execPath, [cli, "finish", "--all", ...(!interactive ? ["--yes"] : []), ...disposition, ...flags], { ...options, env: { ...options.env, PATH: `${bin}:${env.PATH}` }, stdio: "inherit" });
       if (result.error) throw result.error;
-      if (result.status !== 0 || existsSync(worktree) !== failed || existsSync(targets.get("second")) || !existsSync(targets.get("dirty"))) throw new Error("Unexpected disposable bulk outcome");
+      const cancelled = interactive && result.status === 1 && [...targets.values()].every((target) => existsSync(target));
+      if (!cancelled && (result.status !== 0 || existsSync(worktree) !== failed || existsSync(targets.get("second")) || existsSync(targets.get("dirty")) !== !forced)) throw new Error("Unexpected disposable bulk outcome");
       const keep = disposition.length > 0 || flags.includes("--keep-branch");
       for (const [slug, target] of targets) if (git(checkout, "branch", "--list", `agent/${slug}`).includes(`agent/${slug}`) !== (keep || existsSync(target))) throw new Error("Unexpected disposable bulk branch disposition");
       process.exitCode = result.status;

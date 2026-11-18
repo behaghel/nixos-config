@@ -317,8 +317,14 @@ Providers advertising explicit `--yes` bulk state output also support colour and
 verbose flags on that apply path. Branch disposition stays explicit and existing
 selection, force and artifact restrictions still apply. Legacy bulk exit zero
 does not prove complete cleanup: inspect each refused/uncertain outcome and known
-partial effect. Presentation supplies no retry or force authority. Interactive
-bulk confirmation and read-only bulk previews retain their verified interfaces.
+partial effect. Presentation supplies no retry or force authority.
+On providers advertising exact bulk asset review and plan reuse, interactive bulk
+shows removable/blocked assets before one default-No approval, then updates that
+plan when terminal observation is safe. Changed bindings, policy, refs or physical
+checkout identity need fresh approval. Blocked targets remain unapproved, and bulk
+consent never becomes a non-forced ignored-artifact receipt. Personal deletion
+defaults do not expand bulk scope. Read-only bulk previews retain their separate
+verified interface; do not assume apply presentation flags are accepted there.
 
 On versions supporting historical branch review, a human operator can run
 `as <task-slug> finish --branches`. It selects one recorded worktree and candidate

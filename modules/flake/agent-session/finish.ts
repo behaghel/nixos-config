@@ -3,7 +3,7 @@ import { FinishOutput, type CleanupScope } from "./finish-output.ts";
 import { BatchOutput, type CleanupOutcome } from "./batch-output.ts";
 import { inspectTreeBranches, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
 import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, artifactSummary, type IgnoredDataInspection } from "./artifacts.ts";
 import {
@@ -121,6 +121,7 @@ function forceFinishUnlocked(
 	keepBranch: boolean,
 	output?: CleanupOutput,
 	verbose = false,
+	reviewOnly = false,
 ): void {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -148,6 +149,7 @@ function forceFinishUnlocked(
 	else process.stderr.write(
 		`Force-remove local session assets, including uncommitted or unpublished work:\n  worktree: ${metadata.worktreePath}${branchList ? `\n${branchList}` : ""}\n`,
 	);
+	if (reviewOnly) return;
 	if (!yes) {
 		if (!process.stdin.isTTY) {
 			throw new CliError(
@@ -213,6 +215,7 @@ function finishUnlocked(
 	report: ProgressReporter = () => {},
 	output?: CleanupOutput,
 	verbose = false,
+	reviewOnly = false,
 ): void {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
@@ -289,6 +292,7 @@ function finishUnlocked(
 	else process.stderr.write(
 		`Ready to remove local session assets:\n  worktree: ${metadata.worktreePath}\n${branchList}\n${artifactSummary(ignoredData)}`,
 	);
+	if (reviewOnly) return;
 	if (!yes) {
 		if (!process.stdin.isTTY) {
 			throw new CliError(
@@ -771,15 +775,15 @@ function confirmBulkFinish(mode: "all" | "gone", count: number, yes: boolean, ke
 }
 
 /** Observe existing cleanup callbacks without selecting scope or approving work. */
-function observeBulkCleanup(slug: string, worktreePath: string | undefined, display: BatchOutput, deleted: () => void) {
+function observeBulkCleanup(slug: string, worktreePath: string | undefined, display: BatchOutput | undefined, deleted: () => void, assets?: FinishOutput) {
 	let started = false, worktreeRemoved = false;
 	const output: CleanupOutput = {
 		plan(scope: CleanupScope) { worktreePath = scope.worktreePath; },
 		confirm: () => false,
 		begin: () => {},
-		starting() { started = true; display.removing(slug); },
-		removedWorktree() { worktreeRemoved = true; },
-		completed(id, state) { if (id.startsWith("branch:") && state === "Deleted") deleted(); },
+		starting(id, state) { started = true; display?.removing(slug); assets?.starting(id, state, slug); },
+		removedWorktree() { worktreeRemoved = true; assets?.removedWorktree(slug); },
+		completed(id, state) { if (id.startsWith("branch:") && state === "Deleted") deleted(); assets?.completed(id, state, slug); },
 		finish: () => {},
 	};
 	return { output, result(error?: unknown): CleanupOutcome {
@@ -787,6 +791,36 @@ function observeBulkCleanup(slug: string, worktreePath: string | undefined, disp
 			reason: error ? worktreeRemoved ? "partial-cleanup" : started ? "cleanup-not-confirmed" : "bulk-refused" : "confirmed-removal",
 			...(error ? { problem: error instanceof Error ? error.message : String(error) } : {}) };
 	} };
+}
+
+function bulkScopeSnapshot(root: string, invocationRoot: string, slug: string, force: boolean, keepBranch: boolean, report: ProgressReporter) {
+	const plan = previewFinish(root, invocationRoot, slug, force, keepBranch, report, null);
+	const metadata = readMetadata(root, slug);
+	const names = [...new Set([...(plan.ownedBranches as string[]), ...(plan.currentBranch ? [String(plan.currentBranch)] : [])])].sort();
+	const refs = names.map((name) => [name, git(root, ["rev-parse", "--verify", `refs/heads/${name}`])]);
+	const head = existsSync(metadata.worktreePath) ? git(metadata.worktreePath, ["rev-parse", "HEAD"]) : null;
+	const physical = existsSync(metadata.worktreePath) ? lstatSync(metadata.worktreePath, { bigint: true }) : undefined;
+	const fingerprint = createHash("sha256").update(JSON.stringify([rootKey(root), metadata, plan, refs, head,
+		physical ? [physical.dev.toString(), physical.ino.toString(), physical.mode.toString()] : null])).digest("hex");
+	const scope: CleanupScope = { slug, worktreePath: String(plan.worktreePath), metadataPath: String(plan.metadataPath),
+		currentBranch: plan.currentBranch as string | null, ownedBranches: plan.ownedBranches as string[], keepBranch, force,
+		ignoredData: plan.ignoredData as IgnoredDataInspection | undefined };
+	return { fingerprint, scope };
+}
+
+function reviewBulkScope(root: string, invocationRoot: string, slug: string, force: boolean, keepBranch: boolean, report: ProgressReporter): { slug: string; scope?: CleanupScope; fingerprint?: string; problem?: string } {
+	let scope: CleanupScope | undefined;
+	try {
+		const observer: CleanupOutput = { plan(reviewed) { scope = reviewed; }, confirm: () => false, begin() {}, starting() {}, removedWorktree() {}, completed() {}, finish() {} };
+		// Run the existing guards, then stop before consent/native effects. Keep
+		// yes=true: bulk review must not become artifact-disposal authority.
+		if (force) forceFinishUnlocked(root, invocationRoot, slug, true, keepBranch, observer, false, true);
+		else finishUnlocked(root, invocationRoot, slug, true, keepBranch, undefined, report, observer, false, true);
+		return { slug, ...bulkScopeSnapshot(root, invocationRoot, slug, force, keepBranch, report) };
+	} catch (error) {
+		if (!scope) { try { scope = bulkScopeSnapshot(root, invocationRoot, slug, force, keepBranch, report).scope; } catch { /* No approved physical scope: keep a blocked binding row. */ } }
+		return { slug, scope, problem: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 export function finishBulk(
@@ -800,7 +834,7 @@ export function finishBulk(
 	json: boolean,
 	options: PresentationOptions = {},
 ): void {
-	const stateFirst = yes && !dryRun;
+	const stateFirst = !dryRun;
 	const report: ProgressReporter = !stateFirst || options.verbose ? progressReporter("finish", json) : () => {};
 	if (dryRun) {
 		const plans: Record<string, unknown>[] = [];
@@ -882,12 +916,26 @@ export function finishBulk(
 					.filter((record) => branchUpstreamIsGone(root, record.branch))
 					.map((record) => record.slug);
 			}
-			confirmBulkFinish(mode, candidates.length, yes, keepBranch);
+			if (!yes && !process.stdin.isTTY) confirmBulkFinish(mode, candidates.length, yes, keepBranch);
+			if (!yes && !candidates.length && !outcomes.length) {
+				progress?.flush();
+				process.stdout.write(new BatchOutput([], options, "Bulk cleanup", { emptyLabel: "No selected resources" }).finish([]));
+				return;
+			}
+			const reviews = !yes ? candidates.map((slug) => reviewBulkScope(root, invocationRoot, slug, force, keepBranch, report)) : [];
+			const assets = !yes ? new FinishOutput(options) : undefined;
+			if (assets) {
+				progress?.flush();
+				assets.planBulk(mode === "gone" ? "gone-upstream bulk" : "bulk", [...reviews, ...outcomes.filter((outcome) => !candidates.includes(outcome.slug)).map((outcome) => ({ slug: outcome.slug, problem: outcome.problem }))], force);
+				if (candidates.length && !assets.confirm(force)) throw new CliError("Finish cancelled.");
+				assets.begin();
+				for (const outcome of outcomes) assets.bulkResource(outcome);
+			}
 			const entries = stateFirst ? slugs.filter((slug) => candidates.includes(slug) || outcomes.some((outcome) => outcome.slug === slug)).map((slug) => {
 				try { return { slug, worktreePath: readMetadata(root, slug).worktreePath }; } catch { return { slug }; }
 			}) : [];
 			let deletedBranches = 0;
-			const display = stateFirst ? new BatchOutput(entries, options, `Bulk ${mode === "gone" ? "gone-upstream " : ""}cleanup`, {
+			const display = yes ? new BatchOutput(entries, options, `Bulk ${mode === "gone" ? "gone-upstream " : ""}cleanup`, {
 				disposition: () => keepBranch ? "branches preserved" : `${deletedBranches} branch deletion${deletedBranches === 1 ? "" : "s"} confirmed`, emptyLabel: "No selected resources",
 			}) : undefined;
 			progress?.flush(); display?.start();
@@ -896,22 +944,28 @@ export function finishBulk(
 			const skipped = [...preflightSkipped];
 			for (const slug of candidates) {
 				display?.checking(slug);
-				const observer = display ? observeBulkCleanup(slug, entries.find((entry) => entry.slug === slug)?.worktreePath, display, () => deletedBranches++) : undefined;
+				const observer = observeBulkCleanup(slug, entries.find((entry) => entry.slug === slug)?.worktreePath, display, () => deletedBranches++, assets);
 				try {
+					if (assets) {
+						const reviewed = reviews.find((review) => review.slug === slug)!;
+						if (reviewed.problem) throw new CliError(reviewed.problem);
+						if (bulkScopeSnapshot(root, invocationRoot, slug, force, keepBranch, report).fingerprint !== reviewed.fingerprint) throw new CliError("Bulk target changed; review a fresh plan. No resources changed for this target.");
+					}
 					if (force) {
 						forceFinishUnlocked(root, invocationRoot, slug, true, keepBranch, observer?.output, options.verbose);
 					} else {
 						finishUnlocked(root, invocationRoot, slug, true, keepBranch, undefined, report, observer?.output, options.verbose);
 					}
 					finished += 1;
-					if (observer) { const outcome = observer.result(); outcomes.push(outcome); display?.complete(outcome); }
+					if (observer) { const outcome = observer.result(); outcomes.push(outcome); display?.complete(outcome); assets?.bulkResource(outcome); }
 				} catch (error) {
-					if (observer) { const outcome = observer.result(error); outcomes.push(outcome); display?.complete(outcome); }
+					if (observer) { const outcome = observer.result(error); outcomes.push(outcome); display?.complete(outcome); assets?.bulkResource(outcome); }
 					skipped.push(
 						`${slug}: ${error instanceof Error ? error.message : String(error)}`,
 					);
 				}
 			}
+			if (assets) { process.stdout.write(assets.finishBulk(outcomes)); return; }
 			if (display) { process.stdout.write(display.finish(outcomes)); return; }
 			for (const problem of skipped) {
 				process.stderr.write(`[agent-session] SKIPPED ${problem}\n`);

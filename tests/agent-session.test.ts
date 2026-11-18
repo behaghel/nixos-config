@@ -3007,6 +3007,10 @@ try:
                     subprocess.run(['git', '-C', worktree, 'switch', current], check=True, stdout=subprocess.DEVNULL)
                 elif mutation == 'base':
                     subprocess.run(['git', '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-m', 'Concurrent base'], check=True, stdout=subprocess.DEVNULL)
+                elif mutation == 'replace-worktree':
+                    import shutil
+                    os.rename(worktree, worktree + '.moved')
+                    shutil.copytree(worktree + '.moved', worktree, symlinks=True)
                 elif mutation == 'policy':
                     with open(os.environ['AGENT_SESSION_CONFIG']) as data:
                         record = json.load(data)
@@ -8081,6 +8085,34 @@ describe("agent-session status, launch, and resume", () => {
 });
 
 describe("state-first bulk output", () => {
+	it("reviews only gone-upstream resources interactively after the existing fetch/filter", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const gone = startManagedSession(fixture).worktree;
+			commitSessionWork(gone); git(gone, "push", "-u", "origin", "HEAD");
+			const retained = startManagedSession(fixture, "retained").worktree;
+			commitSessionWork(retained); git(retained, "push", "-u", "origin", "HEAD");
+			mergeSessionAndDeleteRemoteBranch(fixture);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--gone", "--keep-branch"], "yes\n", "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]"));
+			expect(plan).toContain(gone); expect(plan.includes(retained)).toBe(false);
+			expect(existsSync(gone)).toBe(false); expect(existsSync(retained)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("finishes empty interactive bulk selection without a prompt or duplicate plan", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch", "--color=never"], "", "", { TERM: "xterm-256color", TEST_PTY_ROWS: "40", TEST_PTY_COLUMNS: "120" });
+			expect(result.status).toBe(0); expect(result.answered).toBe(false);
+			expect(result.output).toContain("No selected resources");
+			expect(result.output.split("ASSET").length <= 2).toBe(true);
+			expect(result.output.includes("[y/N]")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
 	it("reports an empty explicit bulk selection with plain zero counts", () => {
 		const fixture = createRepositoryFixture();
 		try {
@@ -8433,6 +8465,117 @@ describe("agent-session finish", () => {
 		});
 		afterEach(() => {
 			rmSync(fixture.root, { recursive: true, force: true });
+		});
+
+		it("keeps confirmed bulk worktree removal visible when a later branch effect is uncertain", () => {
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = branch ] && [ "$2" = -D ] && [ "$3" = agent/first ]; then printf 'interactive bulk branch failure\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--delete-branches"], "yes\n", "", { PATH: `${bin}:${process.env.PATH}`, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0);
+			for (const word of ["2 worktrees removed", "Uncertain", "Not attempted", "1 branch deleted", "interactive bulk branch failure"]) expect(result.output).toContain(word);
+			expect(existsSync(first)).toBe(false); expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+			expect(git(fixture.checkout, "branch", "--list", "agent/first")).toContain("agent/first");
+			expect(git(fixture.checkout, "branch", "--list", "agent/second")).toBe("");
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "first"))).toBe(true);
+		});
+
+		it("reuses one interactive bulk asset table and leaves blocked assets unattempted", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch"], "yes\n", "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0);
+			const screen: string[][] = []; let row = 0, column = 0;
+			for (const token of result.output.match(/\u001b\[[0-9;]*[A-Za-z]|[\s\S]/g) ?? []) {
+				if (token.startsWith("\u001b[")) {
+					if (token.endsWith("A")) row = Math.max(0, row - Number(token.slice(2, -1)));
+					else if (token.endsWith("K")) screen[row] = [];
+				} else if (token === "\r") column = 0;
+				else if (token === "\n") row++;
+				else { (screen[row] ??= [])[column++] = token; }
+			}
+			const visible = screen.map((line) => line.join("")).join("\n");
+			expect(visible.split("ASSET").length).toBe(2);
+			for (const word of ["Removed", "Preserved", "Not attempted", "2 worktrees removed"]) expect(visible).toContain(word);
+			expect(visible.includes("Would remove")).toBe(false); expect(visible.includes("[y/N]")).toBe(false);
+		});
+
+		for (const answer of ["n\n", "\n", "EOF"]) {
+			it(`does no destructive work during force bulk review when approval is ${JSON.stringify(answer)}`, () => {
+				const metadata = readFileSync(sessionMetadataPath(fixture.checkout, "dirty"), "utf8");
+				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--force", "--keep-branch"], answer, "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+				expect(result.status).toBe(1); expect(result.output).toContain("Finish cancelled");
+				for (const target of [first, second, dirty]) expect(existsSync(target)).toBe(true);
+				expect(readFileSync(join(dirty, "unfinished.txt"), "utf8")).toBe("keep\n");
+				expect(readFileSync(sessionMetadataPath(fixture.checkout, "dirty"), "utf8")).toBe(metadata);
+			});
+		}
+
+		it("shows an explicit destructive force bulk plan with colour and removes only after its one approval", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--force", "--keep-branch", "--color=always"], "yes\n", "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			expect(result.output.slice(0, result.output.indexOf("[y/N]"))).toContain("Force discards uncommitted and ignored local files");
+			expect(/\u001b\[[0-9;]*m/.test(result.output)).toBe(true);
+			expect(result.output).toContain("3 worktrees removed");
+			for (const target of [first, second, dirty]) expect(existsSync(target)).toBe(false);
+			for (const slug of ["first", "second", "dirty"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+		});
+
+		it("retains the bulk review on a narrow unobservable-echo terminal without losing final identities", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch"], "yes\n", "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_NO_ECHO: "1", TEST_PTY_ROWS: "10", TEST_PTY_COLUMNS: "36" });
+			expect(result.status).toBe(0);
+			expect(/\u001b\[\d+A/.test(result.output.slice(0, result.output.indexOf("Cleaning up")))).toBe(false);
+			expect([...result.output.matchAll(/\u001b\[(\d+)A/g)].every((match) => Number(match[1]) <= 8)).toBe(true);
+			const final = result.output.slice(result.output.lastIndexOf("Cleanup incomplete"));
+			for (const word of ["first", "second", "dirty", "Removed", "Preserved", "Not attempted"]) expect(final).toContain(word);
+			expect(final.includes("…")).toBe(false);
+		});
+
+		for (const force of [false, true]) {
+			it(`refuses a physically replaced bulk checkout with unchanged tracked content (force=${force})`, () => {
+				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch", ...(force ? ["--force"] : [])], "yes\n", "replace-worktree", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" }, first);
+				expect(result.status).toBe(0); expect(existsSync(first)).toBe(true); expect(existsSync(`${first}.moved`)).toBe(true);
+				expect(result.output).toContain("changed"); expect(existsSync(second)).toBe(false);
+				expect(existsSync(sessionMetadataPath(fixture.checkout, "first"))).toBe(true);
+			});
+		}
+
+		it("refuses every reviewed bulk target when policy changes after approval", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch"], "yes\n", "policy", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(result.output).toContain("0 worktrees removed");
+			expect(result.output).toContain("changed");
+			for (const target of [first, second, dirty]) expect(existsSync(target)).toBe(true);
+		});
+
+		it("refuses a changed interactive bulk target after approval while continuing unchanged targets", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch"], "yes\n", "head", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" }, first);
+			expect(result.status).toBe(0); expect(existsSync(first)).toBe(true);
+			expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+			expect(result.output).toContain("changed"); expect(result.output).toContain("1 worktree removed");
+			expect(git(fixture.checkout, "branch", "--list", "agent/first")).toContain("agent/first");
+		});
+
+		it("does not turn interactive bulk approval into an artifact-disposal receipt", () => {
+			const config = JSON.parse(readFileSync(runtimeConfigPath(fixture.checkout), "utf8"));
+			config.disposable_paths = [".cache"]; writeFileSync(runtimeConfigPath(fixture.checkout), JSON.stringify(config));
+			writeFileSync(join(fixture.checkout, ".git/info/exclude"), ".cache/\n");
+			mkdirSync(join(first, ".cache")); const artifact = join(first, ".cache", "tasks.sqlite"); writeFileSync(artifact, "retain this database");
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch"], "yes\n", "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(existsSync(first)).toBe(true); expect(readFileSync(artifact, "utf8")).toBe("retain this database");
+			expect(existsSync(second)).toBe(false);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]"));
+			for (const word of ["Artifact", "Blocked"]) expect(plan).toContain(word);
+			expect(plan).toMatch(/preview\s+receipt/);
+			expect(result.output.split("[y/N]").length).toBe(2);
+		});
+
+		it("reviews interactive bulk assets before one approval and retains honest final outcomes", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch"], "yes\n", "", { TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" });
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			expect(existsSync(first)).toBe(false); expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+			for (const slug of ["first", "second", "dirty"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]"));
+			for (const word of ["ASSET", "ACTION", "Would remove", "Would preserve", first, second, "dirty"]) expect(plan).toContain(word);
+			expect(result.output).toContain("2 worktrees removed");
+			expect(result.output.includes("STARTED")).toBe(false);
 		});
 
 		it("updates bulk resource outcomes on a short terminal without introducing a confirmation prompt", () => {

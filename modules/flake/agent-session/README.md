@@ -822,6 +822,50 @@ unmanaged writers or guarantee reclaimed space. Explicit ownership exclusions
 and a quiet target remain necessary. Forced-cleanup semantics are unchanged;
 there is no automatic force fallback.
 
+## Interactive bulk approval
+
+```sh
+as finish --all --keep-branch
+as finish --gone --delete-branches
+```
+
+These repository-wide modes inspect their existing selection before one default-No
+approval. `--gone` still fetches/prunes first and uses upstream disappearance;
+this is not a named session's descendants-first recursive selection. The exact
+`SESSION`, `ASSET`, `ACTION`, `DETAIL` table lists worktrees, records, branch
+dispositions and observed artifact roots. Blocked resources are visibly unapproved;
+a target which becomes eligible while confirmation waits needs a fresh review.
+Unknown scopes stay blocked without an inferred checkout path.
+
+After Yes, the same table updates with observed asset outcomes when review layout
+and simple echo are safely observable. Otherwise the review remains in scrollback
+with bounded append-only updates. Known completed worktree/branch/record effects
+stay visible if a later step becomes uncertain. Counts reflect those known effects,
+not blanket success; legacy bulk still exits zero for individual refusals or
+uncertainties and continues independent unchanged targets. Empty selections do not
+ask for consent or leave a duplicate plan. No/empty input/EOF approve no cleanup.
+
+The internal approval binds configuration, full binding metadata, reviewed refs,
+HEAD, ignored-data evidence and physical checkout identity before each target's
+ordinary cleanup guards run again. Changed targets are refused without expanding
+the approved scope. This is change detection, not a filesystem reservation against
+unmanaged writers. The read-only review phase stops before local destructive work;
+existing remote-refresh checks may fetch local tracking evidence before review.
+
+**Bulk approval is not an artifact-disposal receipt.** Non-forced artifact-bearing
+targets remain blocked even after Yes; use the existing single-session or inactive
+batch protocol for artifact disposal. No receipt is passed to bypass that guard.
+Explicit `--force` retains its separate destructive semantics and warning, but an
+old approval still cannot remove a physically replaced target. Force is never
+inferred from a refusal. Branch selection remains explicit or built-in preserve;
+personal deletion preferences do not expand repository-wide scope.
+
+`--color=auto|always|never` and `--verbose` apply to interactive and explicit-Yes
+bulk cleanup. Verbose mode keeps the review append-only and exposes checks.
+Read-only bulk previews retain their previous presentation and do not yet accept
+those flags. No automated approval, force fallback, new apply JSON, public receipt
+or replay authority is introduced by the interactive view.
+
 ## Explicit bulk apply output
 
 ```sh
@@ -855,8 +899,8 @@ Explicit branch flags remain mandatory with `--yes`; personal deletion defaults
 do not expand bulk scope. `--force` retains its separate existing destructive
 semantics and is never inferred from a refusal. Ordinary bulk approval still
 cannot authorize ignored-artifact disposal or use a new receipt/replay protocol.
-Interactive count-based bulk confirmation and bulk previews retain their existing
-presentation; these flags do not yet apply there. Preview JSON schemas/events
+Interactive bulk uses the exact asset review described above. Bulk previews retain
+their existing presentation; these flags do not yet apply there. Preview JSON schemas/events
 remain unchanged, and no apply JSON protocol is introduced.
 
 ## Inactive-session retirement
