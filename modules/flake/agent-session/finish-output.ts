@@ -37,6 +37,7 @@ export class FinishOutput {
 	private frameRows = 0;
 	private current?: Asset;
 	private tree = false;
+	private reviewNotes: string[] = [];
 	private review?: { height: number; columns: number; rows: number };
 	private reusingReview = false;
 	private finished = false;
@@ -82,7 +83,7 @@ export class FinishOutput {
 			const notes = ["", ...(scope.force ? [`Force discards uncommitted and ignored local files.${scope.unrecorded ? "" : " Deleting branches can also discard unpublished commits."}`] : []),
 				...(!this.tree && scope.head ? [`HEAD: ${scope.head}`] : []), ...(scope.unrecorded ? ["Force will preserve all branches; no ownership metadata is inferred."] : []),
 				...(scope.unrecorded && !scope.currentBranch ? ["Detached HEAD commits may become unreachable; create a branch first if needed."] : []),
-				"Link targets and remote assets are preserved.", ...(blocked ? [`Cleanup blocked: ${blocked}`] : []),
+				...this.reviewNotes, "Link targets and remote assets are preserved.", ...(blocked ? [`Cleanup blocked: ${blocked}`] : []),
 				...(preview ? ["Nothing changed"] : [])];
 			text += formatLines(notes);
 		} else if (this.finished || this.failed) text += formatLines(["", this.summary]);
@@ -102,6 +103,10 @@ export class FinishOutput {
 
 	plan(scope: CleanupScope): void {
 		this.setScope(scope);
+		this.writePlan();
+	}
+
+	private writePlan(): void {
 		const text = this.render(true);
 		this.review = { height: text.split("\n").length - 1, columns: process.stdout.columns || 80, rows: process.stdout.rows || 24 };
 		process.stdout.write(text);
@@ -116,9 +121,16 @@ export class FinishOutput {
 			const branch = branches.find((branch) => branch.slug === asset.slug && branch.name === asset.detail);
 			if (branch) { asset.preserve = branch.preserve; asset.detail = branch.detail; }
 		}
-		const text = this.render(true);
-		this.review = { height: text.split("\n").length - 1, columns: process.stdout.columns || 80, rows: process.stdout.rows || 24 };
-		process.stdout.write(text);
+		this.writePlan();
+	}
+
+	/** Reviewed local refs are not projected as owned branches. */
+	planHistory(scope: Omit<CleanupScope, "ownedBranches" | "currentBranch" | "keepBranch">, branches: { name: string; preserve: boolean; detail: string }[], warning: string): void {
+		this.scope = { ...scope, ownedBranches: [], keepBranch: true };
+		this.assets = this.scopeAssets(this.scope).map((asset) => ({ ...asset, slug: scope.slug }));
+		this.assets.splice(1, 0, ...branches.map((branch) => ({ slug: scope.slug, id: `branch:${branch.name}`, kind: "Reviewed branch", detail: branch.detail, preserve: branch.preserve, state: "Pending" })));
+		this.tree = true; this.reviewNotes = [warning, "Other worktrees are outside this selection."];
+		this.writePlan();
 	}
 
 	treeResource(outcome: Outcome, redraw = true): void {

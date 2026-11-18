@@ -176,10 +176,10 @@ as my-task finish --branches --keep-branch   # remove worktree, preserve refs
 Checkout history is candidate-discovery evidence, **not proof of ownership**.
 Reflogs may expire, branches may be renamed or recreated, and deleted refs may
 appear in the list. The preview reports this limitation, candidate sources and
-current tips. Previews and the final plan use `delete:` or `preserve:` according
-to the effective branch request; preservation is the built-in default. Branches blocked
-from deletion are always labeled `preserve:` with their reason. The preview
-never promises exhaustive history or silently adopts branches.
+current tips. Human previews retain `delete:`/`preserve:` text; the interactive
+asset table uses `Would delete`/`Would preserve` according to the effective request.
+Preservation is the built-in default, and blocked candidates retain their reasons.
+Neither view promises exhaustive history or silently adopts branches.
 
 The operator requests eligible deletion with `--delete-branches` or a personal
 interactive preference, explicitly including candidates without recorded ownership
@@ -187,6 +187,20 @@ in this mode. The final plan states what will be removed and asks once for
 confirmation (default No). `--keep-branch` overrides every deletion request. Non-terminal removal,
 `--yes`, `--expected`, `--force`, `--all` and `--gone` cannot be combined with this
 mode. `--json` is available only for read-only previews, not as an apply receipt.
+
+Interactive output presents one exact `SESSION`, `ASSET`, `ACTION`, `DETAIL`
+plan for the worktree, record, approved artifact roots and **Reviewed branch**
+refs, retaining the history/ownership warning before approval. After Yes, the same
+table updates with observed outcomes when terminal geometry and simple echo are
+safely observable. Oversized/resized/unobservable reviews stay in scrollback with
+bounded append-only fallback; final output retains every asset and counts.
+Routine phase logs stay hidden; original failures retain stdout/stderr evidence
+with credential redaction and no styling inside the evidence body. Partial native
+effects remain uncertain, and branch refusals do not imply deletion.
+`--color=auto|always|never` and `--verbose` apply to interactive history cleanup;
+verbose mode exposes checks and full displayed commit hashes. Read-only previews
+keep their existing presentation and do not yet accept these flags. No consent,
+branch-eligibility, JSON or resource-selection authority is added by presentation.
 
 This path supports legacy records and a different currently checked-out branch
 without inventing ancestry or branch ownership. It requires the uniquely bound

@@ -144,7 +144,7 @@ export function main(args: string[]): number {
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
 			if (options.branches) {
-				return finishWorktreeBranches(root, invocationRoot, resolveSessionTarget(options.slug!, invocationRoot), options.keepBranch, options.dryRun, options.json);
+				return finishWorktreeBranches(root, invocationRoot, resolveSessionTarget(options.slug!, invocationRoot), options.keepBranch, options.dryRun, options.json, options);
 			} else if (options.slug && options.all) {
 				return finishSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),
 					options.keepBranch, options.dryRun, options.json, options.expected, options);

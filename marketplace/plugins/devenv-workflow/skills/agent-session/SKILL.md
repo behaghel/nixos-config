@@ -330,6 +330,12 @@ scope is refused; interrupted or partial cleanup requires inspection, not force.
 `--dry-run --json` previews do not authorize retirement. `--yes`, `--expected`,
 `--force`, `--all` and `--gone` are not accepted with `--branches`. An agent must
 never synthesize terminal consent for a real worktree; use the human handoff.
+On providers advertising asset-plan reuse and presentation flags on historical
+apply, one exact asset table precedes that approval and updates with outcomes
+when terminal observation is safe. Otherwise the review stays in scrollback.
+Refs remain explicitly reviewed candidates, not newly claimed owned branches.
+`--verbose` exposes checks and full displayed hashes; do not assume those flags
+apply to read-only previews or expand cleanup/approval authority.
 
 On versions supporting interactive recursive finish, a human operator can run
 `as <task-slug> finish --all` and confirm the exact final plan (default No).
