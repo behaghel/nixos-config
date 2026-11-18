@@ -9,6 +9,7 @@ in
     home.file = {
       ".hammerspoon/init.lua".source = ./init.lua;
       ".hammerspoon/hotkeys.lua".source = ./hotkeys.lua;
+      ".hammerspoon/fellow.lua".source = ./fellow.lua;
       ".hammerspoon/windows.lua".source = ./windows.lua;
       ".hammerspoon/mail.lua".source = ./mail.lua;
       ".hammerspoon/draw.lua".source = ./draw.lua;
