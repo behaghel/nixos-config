@@ -899,9 +899,33 @@ Explicit branch flags remain mandatory with `--yes`; personal deletion defaults
 do not expand bulk scope. `--force` retains its separate existing destructive
 semantics and is never inferred from a refusal. Ordinary bulk approval still
 cannot authorize ignored-artifact disposal or use a new receipt/replay protocol.
-Interactive bulk uses the exact asset review described above. Bulk previews retain
-their existing presentation; these flags do not yet apply there. Preview JSON schemas/events
-remain unchanged, and no apply JSON protocol is introduced.
+Interactive bulk uses the exact asset review described above. No apply JSON protocol is introduced.
+
+### Read-only bulk previews
+
+```sh
+as finish --all --keep-branch --dry-run
+as finish --gone --keep-branch --dry-run --verbose
+```
+
+These previews announce inspection before namespace discovery, then show stable
+`SESSION`, `PLAN`, `REASON` proposal rows and counts ending in `Nothing changed`.
+Clean candidates show `Would remove`; dirty, artifact-bearing, conflicting or
+unreadable bindings show `Would preserve` with a short reason. Explicit force
+proposals retain their destructive warning, but cannot override an observed
+binding conflict. Proposed removals are not proof that all apply-time branch or
+activity guards pass. Apply rechecks the original guards; these rows create no
+approval authority, receipt, saved state or replay interface.
+
+`--gone` preview uses **local refs only** and explicitly says no fetch occurred.
+Bindings whose cached upstream is not gone remain visible as preserved; JSON
+retains its existing selected-plan filtering, schema and progress events. All
+previews remain read-only: no fetch, registration pruning, metadata writes,
+artifact disposal or native removal. Default human output omits routine phase
+logs; `--verbose` exposes checks, full paths and credential-redacted details.
+`--color=auto|always|never` and personal colour precedence apply. Pipes stay
+append-only; capable terminals bound temporary feedback and retain full final
+identities. Named tree/history previews retain their separate presentation.
 
 ## Inactive-session retirement
 
@@ -1593,6 +1617,7 @@ It dispatches to modules with explicit imports and no initialization side effect
 | `doctor.ts` | Read-only configuration, integration, binding, local-link, and lock diagnostics |
 | `lifecycle.ts` | Creation, preparation, launch/resume, repair, and one-off execution |
 | `finish.ts` | Cleanup previews, receipts, confirmations, and guarded removal |
+| `cleanup-preview.ts` | Human bulk proposal rows; no selection or cleanup authority |
 | `runtime.ts` | Shared command errors, subprocess execution, table/time formatting, and progress output |
 | `types.ts` | Shared configuration, metadata, and status types |
 

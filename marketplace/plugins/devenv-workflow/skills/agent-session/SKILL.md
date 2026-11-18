@@ -323,8 +323,14 @@ shows removable/blocked assets before one default-No approval, then updates that
 plan when terminal observation is safe. Changed bindings, policy, refs or physical
 checkout identity need fresh approval. Blocked targets remain unapproved, and bulk
 consent never becomes a non-forced ignored-artifact receipt. Personal deletion
-defaults do not expand bulk scope. Read-only bulk previews retain their separate
-verified interface; do not assume apply presentation flags are accepted there.
+defaults do not expand bulk scope.
+On providers advertising read-only bulk proposal tables, `as finish --all --dry-run`
+and `as finish --gone --dry-run` support colour/verbose flags, live proposal rows,
+short preservation reasons and final counts. `--gone` preview uses cached local
+refs only; it never fetches. Proposed removals do not prove apply-time guard
+eligibility. Previews never write approval state or authorize cleanup; JSON
+schema, selected-plan filtering and progress events remain unchanged. Verify the
+installed interface before assuming these flags apply to another preview selector.
 
 On versions supporting historical branch review, a human operator can run
 `as <task-slug> finish --branches`. It selects one recorded worktree and candidate

@@ -29,7 +29,7 @@ const reason = (value: string) => reasons[value] ?? displayText(value.replace(/-
 
 // Keep native wording except terminal instructions and credential values. The
 // original backend evidence and JSON envelope are not changed by presentation.
-function diagnostic(text: string): string {
+export function cleanupDiagnostic(text: string): string {
 	return stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, " ")
 		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@")
 		.replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s]+/gi, "$1[redacted]");
@@ -45,7 +45,7 @@ export function writeCleanupDiagnostics(outcomes: CleanupOutcome[], options: Pre
 	for (const [problem, affected] of evidence) {
 		const label = affected.length === 1 ? displayText(affected[0].slug) : `${affected.length} resources`;
 		const state = [...new Set(affected.map(outcomeState))].join(" / ");
-		process.stderr.write(`${styleText(`${label}: ${state}`, 31, options.color, process.stderr.isTTY)}\n${diagnostic(problem)}\n`);
+		process.stderr.write(`${styleText(`${label}: ${state}`, 31, options.color, process.stderr.isTTY)}\n${cleanupDiagnostic(problem)}\n`);
 	}
 }
 
@@ -150,7 +150,7 @@ export class BatchOutput {
 		if (this.options.verbose) {
 			for (const outcome of outcomes) {
 				const changes = outcome.inspection?.git?.changes?.map((change) => `  ${displayText(change.status)} ${displayText(change.path)}`) ?? [];
-				const blockers = outcome.inspection?.blockers.map((blocker) => `  ${diagnostic(blocker.problem ?? reason(blocker.reason))}`) ?? [];
+				const blockers = outcome.inspection?.blockers.map((blocker) => `  ${cleanupDiagnostic(blocker.problem ?? reason(blocker.reason))}`) ?? [];
 				text += formatLines(["", `${displayText(outcome.slug)}: ${displayText(outcome.worktreePath ?? "Unknown binding")}`, ...changes, ...blockers]);
 			}
 		}

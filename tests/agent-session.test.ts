@@ -8085,6 +8085,119 @@ describe("agent-session status, launch, and resume", () => {
 });
 
 describe("state-first bulk output", () => {
+	it("reports empty and unreadable bulk previews without inventing scopes or persisting approval state", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			const args = ["finish", "--all", "--keep-branch", "--dry-run", "--color=never"];
+			const empty = runCli(fixture.checkout, args);
+			expect(empty.status).toBe(0); expect(empty.stdout).toContain("No recorded resources"); expect(empty.stdout).toContain("0 proposed removals");
+			const record = sessionMetadataPath(fixture.checkout, "broken"); mkdirSync(dirname(record), { recursive: true }); writeFileSync(record, "{broken preview fixture");
+			const unreadable = runCli(fixture.checkout, args);
+			expect(unreadable.status).toBe(0);
+			for (const word of ["broken", "Would preserve", "Inspection incomplete", "Nothing changed"]) expect(unreadable.stdout).toContain(word);
+			expect(unreadable.stdout.includes(join(fixture.worktrees, "broken"))).toBe(false);
+			expect(readFileSync(record, "utf8")).toBe("{broken preview fixture");
+			for (const path of ["operation.lock", "retirements"]) expect(existsSync(join(fixture.checkout, ".git/agent-session", path))).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("redacts credentials and terminal instructions in verbose preview evidence without styling its body", () => {
+		const renderer = resolve("modules/flake/agent-session/cleanup-preview.ts");
+		const script = `import { CleanupPreview } from ${tomlString(renderer)};
+const view = new CleanupPreview(['fixture'], {color: 'never', verbose: true}, 'fixture');
+view.complete({slug: 'fixture', remove: false, reason: 'Inspection incomplete', details: ['native error https://demo:secret@example.invalid/path', 'Authorization: Bearer fixture-private-token', '\\u001b[2Joriginal evidence']});
+process.stdout.write(view.finish());`;
+		const result = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8" });
+		expect(result.status).toBe(0);
+		for (const value of ["secret", "fixture-private-token", "\u001b"]) expect(result.stdout.includes(value)).toBe(false);
+		expect(result.stdout).toContain("native error https://[redacted]@example.invalid/path"); expect(result.stdout).toContain("original evidence");
+	});
+
+	it("retains fatal bulk preview evidence with human credential redaction and original JSON diagnostics", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$*" in *'rev-parse --git-common-dir'*) printf 'Fatal native evidence https://demo:secret@example.invalid/path\\n' >&2; exit 7 ;; esac\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const env = { PATH: `${bin}:${process.env.PATH}` }, args = ["finish", "--all", "--keep-branch", "--dry-run", "--color=never", "--verbose"];
+			const human = runCli(fixture.checkout, args, env), json = runCli(fixture.checkout, [...args, "--json"], env);
+			expect(human.status).toBe(1); expect(json.status).toBe(1);
+			expect((human.stdout + human.stderr).includes("secret")).toBe(false);
+			expect(human.stderr).toContain("Fatal native evidence https://[redacted]@example.invalid/path");
+			expect(json.stdout + json.stderr).toContain("Fatal native evidence https://demo:secret@example.invalid/path");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("announces bulk preview inspection before blocked local namespace discovery", async () => {
+		const fixture = createRepositoryFixture(); const marker = join(fixture.root, "checking"), release = join(fixture.root, "release");
+		try {
+			const worktree = startManagedSession(fixture).worktree;
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\ncase "$*" in *'rev-parse --git-common-dir'*) touch ${tomlString(marker)}; while [ ! -f ${tomlString(release)} ]; do sleep 0.02; done ;; esac\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const child = spawn("node", [cliScript, "finish", "--all", "--keep-branch", "--dry-run", "--color=never"], { cwd: fixture.checkout, env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) }, stdio: ["ignore", "pipe", "pipe"] });
+			let stdout = "", stderr = ""; child.stdout.on("data", (data) => stdout += data); child.stderr.on("data", (data) => stderr += data);
+			const closed = new Promise<number | null>((resolve) => child.once("close", resolve));
+			try {
+				const deadline = Date.now() + 15000; while (!existsSync(marker) && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+				expect(existsSync(marker)).toBe(true); expect(stderr).toContain("Inspecting cleanup preview"); expect(stdout).toBe("");
+			} finally { writeFileSync(release, "continue\n"); expect(await closed).toBe(0); }
+			expect(existsSync(worktree)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps gone-upstream previews local, preserves cached live refs and retains JSON selection semantics", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const gone = startManagedSession(fixture).worktree;
+			commitSessionWork(gone); git(gone, "push", "-u", "origin", "HEAD");
+			const retained = startManagedSession(fixture, "retained").worktree;
+			commitSessionWork(retained); git(retained, "push", "-u", "origin", "HEAD");
+			mergeSessionAndDeleteRemoteBranch(fixture);
+			const bin = join(fixture.root, "bin"), marker = join(fixture.root, "unexpected-fetch"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then touch ${tomlString(marker)}; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const env = { PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" };
+			const args = ["finish", "--gone", "--keep-branch", "--dry-run"];
+			const stale = runCli(fixture.checkout, args, env);
+			expect(stale.status).toBe(0); expect(stale.stdout).toContain("Based on local refs; no fetch performed");
+			expect(stale.stdout).toContain("0 proposed removals"); expect(existsSync(marker)).toBe(false);
+			git(fixture.checkout, "fetch", "--prune", "origin");
+			const before = git(fixture.checkout, "for-each-ref", "--format=%(refname):%(objectname)");
+			const fresh = runCli(fixture.checkout, args, env), json = runCli(fixture.checkout, [...args, "--json"], env);
+			expect(fresh.status).toBe(0); expect(fresh.stdout).toContain("1 proposed removal"); expect(fresh.stdout).toContain("Upstream not gone");
+			expect(JSON.parse(json.stdout).plans.length).toBe(1); expect(JSON.parse(json.stdout).basedOnLocalRefs).toBe(true);
+			expect(existsSync(marker)).toBe(false); expect(git(fixture.checkout, "for-each-ref", "--format=%(refname):%(objectname)")).toBe(before);
+			expect(existsSync(gone)).toBe(true); expect(existsSync(retained)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps bulk proposal rows still and abandons old cursor geometry after resize", () => {
+		const renderer = resolve("modules/flake/agent-session/cleanup-preview.ts");
+		const script = `import { CleanupPreview } from ${tomlString(renderer)};
+let columns = 120, rows = 60;
+Object.defineProperties(process.stdout, {isTTY: {value: true}, columns: {get: () => columns}, rows: {get: () => rows}});
+const write = process.stdout.write.bind(process.stdout), chunks = [];
+process.stdout.write = text => {chunks.push(String(text)); return true;};
+const slugs = Array.from({length: 35}, (_, i) => 'preview' + i);
+const view = new CleanupPreview(slugs, {color: 'never'}, 'fixture');
+view.start(); const before = chunks.at(-1);
+view.checking(slugs[0]); view.complete({slug: slugs[0], remove: true, reason: 'Clean; branches preserved', details: []}); const during = chunks.at(-1);
+columns = 36; rows = 8; const start = chunks.length;
+view.checking(slugs[1]); const resized = chunks.slice(start).join('');
+for (const slug of slugs) {view.checking(slug); view.complete({slug, remove: true, reason: 'Clean; branches preserved', details: []});}
+const final = view.finish(); write(JSON.stringify({before, during, resized, after: chunks.slice(start).join(''), final}));`;
+		const result = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8", env: { ...process.env, TERM: "xterm-256color" } });
+		expect(result.status).toBe(0); const value = JSON.parse(result.stdout);
+		expect(value.before.split("\n").findIndex((line) => line.startsWith("preview20"))).toBe(value.during.split("\n").findIndex((line) => line.startsWith("preview20")));
+		expect(/\u001b\[\d+A/.test(value.resized)).toBe(false);
+		expect([...value.after.matchAll(/\u001b\[(\d+)A/g)].every((match) => Number(match[1]) <= 6)).toBe(true);
+		for (const slug of Array.from({length: 35}, (_, i) => `preview${i}`)) expect(value.final).toContain(slug);
+		expect(value.final).toContain("Nothing changed"); expect(value.final.includes("…")).toBe(false);
+	});
+
 	it("reviews only gone-upstream resources interactively after the existing fetch/filter", () => {
 		const fixture = createRepositoryFixture();
 		try {
@@ -8632,6 +8745,83 @@ describe("agent-session finish", () => {
 			expect(result.stderr.includes("COMPLETED")).toBe(false);
 		});
 
+		it("keeps bulk preview JSON/events unchanged while exposing colour and blocker details in human verbose output", () => {
+			const json = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--dry-run", "--json", "--color=always", "--verbose"]);
+			expect(json.status).toBe(0); expect((json.stdout + json.stderr).includes("\u001b")).toBe(false);
+			expect(Object.keys(JSON.parse(json.stdout)).sort().join(",")).toBe("basedOnLocalRefs,command,dryRun,mode,plans,skipped,version");
+			expect(JSON.parse(json.stdout).plans.length).toBe(3);
+			expect(json.stderr.trim().split("\n").map((line) => JSON.parse(line)).every((event) => event.type === "progress" && event.command === "finish")).toBe(true);
+			const human = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--dry-run", "--color=always", "--verbose"], { NO_COLOR: "1" });
+			expect(human.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(human.stdout)).toBe(true);
+			expect(/\u001b\[\d+A/.test(human.stdout)).toBe(false); expect(human.stdout).toContain(first);
+			expect(human.stdout).toContain("Uncommitted changes"); expect(human.stderr).toContain("STARTED inspect-bulk-finish");
+		});
+
+		it("redacts human verbose bulk preview errors without altering JSON failure evidence", () => {
+			const preload = join(fixture.root, "preview-error.mjs");
+			writeFileSync(preload, `import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';
+const original = fs.readFileSync; fs.readFileSync = (file, ...args) => { if (String(file).endsWith('/agent-session/sessions/first.json')) throw new Error('Native evidence https://demo:secret@example.invalid/path'); return original(file, ...args); }; syncBuiltinESMExports();`);
+			const env = { NODE_OPTIONS: `--import=${preload}` }, args = ["finish", "--all", "--keep-branch", "--dry-run", "--verbose", "--color=never"];
+			const human = runCli(fixture.checkout, args, env), json = runCli(fixture.checkout, [...args, "--json"], env);
+			expect(human.status).toBe(0); expect(json.status).toBe(0);
+			expect((human.stdout + human.stderr).includes("secret")).toBe(false);
+			expect(human.stdout).toContain("Native evidence https://[redacted]@example.invalid/path");
+			expect(JSON.parse(json.stdout).skipped[0]).toContain("https://demo:secret@example.invalid/path");
+			expect(existsSync(first)).toBe(true);
+		});
+
+		it("keeps artifact-bearing bulk proposals preserved unless force is explicitly previewed", () => {
+			const config = JSON.parse(readFileSync(runtimeConfigPath(fixture.checkout), "utf8"));
+			config.disposable_paths = [".cache"]; writeFileSync(runtimeConfigPath(fixture.checkout), JSON.stringify(config));
+			writeFileSync(join(fixture.checkout, ".git/info/exclude"), ".cache/\n");
+			mkdirSync(join(first, ".cache")); const artifact = join(first, ".cache", "tasks.sqlite"); writeFileSync(artifact, "preserve database");
+			const normal = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--dry-run"]);
+			expect(normal.status).toBe(0); expect(normal.stdout).toContain("Artifact approval required");
+			expect(normal.stdout).toContain("1 proposed removal");
+			const forced = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--force", "--dry-run"]);
+			expect(forced.status).toBe(0); expect(forced.stdout).toContain("Force proposal discards"); expect(forced.stdout).toContain("3 proposed removals");
+			expect(readFileSync(artifact, "utf8")).toBe("preserve database");
+			for (const target of [first, second, dirty]) expect(existsSync(target)).toBe(true);
+		});
+
+		it("shows bulk preview activity live on a narrow terminal without asking for approval", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch", "--dry-run", "--color=never"], "", "", { TERM: "xterm-256color", TEST_PTY_ROWS: "10", TEST_PTY_COLUMNS: "36" });
+			expect(result.status).toBe(0); expect(result.answered).toBe(false);
+			for (const word of ["Checking", "Would remove", "Would preserve", "Nothing changed", "first", "second", "dirty"]) expect(result.output).toContain(word);
+			expect([...result.output.matchAll(/\u001b\[(\d+)A/g)].every((match) => Number(match[1]) <= 8)).toBe(true);
+			for (const target of [first, second, dirty]) expect(existsSync(target)).toBe(true);
+		});
+
+		it("states activity blockers in bulk preview without reconciling operations or granting force", () => {
+			const record = sessionMetadataPath(fixture.checkout, "first"), metadata = JSON.parse(readFileSync(record, "utf8"));
+			metadata.activeOperations = [{ id: "preview-activity", pid: process.pid, hostname: hostname(), startedAt: metadata.createdAt }];
+			writeFileSync(record, JSON.stringify(metadata)); const before = readFileSync(record, "utf8");
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--dry-run"]);
+			expect(result.status).toBe(0); expect(result.stdout).toContain("Activity blocks cleanup"); expect(result.stdout).toContain("Would preserve");
+			expect(result.stdout).toContain("1 proposed removal"); expect(result.stdout.includes("Force proposal")).toBe(false);
+			expect(readFileSync(record, "utf8")).toBe(before); expect(existsSync(first)).toBe(true);
+		});
+
+		it("preserves conflicting bulk preview bindings even with an explicit force proposal", () => {
+			git(first, "switch", "-c", "feat/borrowed-preview");
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--force", "--dry-run"]);
+			expect(result.status).toBe(0); expect(result.stdout).toContain("Would preserve"); expect(result.stdout).toContain("Binding needs inspection");
+			expect(existsSync(first)).toBe(true); expect(git(first, "branch", "--show-current")).toBe("feat/borrowed-preview");
+		});
+
+		it("shows repository-wide cleanup preview as a read-only proposal table without phase logs", () => {
+			const records = ["first", "second", "dirty"].map((slug) => [slug, readFileSync(sessionMetadataPath(fixture.checkout, slug), "utf8")]);
+			const refs = git(fixture.checkout, "for-each-ref", "--format=%(refname):%(objectname)");
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--dry-run"], { NO_COLOR: "1" });
+			expect(result.status).toBe(0);
+			for (const target of [first, second, dirty]) expect(existsSync(target)).toBe(true);
+			for (const [slug, content] of records) expect(readFileSync(sessionMetadataPath(fixture.checkout, slug), "utf8")).toBe(content);
+			expect(git(fixture.checkout, "for-each-ref", "--format=%(refname):%(objectname)")).toBe(refs);
+			for (const word of ["SESSION", "PLAN", "first", "second", "dirty", "Would remove", "Would preserve", "Uncommitted changes", "Nothing changed"]) expect(result.stdout).toContain(word);
+			expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+			expect(result.stderr.includes("STARTED")).toBe(false); expect(result.stderr.includes("COMPLETED")).toBe(false);
+		});
+
 		it("previews bulk cleanup and protects the invoking worktree without mutation", () => {
 			const preview = runCli(fixture.checkout, [
 				"finish",
@@ -8649,11 +8839,12 @@ describe("agent-session finish", () => {
 
 			const protectedPreview = runCli(first, ["finish", "--all", "--dry-run"]);
 			expect(protectedPreview.status).toBe(0);
-			expect(protectedPreview.stderr).toContain("SKIPPED inspect-finish:first");
+			expect(protectedPreview.stderr.includes("SKIPPED")).toBe(false);
 			expect(protectedPreview.stderr.includes("FAILED")).toBe(false);
-			expect(protectedPreview.stdout).toContain(
-				"Cannot remove the worktree containing the current shell",
-			);
+			expect(protectedPreview.stdout).toContain("Current worktree");
+			expect(protectedPreview.stdout).toContain("Would preserve");
+			const details = runCli(first, ["finish", "--all", "--dry-run", "--verbose", "--color=never"]);
+			expect(details.stdout).toContain("Cannot remove the worktree containing the current shell");
 		});
 
 		it("finishes all safe sessions while skipping dirty work", () => {
