@@ -39,10 +39,27 @@ function M.setup()
       hs.alert.show("Open Fellow before starting a botless recording", 2)
       return
     end
+    -- Capture before activating Fellow; the asynchronous lookup must not
+    -- mistake Fellow for the app the user was working in.
+    local previousApp = hs.application.frontmostApplication()
+    if previousApp and previousApp:pid() == app:pid() then previousApp = nil end
     pending = true
     local function finish(message)
       pending = false
       hs.alert.show(message, 2)
+    end
+    local function restoreFocus()
+      local ok, restored = pcall(function()
+        local current = hs.application.frontmostApplication()
+        -- During the delay the user may have deliberately switched elsewhere.
+        if not current or current:pid() ~= app:pid() then return true end
+        return previousApp:activate()
+      end)
+      if not ok or not restored then
+        finish("Fellow: botless recording requested; could not restore previous app")
+      else
+        finish("Fellow: botless recording requested")
+      end
     end
     app:activate(true)
     local root = hs.axuielement.applicationElement(app)
@@ -64,7 +81,14 @@ function M.setup()
           -- Do not retry AXPress: an error can leave its effects uncertain.
           local pressed = item:performAction("AXPress")
           if pressed then
-            finish("Fellow: botless recording requested")
+            if previousApp then
+              -- Fellow can activate itself again as recording starts. Give
+              -- that late focus change time to settle before returning once.
+              -- AXPress acceptance is not proof that audio is flowing.
+              hs.timer.doAfter(2, restoreFocus)
+            else
+              finish("Fellow: botless recording requested")
+            end
           else
             finish("Could not confirm the recording request. Check Fellow.")
           end
