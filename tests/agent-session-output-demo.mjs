@@ -6,9 +6,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const [mode = "create", ...flags] = process.argv.slice(2);
-const branchFlags = ["preview", "finish", "preferences", "branches", "tree-review", "tree-review-failure"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
-if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags].includes(flag))) {
-  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches|batch|batch-failure|tree|tree-failure|tree-review|tree-review-failure] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
+const branchFlags = ["preview", "finish", "preferences", "branches", "tree-review", "tree-review-failure", "history", "history-failure"].includes(mode) ? ["--keep-branch", "--delete-branches"] : [];
+if (!["create", "start", "failure", "busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure"].includes(mode) || flags.some((flag) => !["--verbose", "--color=auto", "--color=always", "--color=never", ...branchFlags].includes(flag))) {
+  throw new Error("Use: node tests/agent-session-output-demo.mjs [create|start|failure|busy|preview|finish|partial|preferences|branches|batch|batch-failure|tree|tree-failure|tree-review|tree-review-failure|history|history-failure] [--verbose] [--color=auto|always|never]; cleanup demos also accept explicit branch flags");
 }
 const root = mkdtempSync(join(tmpdir(), "as-output-demo-"));
 const checkout = join(root, "checkout");
@@ -38,11 +38,11 @@ try {
   writeFileSync(config, JSON.stringify({
     version: 1, worktree_root: ".worktrees", local_links: [], disposable_paths: [".cache"], generated_links: {},
     agent_command: [process.execPath, "-e", "console.log('Agent stdout remains visible'); console.error('Agent stderr remains visible');"],
-    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
+    prepare_command: ["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure"].includes(mode) ? [] : [process.execPath, "-e", `console.log('Demo preparation stdout'); console.error('Demo preparation stderr'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1200); ${mode === "failure" ? "process.exit(7);" : ""}`],
   }));
   const cli = resolve(dirname(fileURLToPath(import.meta.url)), "../modules/flake/agent-session/cli.ts");
   const options = { cwd: checkout, env: { ...env, AGENT_SESSION_CONFIG: config } };
-  if (["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode)) {
+  if (["busy", "preview", "finish", "partial", "preferences", "branches", "batch", "batch-failure", "tree", "tree-failure", "tree-review", "tree-review-failure", "history", "history-failure"].includes(mode)) {
     const prepared = spawnSync(process.execPath, [cli, "demo", "create", "--json"], { ...options, encoding: "utf8" });
     if (prepared.status !== 0) throw new Error(prepared.stderr || "Cannot prepare demo fixture");
     const worktree = JSON.parse(prepared.stdout).session.worktreePath;
@@ -53,7 +53,27 @@ try {
       options.env = { ...options.env, XDG_CONFIG_HOME: personal };
       process.stdout.write(mode === "branches" ? "Temporary personal preference: branches=delete. Eligible deletion still requires your approval.\n\n" : "Temporary personal preference: color=always. Flags and NO_COLOR still apply.\n\n");
     }
-    if (["tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode)) {
+    if (mode === "history" || mode === "history-failure") {
+      git(worktree, "switch", "-c", "demo/one"); git(worktree, "switch", "-c", "demo/two");
+      mkdirSync(join(worktree, ".cache"));
+      writeFileSync(join(worktree, ".cache", "tasks.sqlite"), "Disposable task database\n");
+      const created = spawnSync(process.execPath, [cli, "retained", "create", "--json"], { ...options, encoding: "utf8" });
+      if (created.status !== 0) throw new Error(created.stderr || "Cannot prepare retained fixture");
+      const retained = JSON.parse(created.stdout).session;
+      const bin = join(checkout, ".git", "demo-bin"); mkdirSync(bin);
+      const executable = spawnSync("sh", ["-c", "command -v git"], { env, encoding: "utf8" }).stdout.trim();
+      const failed = mode === "history-failure";
+      const fail = failed ? 'rm "$4/README.md"; printf "Demo history stdout evidence\\n"; printf "Demo history native removal failed\\n" >&2; exit 1;' : "";
+      writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then ${JSON.stringify(process.execPath)} -e 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 900)'; ${fail}fi\nexec ${JSON.stringify(executable)} "$@"\n`, { mode: 0o755 });
+      process.stdout.write("Review the disposable worktree and historical local refs below. Checkout history is not ownership; the retained worktree is outside this selection.\n\n");
+      const result = spawnSync(process.execPath, [cli, "demo", "finish", "--branches", ...flags], { ...options, env: { ...options.env, PATH: `${bin}:${env.PATH}` }, stdio: "inherit" });
+      if (result.error) throw result.error;
+      if (result.status !== (failed ? 1 : 0) || existsSync(worktree) !== failed || !existsSync(retained.worktreePath)) throw new Error("Unexpected historical fixture outcome");
+      const preserve = failed || !flags.includes("--delete-branches") || flags.includes("--keep-branch");
+      for (const name of ["agent/demo", "demo/one", "demo/two"]) if (git(checkout, "branch", "--list", name).includes(name) !== preserve) throw new Error("Unexpected historical ref disposition");
+      if (!git(checkout, "branch", "--list", "agent/retained").includes("agent/retained")) throw new Error("Unrelated fixture ref changed");
+      process.exitCode = result.status ?? 1;
+    } else if (["tree", "tree-failure", "tree-review", "tree-review-failure"].includes(mode)) {
       const interactive = mode.startsWith("tree-review");
       const create = (cwd, slug) => {
         const result = spawnSync(process.execPath, [cli, slug, "create", "--json"], { ...options, cwd, encoding: "utf8" });

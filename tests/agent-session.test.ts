@@ -1675,6 +1675,74 @@ describe("worktree branch history finish", () => {
 		return { ...fixture, session, environment, args, terminal, preview };
 	}
 
+	it("reuses one historical asset table after approval without implying branch ownership", () => {
+		const fixture = setup();
+		try {
+			const tip = git(fixture.checkout, "rev-parse", "feat/two").slice(0, 12);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, ...fixture.args, "--delete-branches"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" }, fixture.session.worktreePath);
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]"));
+			for (const word of ["Reviewed branch", "history does not establish ownership", "Would delete", `feat/two @ ${tip}`]) expect(plan).toContain(word);
+			const screen: string[][] = []; let row = 0, column = 0;
+			for (const token of result.output.match(/\u001b\[[0-9;]*[A-Za-z]|[\s\S]/g) ?? []) {
+				if (token.startsWith("\u001b[")) {
+					if (token.endsWith("A")) row = Math.max(0, row - Number(token.slice(2, -1)));
+					else if (token.endsWith("K")) screen[row] = [];
+				} else if (token === "\r") column = 0;
+				else if (token === "\n") row++;
+				else { (screen[row] ??= [])[column++] = token; }
+			}
+			const visible = screen.map((line) => line.join("")).join("\n");
+			expect(visible.split("ASSET").length).toBe(2);
+			expect(visible.includes("Would delete")).toBe(false); expect(visible.includes("[y/N]")).toBe(false);
+			expect(visible).toContain("3 branches deleted");
+			for (const branch of ["agent/human", "feat/one", "feat/two"]) expect(git(fixture.checkout, "branch", "--list", branch)).toBe("");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps historical native partial failure uncertain, retains original output and preserves every branch", () => {
+		const fixture = setup();
+		try {
+			const metadata = readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8");
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(fixture.root, "bin/git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ]; then rm "$4/README.md"; printf 'history stdout evidence\\n'; printf 'history native removal failed\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = fixture.terminal(true, "yes\n");
+			expect(result.status).toBe(1);
+			for (const word of ["Uncertain", "0 worktrees removed", "history stdout evidence", "history native removal failed"]) expect(result.output).toContain(word);
+			expect(existsSync(fixture.session.worktreePath)).toBe(true); expect(existsSync(join(fixture.session.worktreePath, "README.md"))).toBe(false);
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8")).toBe(metadata);
+			for (const branch of ["agent/human", "feat/one", "feat/two"]) expect(git(fixture.checkout, "branch", "--list", branch)).toContain(branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("supports historical interactive colour and verbose flags while leaving preview JSON and eligibility read-only", () => {
+		const fixture = setup();
+		try {
+			const metadata = readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8");
+			const json = fixture.preview(); expect(json.status).toBe(0);
+			expect(JSON.parse(json.stdout).historyComplete).toBe(false);
+			expect(Object.keys(JSON.parse(json.stdout)).sort().join(",")).toBe("branches,command,dryRun,executionSupported,historyComplete,inspection,limitation,mode,remoteAssetsModified,slug,version,worktreePath");
+			expect(readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8")).toBe(metadata);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, ...fixture.args, "--keep-branch", "--verbose", "--color=always"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "240" }, fixture.session.worktreePath);
+			expect(result.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(result.output)).toBe(true);
+			expect(result.output).toContain(git(fixture.checkout, "rev-parse", "feat/two"));
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("renders reviewed historical branch cleanup with an asset plan and durable outcomes", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, ...fixture.args, "--keep-branch"], "yes\n", "", { ...fixture.environment, TERM: "xterm-256color", NO_COLOR: "1", TEST_PTY_ROWS: "80", TEST_PTY_COLUMNS: "200" }, fixture.session.worktreePath);
+			expect(result.status).toBe(0); expect(result.output.split("[y/N]").length).toBe(2);
+			expect(existsSync(fixture.session.worktreePath)).toBe(false);
+			for (const branch of ["agent/human", "feat/one", "feat/two"]) expect(git(fixture.checkout, "branch", "--list", branch)).toContain(branch);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]"));
+			for (const word of ["ASSET", "ACTION", "Would remove", "Would preserve", "history does not establish ownership"]) expect(plan).toContain(word);
+			for (const word of ["Removed", "Preserved", "1 worktree removed"]) expect(result.output).toContain(word);
+			expect(result.output.includes("STARTED")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
 	it("previews retained checkout history for a legacy branch conflict without migration", () => {
 		const fixture = setup();
 		try {
@@ -1701,7 +1769,7 @@ describe("worktree branch history finish", () => {
 				expect(outside.status).toBe(0);
 				const result = fixture.terminal(deleteBranches, "y\n");
 				if (result.status !== 0) throw new Error(result.output);
-				expect(result.output).toContain("Final removal plan");
+				expect(result.output).toContain("Cleanup plan");
 				expect(result.output).toContain("history does not establish ownership");
 				expect(existsSync(fixture.session.worktreePath)).toBe(false);
 				for (const branch of ["agent/human", "feat/one", "feat/two"]) expect(git(fixture.checkout, "branch", "--list", branch) === "").toBe(deleteBranches);
@@ -1738,8 +1806,9 @@ describe("worktree branch history finish", () => {
 			git(fixture.checkout, "branch", "-d", "feat/one");
 			const result = fixture.terminal(true, "y\n");
 			if (result.status !== 0) throw new Error(result.output);
-			expect(result.output).toContain("shared branch preserved");
-			expect(result.output).toContain("local branch absent");
+			const text = result.output.replace(/\u001b\[[0-9;]*m/g, "");
+			expect(text).toMatch(/shared branch\s+preserved/);
+			expect(text).toMatch(/local branch\s+absent/);
 			expect(git(fixture.checkout, "branch", "--list", "feat/two")).toContain("feat/two");
 			expect(git(fixture.checkout, "branch", "--list", "untouched")).toContain("untouched");
 			expect(git(fixture.checkout, "branch", "--list", "agent/human")).toBe("");
@@ -1763,14 +1832,13 @@ describe("worktree branch history finish", () => {
 			const result = runFixtureOnTerminal(fixture, ["node", cliScript, ...fixture.args, "--keep-branch"], "y\n", "", fixture.environment);
 			if (result.status !== 0) throw new Error(result.output);
 			expect(result.output.includes("Also delete")).toBe(false);
-			expect(result.output).toContain("Scanning");
-			expect(result.output).toContain("\r\x1b[2KWorktree:");
-			expect(result.output).toContain("\r\x1b[2Khuman: finished");
-			const [preview, final] = result.output.split("Final removal plan:");
-			expect(preview).toContain("  branch: agent/human @");
-			expect(preview.includes("  preserve: agent/human")).toBe(false);
-			expect(final).toContain("  preserve: agent/human @");
-			expect(final).toContain("deletion not requested");
+			expect(result.output.includes("STARTED")).toBe(false);
+			const plan = result.output.slice(0, result.output.indexOf("[y/N]")).replace(/\u001b\[[0-9;]*m/g, "");
+			expect(plan).toContain("Reviewed branch");
+			expect(plan).toContain("Would preserve");
+			expect(plan).toContain("agent/human @");
+			expect(plan).toMatch(/deletion not\s+requested/);
+			expect(result.output).toContain("1 artifact removed");
 			expect(result.output).toContain("entire subtree");
 			expect(existsSync(fixture.session.worktreePath)).toBe(false);
 			expect(git(fixture.checkout, "branch", "--list", "feat/two")).toContain("feat/two");

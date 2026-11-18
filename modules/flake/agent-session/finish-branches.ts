@@ -1,18 +1,20 @@
 import { createHash } from "node:crypto";
 import { assertPrimaryCheckout, ensureClean, git, branchCheckedOutElsewhere, deleteBranchRef, type BranchRef } from "./git.ts";
-import { inspectCandidate, completeRemoval, rootKey } from "./batch.ts";
-import { readMetadata, readMetadataInventory, withOperationLock } from "./sessions.ts";
+import { inspectCandidate, completeRemoval, rootKey, type Outcome } from "./batch.ts";
+import { readMetadata, readMetadataInventory, withOperationLock, metadataPath } from "./sessions.ts";
 import { sessionBaseBranch } from "./inspection.ts";
 import { artifactSummary } from "./artifacts.ts";
-import { CliError, confirm, progressReporter, run, writeCommandResult } from "./runtime.ts";
+import { CliError, progressReporter, run, writeCommandResult, withInspection, type InspectionProgress } from "./runtime.ts";
+import { FinishOutput } from "./finish-output.ts";
+import type { PresentationOptions, ProgressReporter } from "./types.ts";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const limitation = "Retained checkout history does not establish ownership and may be incomplete after reflog expiry. Review the listed current local refs; no descendants or remote refs are selected.";
 
-function inspectHistory(root: string, invocationRoot: string, slug: string, json: boolean) {
+function inspectHistory(root: string, invocationRoot: string, slug: string, json: boolean, reporter?: ProgressReporter) {
 	assertPrimaryCheckout(root);
 	const metadata = readMetadata(root, slug);
-	const report = progressReporter("finish --branches", json);
+	const report = reporter ?? progressReporter("finish --branches", json);
 	let candidate: ReturnType<typeof inspectCandidate>;
 	try {
 		candidate = inspectCandidate(root, invocationRoot, slug,
@@ -74,8 +76,10 @@ function assertNoOtherClaim(root: string, branch: BranchRef): void {
 		record.branch === branch.name || record.branches?.some((entry) => entry.name === branch.name))) throw new CliError(`Another session now references ${branch.name}; branch preserved.`);
 }
 
-export function finishWorktreeBranches(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean): number {
+export function finishWorktreeBranches(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, options: PresentationOptions = {}): number {
 	if (!dryRun && !process.stdin.isTTY) throw new CliError("finish --branches requires a terminal for explicit approval; use --dry-run to inspect without removal.");
+	if (!dryRun) return withInspection("Inspecting reviewed branch cleanup", false, options,
+		(progress) => applyHistory(root, invocationRoot, slug, keepBranch, options, progress));
 	const plan = inspectHistory(root, invocationRoot, slug, json);
 	if (dryRun) {
 		writeCommandResult({ version: 1, command: "finish", mode: "worktree-branches", dryRun: true, slug,
@@ -84,34 +88,62 @@ export function finishWorktreeBranches(root: string, invocationRoot: string, slu
 			`${describe(plan, !keepBranch)}No resources changed.\n`);
 		return 0;
 	}
-	process.stderr.write(describe(plan));
+	return 0;
+}
+
+function applyHistory(root: string, invocationRoot: string, slug: string, keepBranch: boolean, options: PresentationOptions, progress: InspectionProgress): number {
+	if (options.verbose) progress.flush();
+	const report: ProgressReporter = options.verbose ? progressReporter("finish --branches", false) : () => {};
+	const plan = inspectHistory(root, invocationRoot, slug, false, report);
 	const approvedTarget = plan.candidate.snapshot;
-	if (!approvedTarget) throw new CliError("Cleanup blocked. No resources changed.");
+	if (!approvedTarget) { progress.flush(); process.stderr.write(describe(plan)); throw new CliError("Cleanup blocked. No resources changed."); }
 	const deleteEligible = !keepBranch && plan.branches.some((branch) => !branch.reason);
-	process.stderr.write(`Final removal plan:\n${describe(plan, deleteEligible)}All remote assets and other worktrees will be preserved.\n`);
-	if (!confirm("Remove these local session assets? [y/N]")) throw new CliError("Cleanup cancelled. No resources changed.");
-	return withOperationLock(root, "finish --branches", () => {
-		ensureClean(root, true);
-		const current = inspectHistory(root, invocationRoot, slug, false);
-		if (!current.candidate.snapshot || current.fingerprint !== plan.fingerprint) throw new CliError("Worktree, branch history or branch scope changed; review a fresh plan. No resources changed.");
-		const removed = run("git", ["worktree", "remove", "--", plan.metadata.worktreePath], root);
-		if (removed.status !== 0) throw new CliError(`Native worktree removal failed; all branches preserved. ${removed.stderr}`);
-		const completed = completeRemoval(root, approvedTarget, false);
-		process.stdout.write(`${slug}: ${completed.outcome} (${completed.reason})\n`);
-		if (completed.outcome !== "finished") throw new CliError(`Worktree removal could not be fully confirmed; all branches preserved. ${completed.problem ?? completed.reason}`);
-		if (deleteEligible) {
-			for (const branch of plan.branches.filter((branch) => !branch.reason)) {
-				try {
-					if (rootKey(root) !== plan.rootIdentity) throw new CliError("Configuration changed; branch preserved.");
-					assertNoOtherClaim(root, branch);
-					deleteBranchRef(root, branch);
-					process.stdout.write(`${branch.name}: deleted\n`);
-				} catch (error) {
-					throw new CliError(`Partial cleanup: worktree removed, ${branch.name} not confirmed deleted; later branches preserved. ${String(error)}`);
+	const output = new FinishOutput(options);
+	progress.flush();
+	output.planHistory({ slug, worktreePath: plan.metadata.worktreePath, metadataPath: metadataPath(root, slug), ignoredData: plan.candidate.ignoredData },
+		plan.branches.map((branch) => ({ name: branch.name, preserve: !deleteEligible || Boolean(branch.reason),
+			detail: `${branch.name}${branch.revision ? ` @ ${options.verbose ? branch.revision : branch.revision.slice(0, 12)}` : ""} (${branch.reason ?? (deleteEligible ? `merged into ${branch.baseRef} @ ${options.verbose ? branch.baseRevision : branch.baseRevision.slice(0, 12)}` : "deletion not requested")}; ${branch.sources.join(", ")})` })), limitation);
+	if (!output.confirm()) throw new CliError("Cleanup cancelled. No resources changed.");
+	let outcome: Outcome | undefined;
+	const branches: { name: string; outcome: "deleted" | "refused"; problem?: string }[] = [];
+	output.begin();
+	try {
+		withOperationLock(root, "finish --branches", () => {
+			ensureClean(root, true);
+			const current = inspectHistory(root, invocationRoot, slug, false, report);
+			if (!current.candidate.snapshot || current.fingerprint !== plan.fingerprint) throw new CliError("Worktree, branch history or branch scope changed; review a fresh plan. No resources changed.");
+			output.starting("worktree", "Removing", slug);
+			const removed = run("git", ["worktree", "remove", "--", plan.metadata.worktreePath], root);
+			if (removed.status !== 0) {
+				outcome = { slug, worktreePath: plan.metadata.worktreePath, outcome: "uncertain", reason: "native-removal-unconfirmed" };
+				throw new CliError(`Native worktree removal failed; all branches preserved. ${[removed.stdout, removed.stderr, removed.errorCode].filter(Boolean).join("\n")}`);
+			}
+			outcome = completeRemoval(root, approvedTarget, false);
+			output.treeResource(outcome);
+			if (outcome.outcome !== "finished") throw new CliError(`Worktree removal could not be fully confirmed; all branches preserved. ${outcome.problem ?? outcome.reason}`);
+			if (deleteEligible) {
+				for (const branch of plan.branches.filter((branch) => !branch.reason)) {
+					try {
+						if (rootKey(root) !== plan.rootIdentity) throw new CliError("Configuration changed; branch preserved.");
+						assertNoOtherClaim(root, branch);
+						output.starting(`branch:${branch.name}`, "Deleting", slug);
+						deleteBranchRef(root, branch);
+						branches.push({ name: branch.name, outcome: "deleted" });
+						output.completed(`branch:${branch.name}`, "Deleted", slug);
+					} catch (error) {
+						const failure = new CliError(`Partial cleanup: worktree removed, ${branch.name} not confirmed deleted; later branches preserved. ${String(error)}`);
+						branches.push({ name: branch.name, outcome: "refused", problem: failure.message });
+						throw failure;
+					}
 				}
 			}
-		}
-		process.stdout.write("Worktree cleanup complete. Remote assets and other worktrees were not modified.\n");
-		return 0;
-	});
+		});
+	} catch (error) {
+		if (!outcome) outcome = { slug, worktreePath: plan.metadata.worktreePath, outcome: "refused", reason: "revalidation-failed", problem: error instanceof Error ? error.message : String(error) };
+		else if (outcome.outcome !== "finished") outcome.problem = error instanceof Error ? error.message : String(error);
+		process.stdout.write(output.finishTree([outcome], branches));
+		return error instanceof CliError ? error.exitCode : 1;
+	}
+	process.stdout.write(output.finishTree([outcome!], branches));
+	return 0;
 }
