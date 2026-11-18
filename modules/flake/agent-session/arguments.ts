@@ -319,8 +319,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 			throw argumentError(`Unexpected argument '${argument}' for 'finish'.`);
 		}
 	}
-	const scopedApply = Boolean(slug && (all || branches) && !dryRun);
-	if ((all || branches || gone) && !scopedApply && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session finish selector or scoped recursive/history apply.");
+	const presentedApply = !dryRun && Boolean(slug ? all || branches : yes && (all || gone));
+	if ((all || branches || gone) && !presentedApply && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session selector, scoped recursive/history apply, or explicit --yes bulk apply.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -484,6 +484,7 @@ function usage(): string {
 		"  agent-session list --inspect [--json] [--refresh] [--color=auto|always|never] [--verbose] (live Git/binding table)",
 		"  agent-session list --inspect --worktree <path> [--json] [--color=auto|always|never] [--verbose] (read-only exact inspection)",
 		"  agent-session finish (--all | --gone) [--keep-branch|--delete-branches] [--force] [--yes] [--dry-run [--json]]",
+		"  agent-session finish (--all | --gone) (--keep-branch | --delete-branches) --yes [--force] [--color=auto|always|never] [--verbose] (explicit --yes bulk state output; legacy exit behaviour)",
 		"  agent-session completion <bash|zsh|fish>",
 		"",
 		"Personal colour and interactive branch defaults: $XDG_CONFIG_HOME/agent-session/config.json (fallback ~/.config/agent-session/config.json).",

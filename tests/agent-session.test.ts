@@ -32,7 +32,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { hostname, tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 const cliScript = resolve("modules/flake/agent-session/cli.ts");
 
@@ -8080,6 +8080,68 @@ describe("agent-session status, launch, and resume", () => {
 	});
 });
 
+describe("state-first bulk output", () => {
+	it("reports an empty explicit bulk selection with plain zero counts", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			writeConfig(fixture.checkout, "true");
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--yes", "--color=never"]);
+			expect(result.status).toBe(0); expect(result.stdout).toContain("No selected resources");
+			expect(result.stdout).toContain("0 removed"); expect(result.stdout.includes("Waiting")).toBe(false);
+			expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	for (const mode of ["--all", "--gone"]) {
+		it(`keeps unreadable bulk records visible without guessing a checkout path (${mode})`, () => {
+			const fixture = createRepositoryFixture();
+			try {
+				writeConfig(fixture.checkout, "true");
+				const record = sessionMetadataPath(fixture.checkout, "broken"); mkdirSync(dirname(record), { recursive: true });
+				writeFileSync(record, "{broken fixture");
+				const result = runCli(fixture.checkout, ["finish", mode, "--keep-branch", "--yes", "--verbose", "--color=never"]);
+				expect(result.status).toBe(0);
+				for (const word of ["broken", "Refused", "1 refused", "Unknown binding"]) expect(result.stdout).toContain(word);
+				expect(result.stdout.includes(join(fixture.worktrees, "broken"))).toBe(false);
+				expect(readFileSync(record, "utf8")).toBe("{broken fixture");
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		});
+	}
+
+	it("preserves native fetch failure evidence and refuses gone-upstream cleanup before eligibility is known", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const worktree = startManagedSession(fixture).worktree;
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then printf 'bulk fetch stdout evidence\\n'; printf 'bulk fetch native failure\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["finish", "--gone", "--keep-branch", "--yes", "--color=never"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(1);
+			for (const word of ["Could not fetch origin", "bulk fetch stdout evidence", "bulk fetch native failure"]) expect(result.stdout + result.stderr).toContain(word);
+			expect(existsSync(worktree)).toBe(true); expect(existsSync(sessionMetadataPath(fixture.checkout, "git-hygiene"))).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("fetches gone-upstream eligibility without leaking successful native chatter or selecting a live upstream", () => {
+		const fixture = createRepositoryFixture();
+		try {
+			const gone = startManagedSession(fixture).worktree;
+			commitSessionWork(gone); git(gone, "push", "-u", "origin", "HEAD");
+			const retained = startManagedSession(fixture, "retained").worktree;
+			commitSessionWork(retained); git(retained, "push", "-u", "origin", "HEAD");
+			mergeSessionAndDeleteRemoteBranch(fixture);
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then printf 'BULK_FETCH_NOISE\\n'; printf 'BULK_FETCH_NOISE\\n' >&2; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["finish", "--gone", "--keep-branch", "--yes", "--color=never"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(0); expect(result.stdout).toContain("git-hygiene"); expect(result.stdout).toContain("1 removed");
+			expect((result.stdout + result.stderr).includes("BULK_FETCH_NOISE")).toBe(false);
+			expect(existsSync(gone)).toBe(false); expect(existsSync(retained)).toBe(true);
+			expect(git(fixture.checkout, "branch", "--list", "agent/git-hygiene")).toContain("agent/git-hygiene");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+});
+
 describe("agent-session finish", () => {
 	it("refuses a stale finish preview receipt under the operation lock", () => {
 		const fixture = createRepositoryFixture();
@@ -8373,6 +8435,60 @@ describe("agent-session finish", () => {
 			rmSync(fixture.root, { recursive: true, force: true });
 		});
 
+		it("updates bulk resource outcomes on a short terminal without introducing a confirmation prompt", () => {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "finish", "--all", "--keep-branch", "--yes", "--color=never"], "", "", { TERM: "xterm-256color", TEST_PTY_ROWS: "10", TEST_PTY_COLUMNS: "36" });
+			expect(result.status).toBe(0); expect(result.answered).toBe(false);
+			for (const word of ["Checking", "Removing", "Removed", "Refused", "first", "second", "dirty"]) expect(result.output).toContain(word);
+			const moves = [...result.output.matchAll(/\u001b\[(\d+)A/g)].map((match) => Number(match[1]));
+			expect(moves.length > 0).toBe(true); expect(moves.every((height) => height <= 8)).toBe(true);
+			expect(existsSync(first)).toBe(false); expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+		});
+
+		it("keeps native bulk partial failures uncertain, continues other targets and retains original diagnostics", () => {
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = worktree ] && [ "$2" = remove ] && [ "$3" = ${tomlString(first)} ]; then rm "$3/README.md"; printf 'bulk stdout evidence\\n'; printf 'bulk native removal failed\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--yes"], { PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" });
+			expect(result.status).toBe(0);
+			for (const word of ["Removed", "Uncertain", "Refused", "1 removed", "1 uncertain", "1 refused"]) expect(result.stdout).toContain(word);
+			for (const word of ["bulk stdout evidence", "bulk native removal failed"]) expect(result.stderr).toContain(word);
+			expect(existsSync(first)).toBe(true); expect(existsSync(join(first, "README.md"))).toBe(false);
+			expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+			for (const slug of ["first", "second", "dirty"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+		});
+
+		it("reports confirmed bulk worktree removal separately from uncertain later branch cleanup", () => {
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = branch ] && [ "$2" = -D ] && [ "$3" = agent/first ]; then printf 'bulk branch deletion failed\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["finish", "--all", "--delete-branches", "--yes"], { PATH: `${bin}:${process.env.PATH}`, NO_COLOR: "1" });
+			expect(result.status).toBe(0); expect(result.stdout).toContain("Worktree removed; cleanup pending");
+			expect(result.stdout).toContain("1 branch deletion confirmed"); expect(result.stderr).toContain("bulk branch deletion failed");
+			expect(existsSync(first)).toBe(false); expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+			expect(git(fixture.checkout, "branch", "--list", "agent/first")).toContain("agent/first");
+			expect(git(fixture.checkout, "branch", "--list", "agent/second")).toBe("");
+			expect(existsSync(sessionMetadataPath(fixture.checkout, "first"))).toBe(true);
+		});
+
+		it("supports explicit bulk apply colour and verbose flags without styling pipes with cursor movement", () => {
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--yes", "--color=always", "--verbose"], { NO_COLOR: "1" });
+			expect(result.status).toBe(0); expect(/\u001b\[[0-9;]*m/.test(result.stdout)).toBe(true);
+			expect(/\u001b\[\d+A/.test(result.stdout)).toBe(false);
+			expect(result.stdout).toContain(first); expect(result.stdout).toContain("2 removed");
+		});
+
+		it("shows bulk apply outcomes as plain state rows and counts without changing legacy approval or exit behaviour", () => {
+			const result = runCli(fixture.checkout, ["finish", "--all", "--keep-branch", "--yes"], { NO_COLOR: "1" });
+			expect(result.status).toBe(0);
+			expect(existsSync(first)).toBe(false); expect(existsSync(second)).toBe(false); expect(existsSync(dirty)).toBe(true);
+			for (const slug of ["first", "second", "dirty"]) expect(git(fixture.checkout, "branch", "--list", `agent/${slug}`)).toContain(`agent/${slug}`);
+			for (const word of ["SESSION", "STATE", "Removed", "Refused", "2 removed", "1 refused"]) expect(result.stdout).toContain(word);
+			expect(result.stderr).toContain("Working tree is not clean");
+			expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+			expect(result.stderr.includes("STARTED")).toBe(false);
+			expect(result.stderr.includes("COMPLETED")).toBe(false);
+		});
+
 		it("previews bulk cleanup and protects the invoking worktree without mutation", () => {
 			const preview = runCli(fixture.checkout, [
 				"finish",
@@ -8401,8 +8517,8 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, ["finish", "--all", "--delete-branches", "--yes"]);
 
 			expect(result.status).toBe(0);
-			expect(result.stdout).toContain("Finished 2 session(s); skipped 1");
-			expect(result.stderr).toContain("dirty: Working tree is not clean");
+			expect(result.stdout).toContain("2 removed"); expect(result.stdout).toContain("1 refused");
+			expect(result.stderr).toContain("Working tree is not clean");
 			expect(existsSync(first)).toBe(false);
 			expect(existsSync(second)).toBe(false);
 			expect(existsSync(dirty)).toBe(true);
@@ -8415,7 +8531,7 @@ describe("agent-session finish", () => {
 				"--yes",
 			]);
 			expect(forced.status).toBe(0);
-			expect(forced.stdout).toContain("Finished 1 session(s); skipped 0");
+			expect(forced.stdout).toContain("1 removed"); expect(forced.stdout).toContain("0 refused");
 			expect(existsSync(dirty)).toBe(false);
 		});
 	});
@@ -8478,7 +8594,7 @@ describe("agent-session finish", () => {
 			const result = runCli(fixture.checkout, ["finish", "--gone", "--delete-branches", "--yes"]);
 
 			expect(result.status).toBe(0);
-			expect(result.stdout).toContain("Finished 1 session(s); skipped 0");
+			expect(result.stdout).toContain("1 removed"); expect(result.stdout).toContain("0 refused");
 			expect(existsSync(worktree)).toBe(false);
 			expect(existsSync(active)).toBe(true);
 		});

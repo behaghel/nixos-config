@@ -313,6 +313,13 @@ cleanup preserve all branches; explicit deletion requests there are unsupported.
 If the installed version lacks the required guard, offer an approved upgrade or
 operator handoff rather than substituting an unguarded/forced effect.
 
+Providers advertising explicit `--yes` bulk state output also support colour and
+verbose flags on that apply path. Branch disposition stays explicit and existing
+selection, force and artifact restrictions still apply. Legacy bulk exit zero
+does not prove complete cleanup: inspect each refused/uncertain outcome and known
+partial effect. Presentation supplies no retry or force authority. Interactive
+bulk confirmation and read-only bulk previews retain their verified interfaces.
+
 On versions supporting historical branch review, a human operator can run
 `as <task-slug> finish --branches`. It selects one recorded worktree and candidate
 local branches from its saved initial/current branch, recorded creations and

@@ -1,10 +1,14 @@
 import { stripVTControlCharacters } from "node:util";
 import { displayText, formatLines, formatStateTable, styleText } from "./runtime.ts";
-import type { Outcome, Target } from "./batch.ts";
+import type { Outcome } from "./batch.ts";
 import type { PresentationOptions } from "./types.ts";
 
+/** Display facts only; an unknown binding is not turned into a guessed path. */
+export interface CleanupTarget { slug: string; worktreePath?: string }
+export type CleanupOutcome = Omit<Outcome, "worktreePath"> & { worktreePath?: string };
+
 const reasons: Record<string, string> = {
-	"confirmed-removal": "Local assets removed", "reconciled-removal": "Removal reconciled",
+	"confirmed-removal": "Local assets removed", "bulk-refused": "Cleanup refused", "partial-cleanup": "Worktree removed; cleanup pending", "reconciled-removal": "Removal reconciled",
 	"confirmed-absence": "Confirmed absent", "changed-since-preview": "Changed since approval",
 	"native-removal-unconfirmed": "Native removal not confirmed", "operation-guard": "Operation guard refused cleanup",
 	"inspection-or-cleanup-failed": "Cleanup could not be confirmed", "residual-evidence-changed": "Residual evidence changed",
@@ -19,7 +23,7 @@ const reasons: Record<string, string> = {
 	"worktree-locked": "Worktree locked", submodules: "Submodules need review", "unresolved-evidence": "Inspection incomplete",
 };
 const states: Record<Outcome["outcome"], string> = { finished: "Removed", absent: "Already absent", refused: "Refused", uncertain: "Uncertain" };
-const outcomeState = (outcome: Outcome) => outcome.reason === "earlier-target-not-finished" ? "Not attempted" : states[outcome.outcome];
+const outcomeState = (outcome: CleanupOutcome) => outcome.reason === "earlier-target-not-finished" ? "Not attempted" : states[outcome.outcome];
 const pendingReasons = ["Not processed", "Revalidating approved scope", "Native worktree removal"];
 const reason = (value: string) => reasons[value] ?? displayText(value.replace(/-/g, " "));
 
@@ -31,8 +35,8 @@ function diagnostic(text: string): string {
 		.replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s]+/gi, "$1[redacted]");
 }
 
-export function writeCleanupDiagnostics(outcomes: Outcome[], options: PresentationOptions): void {
-	const evidence = new Map<string, Outcome[]>();
+export function writeCleanupDiagnostics(outcomes: CleanupOutcome[], options: PresentationOptions): void {
+	const evidence = new Map<string, CleanupOutcome[]>();
 	for (const outcome of outcomes) {
 		if (!outcome.problem || outcome.problem === outcome.reason) continue;
 		const affected = evidence.get(outcome.problem);
@@ -47,7 +51,7 @@ export function writeCleanupDiagnostics(outcomes: Outcome[], options: Presentati
 
 /** Displays already-approved targets; never selects, approves or removes them. */
 export class BatchOutput {
-	private readonly outcomes = new Map<string, Outcome>();
+	private readonly outcomes = new Map<string, CleanupOutcome>();
 	private current?: string;
 	private phase: "Checking" | "Removing" = "Checking";
 	private frame: string[] = [];
@@ -55,23 +59,26 @@ export class BatchOutput {
 	private terminalRows = 0;
 	private readonly nameWidth: number;
 	readonly live: boolean;
-	private readonly targets: readonly Target[];
+	private readonly targets: readonly CleanupTarget[];
+	private readonly disposition: () => string;
+	private readonly emptyLabel: string;
 	private readonly options: PresentationOptions;
 	private readonly heading: string;
 
-	constructor(targets: readonly Target[], options: PresentationOptions, heading = "Batch cleanup") {
+	constructor(targets: readonly CleanupTarget[], options: PresentationOptions, heading = "Batch cleanup", context: { disposition?: () => string; emptyLabel?: string } = {}) {
 		this.targets = targets; this.options = options; this.heading = heading;
+		this.disposition = context.disposition ?? (() => "branches preserved"); this.emptyLabel = context.emptyLabel ?? "No approved resources";
 		this.nameWidth = Math.max(7, ...targets.map((target) => [...displayText(target.slug)].length));
 		this.live = Boolean(process.stdout.isTTY && process.env.TERM !== "dumb" && !options.verbose);
 	}
 
-	private row(target: Target): string[] {
+	private row(target: CleanupTarget): string[] {
 		const outcome = this.outcomes.get(target.slug);
 		return [displayText(target.slug), outcome ? outcomeState(outcome) : this.current === target.slug ? this.phase : "Waiting",
 			outcome ? reason(outcome.reason) : this.current !== target.slug ? pendingReasons[0] : this.phase === "Checking" ? pendingReasons[1] : pendingReasons[2]];
 	}
 
-	private code(target: Target): number {
+	private code(target: CleanupTarget): number {
 		const outcome = this.outcomes.get(target.slug);
 		return outcome?.reason === "earlier-target-not-finished" ? 2 : outcome?.outcome === "finished" ? 32 : outcome?.outcome === "absent" ? 2
 			: outcome?.outcome === "refused" || outcome?.outcome === "uncertain" ? 31 : 36;
@@ -80,15 +87,15 @@ export class BatchOutput {
 	private counts(): string {
 		const pending = [...this.outcomes.values()].filter((entry) => entry.reason === "earlier-target-not-finished").length;
 		const count = (outcome: Outcome["outcome"]) => [...this.outcomes.values()].filter((entry) => entry.outcome === outcome && entry.reason !== "earlier-target-not-finished").length;
-		return `${count("finished")} removed · ${count("absent")} already absent · ${count("refused")} refused · ${count("uncertain")} uncertain${pending ? ` · ${pending} not attempted` : ""} · branches preserved`;
+		return `${count("finished")} removed · ${count("absent")} already absent · ${count("refused")} refused · ${count("uncertain")} uncertain${pending ? ` · ${pending} not attempted` : ""} · ${this.disposition()}`;
 	}
 
-	private render(final: boolean, targets: readonly Target[] = this.targets): string {
+	private render(final: boolean, targets: readonly CleanupTarget[] = this.targets): string {
 		const width = process.stdout.isTTY ? Math.max(1, (process.stdout.columns || 80) - 1) : Infinity;
 		const complete = this.targets.every((target) => ["finished", "absent"].includes(this.outcomes.get(target.slug)?.outcome ?? ""));
-		const title = final ? `${this.heading} ${complete ? "complete" : "incomplete"}` : `${this.heading} · branches preserved`;
+		const title = final ? `${this.heading} ${complete ? "complete" : "incomplete"}` : `${this.heading} · ${this.disposition()}`;
 		let text = formatLines([styleText(title, final && !complete ? 31 : final ? 32 : 1, this.options.color), ""]);
-		if (!this.targets.length) text += formatLines(["No approved resources"]);
+		if (!this.targets.length) text += formatLines([this.emptyLabel]);
 		else if (this.nameWidth + 14 + 32 + 4 <= width) {
 			text += formatStateTable(["SESSION", "STATE", "REASON"], targets.map((target) => {
 				const row = this.row(target); return [row[0].padEnd(this.nameWidth), row[1].padEnd(14), row[2].padEnd(32)];
@@ -133,9 +140,9 @@ export class BatchOutput {
 	start(): void { this.update(); }
 	checking(slug: string): void { this.current = slug; this.phase = "Checking"; this.update(); }
 	removing(slug: string): void { this.current = slug; this.phase = "Removing"; this.update(); }
-	complete(outcome: Outcome): void { this.outcomes.set(outcome.slug, outcome); this.update(); }
+	complete(outcome: CleanupOutcome): void { this.outcomes.set(outcome.slug, outcome); this.update(); }
 
-	finish(outcomes: Outcome[]): string {
+	finish(outcomes: CleanupOutcome[]): string {
 		for (const outcome of outcomes) this.outcomes.set(outcome.slug, outcome);
 		this.clear();
 		writeCleanupDiagnostics(outcomes, this.options);
@@ -144,7 +151,7 @@ export class BatchOutput {
 			for (const outcome of outcomes) {
 				const changes = outcome.inspection?.git?.changes?.map((change) => `  ${displayText(change.status)} ${displayText(change.path)}`) ?? [];
 				const blockers = outcome.inspection?.blockers.map((blocker) => `  ${diagnostic(blocker.problem ?? reason(blocker.reason))}`) ?? [];
-				text += formatLines(["", `${displayText(outcome.slug)}: ${displayText(outcome.worktreePath)}`, ...changes, ...blockers]);
+				text += formatLines(["", `${displayText(outcome.slug)}: ${displayText(outcome.worktreePath ?? "Unknown binding")}`, ...changes, ...blockers]);
 			}
 		}
 		return text;
