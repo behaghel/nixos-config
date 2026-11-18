@@ -320,8 +320,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 		}
 	}
 	const presentedApply = !dryRun && Boolean(slug ? all || branches : all || gone);
-	const bulkPreview = dryRun && !slug && (all || gone);
-	if ((all || branches || gone) && !presentedApply && !bulkPreview && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session selector, recursive/history apply, or bulk apply/preview.");
+	const presentedPreview = dryRun && (all || !slug && gone);
+	if ((all || branches || gone) && !presentedApply && !presentedPreview && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session selector, recursive/bulk apply or preview, or historical apply.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -475,7 +475,7 @@ function usage(): string {
 		"  agent-session <task-slug> finish --branches [--keep-branch|--delete-branches] [--color=auto|always|never] [--verbose] (review branches used in this worktree and reuse the asset plan; no descendants)",
 		"  agent-session <task-slug> finish --branches --dry-run [--keep-branch|--delete-branches] [--json] (read-only branch-history review)",
 		"  agent-session <task-slug> finish --all [--keep-branch|--delete-branches] [--color=auto|always|never] [--verbose] (review recorded descendants, confirm once and reuse the asset plan; branches preserved by default)",
-		"  agent-session <task-slug> finish --all --dry-run [--keep-branch|--delete-branches] [--json] (preview recorded descendants before their parent)",
+		"  agent-session <task-slug> finish --all --dry-run [--keep-branch|--delete-branches] [--json] [--color=auto|always|never] [--verbose] (read-only proposal table; recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] [--color=auto|always|never] [--verbose] (guarded branch-preserving recursive cleanup; state output)",
 		"  agent-session . <cd|run|branch|ownership|activity|launch|resume|list|doctor|finish> (current managed worktree)",
 		"  agent-session [<task-slug>] doctor [--json] [--color=auto|always|never] [--verbose] (read-only diagnostics)",

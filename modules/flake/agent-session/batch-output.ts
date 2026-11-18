@@ -26,6 +26,7 @@ const states: Record<Outcome["outcome"], string> = { finished: "Removed", absent
 const outcomeState = (outcome: CleanupOutcome) => outcome.reason === "earlier-target-not-finished" ? "Not attempted" : states[outcome.outcome];
 const pendingReasons = ["Not processed", "Revalidating approved scope", "Native worktree removal"];
 const reason = (value: string) => reasons[value] ?? displayText(value.replace(/-/g, " "));
+export const cleanupReason = reason;
 
 // Keep native wording except terminal instructions and credential values. The
 // original backend evidence and JSON envelope are not changed by presentation.

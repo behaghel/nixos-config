@@ -403,7 +403,14 @@ presentation flags, one exact worktree/record/artifact/branch plan precedes one
 final approval. The plan updates with observed outcomes when terminal review and
 echo are safely observable; otherwise it stays in scrollback with append-only
 fallback. Unknown or uncertain effects never become successful completion.
-Tree previews retain separate presentation; do not assume these flags apply.
+Providers advertising recursive preview proposal tables also support these flags
+on `as parent finish --all --dry-run`. Inspection stays read-only and descendants
+appear before parents. A blocked branch-preserving tree remains entirely
+preserved; unresolved ancestry is shown without adopting it into the selection.
+Verbose output exposes paths, branch claims, artifact scopes and blocker details.
+Human text omits raw receipts; structured receipts/events and approval rules stay
+unchanged. A preview supplies no consent, reconciliation or cleanup authority.
+Verify installed support rather than assuming flags work on other preview modes.
 
 On versions supporting inactive batches, supply an explicit inactivity window,
 exclude retained/otherwise active work, and preview with `--dry-run --json`.

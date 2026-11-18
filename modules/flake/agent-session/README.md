@@ -326,7 +326,26 @@ resized live views stay bounded and retain full final identities; pipes remain
 append-only. The receipt plus explicit `--yes` still supplies approval, without
 an extra prompt. JSON schemas/events, preflight, replay and branch-preservation
 rules are unchanged. Interactive cleanup uses the exact asset-plan table described
-above; tree previews retain their separate presentation.
+above.
+
+Read-only `as parent finish --all --dry-run` announces inspection before namespace
+discovery and shows live `SESSION`, `PLAN`, `REASON` proposals in descendants-first
+order, followed by counts and `Nothing changed`. It never asks for approval or
+fetches, prunes, writes approval state, reconciles activity or removes assets.
+Known descendant blockers keep the whole proposal preserved, including when
+branch deletion is requested; clean ancestors say `Recursive scope blocked`.
+Unknown ancestry stays
+visible as preserved outside the resolved selection, not adopted into it.
+Unrelated resolved sessions remain outside the display.
+
+These previews support `--color=auto|always|never` and `--verbose`. Default output
+ends with proposal rows/counts; verbose adds full paths, recorded/shared branch
+claims, artifact scopes, blockers and successful checks. Human diagnostics redact
+credentials while JSON schemas, receipts and structured events retain their
+original meanings and evidence. Ordinary human text omits raw receipt tokens.
+Pipes remain append-only; bounded narrow/resized terminal feedback retains every
+final identity. A branch-deletion proposal describes a request with apply-time
+branch checks, never automated deletion authority.
 
 A fully resolved metadata-v3 tree with no blockers receives a top-level
 `receipt` beginning `tree-v1.` and `executionSupported: true`. Otherwise no
@@ -862,8 +881,8 @@ personal deletion preferences do not expand repository-wide scope.
 
 `--color=auto|always|never` and `--verbose` apply to interactive and explicit-Yes
 bulk cleanup. Verbose mode keeps the review append-only and exposes checks.
-Read-only bulk previews retain their previous presentation and do not yet accept
-those flags. No automated approval, force fallback, new apply JSON, public receipt
+Read-only bulk previews also support those flags and use proposal rows/counts as
+described below. No automated approval, force fallback, new apply JSON, public receipt
 or replay authority is introduced by the interactive view.
 
 ## Explicit bulk apply output
@@ -925,7 +944,9 @@ artifact disposal or native removal. Default human output omits routine phase
 logs; `--verbose` exposes checks, full paths and credential-redacted details.
 `--color=auto|always|never` and personal colour precedence apply. Pipes stay
 append-only; capable terminals bound temporary feedback and retain full final
-identities. Named tree/history previews retain their separate presentation.
+identities. Named recursive previews use the same proposal presentation while
+retaining their own tree eligibility and receipt rules. Historical-branch previews
+retain their separate presentation.
 
 ## Inactive-session retirement
 
