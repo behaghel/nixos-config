@@ -822,6 +822,43 @@ unmanaged writers or guarantee reclaimed space. Explicit ownership exclusions
 and a quiet target remain necessary. Forced-cleanup semantics are unchanged;
 there is no automatic force fallback.
 
+## Explicit bulk apply output
+
+```sh
+as finish --all --keep-branch --yes
+as finish --gone --delete-branches --yes
+```
+
+These are the existing repository-wide selectors, not named-session recursive
+cleanup. Explicit `--yes` apply uses stable `SESSION`, `STATE`, `REASON` rows and
+final counts. It announces work before provider discovery and remote-eligibility
+checks, hides routine phase/successful fetch chatter, bounds live updates, and
+retains every final identity. Pipes stay append-only; `--color=auto|always|never`
+and `--verbose` are supported on this explicit-approval path. Verbose output adds
+known paths/checks. An unreadable binding stays unknown, never a guessed path.
+
+`Refused` means cleanup did not reach a local destructive step. Once a local
+effect begins, an unsettled resource is `Uncertain`; a confirmed worktree removal
+with incomplete later branch/record cleanup is stated in its reason rather than
+reported as a completed session. Branch-deletion counts include only confirmed
+callbacks. Original failure evidence is retained in human diagnostics, without
+styling the evidence body and with credential redaction.
+
+**Legacy bulk exit behaviour is unchanged:** individual refusals/uncertainties
+are reported but do not by themselves make the command exit nonzero. Inspect the
+outcome table; exit zero alone does not prove complete cleanup. Fatal root/fetch
+failures still abort normally. `--gone` still fetches/prunes configured remotes
+before applying its existing upstream-disappearance filter, and then rechecks
+each selected resource. Other targets remain outside its selection.
+
+Explicit branch flags remain mandatory with `--yes`; personal deletion defaults
+do not expand bulk scope. `--force` retains its separate existing destructive
+semantics and is never inferred from a refusal. Ordinary bulk approval still
+cannot authorize ignored-artifact disposal or use a new receipt/replay protocol.
+Interactive count-based bulk confirmation and bulk previews retain their existing
+presentation; these flags do not yet apply there. Preview JSON schemas/events
+remain unchanged, and no apply JSON protocol is introduced.
+
 ## Inactive-session retirement
 
 ```sh

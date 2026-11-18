@@ -158,6 +158,7 @@ export function main(args: string[]): number {
 					options.keepBranch,
 					options.dryRun,
 					options.json,
+					options,
 				);
 			} else {
 				finish(
