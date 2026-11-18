@@ -4,7 +4,7 @@ import { confirm, formatLines, formatStateTable, styleText } from "./runtime.ts"
 import { ignoredDataProblem, type IgnoredDataInspection } from "./artifacts.ts";
 import type { PresentationOptions } from "./types.ts";
 import type { Outcome } from "./batch.ts";
-import { writeCleanupDiagnostics } from "./batch-output.ts";
+import { writeCleanupDiagnostics, type CleanupOutcome } from "./batch-output.ts";
 
 export interface CleanupScope {
 	slug: string;
@@ -26,6 +26,7 @@ interface Asset {
 	detail: string;
 	preserve: boolean;
 	state: string;
+	blocked?: string;
 }
 
 /** Human presentation only. Native cleanup, validation and consent stay outside. */
@@ -71,10 +72,10 @@ export class FinishOutput {
 		const scope = this.scope!;
 		const title = plan ? `${preview ? "Preview" : "Cleanup plan"} · ${scope.slug}` : `${this.failed ? "Cleanup incomplete" : this.finished ? "Finished" : "Cleaning up"} · ${scope.slug}`;
 		const rows = this.assets.map((asset) => [...(this.tree ? [asset.slug!] : []), asset.kind,
-			(plan ? asset.preserve ? "Would preserve" : blocked ? "Blocked" : asset.id.startsWith("branch:") ? "Would delete" : "Would remove" : asset.state).padEnd(14), asset.detail]);
+			(plan ? asset.preserve ? "Would preserve" : blocked || asset.blocked ? "Blocked" : asset.id.startsWith("branch:") ? "Would delete" : "Would remove" : asset.state).padEnd(14), asset.detail]);
 		const colour = (index: number) => {
 			const asset = this.assets[index];
-			return plan ? asset.preserve ? 2 : blocked ? 31 : 33
+			return plan ? asset.preserve ? 2 : blocked || asset.blocked ? 31 : 33
 				: ["Removed", "Deleted"].includes(asset.state) ? 32 : asset.state === "Preserved" ? 2 : ["Uncertain", "Refused"].includes(asset.state) ? 31 : 36;
 		};
 		let text = formatLines([styleText(title, this.failed || blocked ? 31 : this.finished ? 32 : 1, this.options.color), ""]);
@@ -122,6 +123,36 @@ export class FinishOutput {
 			if (branch) { asset.preserve = branch.preserve; asset.detail = branch.detail; }
 		}
 		this.writePlan();
+	}
+
+	planBulk(label: string, entries: { slug: string; scope?: CleanupScope; problem?: string }[], force: boolean): void {
+		this.scope = { slug: label, worktreePath: "", ownedBranches: [], keepBranch: true, force };
+		this.tree = true;
+		this.assets = entries.flatMap(({ slug, scope, problem }): Asset[] => {
+			if (!scope) return [{ slug, id: "binding", kind: "Session binding", detail: problem ?? "No removal scope established", preserve: false, state: "Pending", blocked: problem ?? "Unknown scope" }];
+			return this.scopeAssets(scope).map((asset) => ({ ...asset, slug, blocked: problem,
+				preserve: asset.preserve || Boolean(problem && asset.id.startsWith("branch:")),
+				detail: asset.detail + (problem && asset.id === "worktree" ? `; ${problem}` : "") }));
+		});
+		this.reviewNotes = ["Blocked targets are not approved for removal.", ...(!force ? ["Bulk approval cannot authorize ignored-artifact disposal."] : []), ...(!entries.length ? ["No selected resources"] : [])];
+		this.writePlan();
+	}
+
+	bulkResource(outcome: CleanupOutcome, redraw = true): void {
+		for (const asset of this.assets) {
+			if (asset.slug !== outcome.slug || ["Removed", "Deleted", "Absent", "Unregistered"].includes(asset.state)) continue;
+			if (asset.id.startsWith("branch:") || asset.id === "borrowed") asset.state = asset === this.current && outcome.outcome === "uncertain" ? "Uncertain" : "Preserved";
+			else asset.state = outcome.outcome === "finished" ? "Removed" : outcome.outcome === "absent" ? "Absent"
+				: outcome.outcome === "uncertain" && (asset === this.current || this.current?.id === "worktree" && asset.id.startsWith("artifact:")) ? "Uncertain" : "Not attempted";
+		}
+		this.current = undefined; if (redraw) this.update();
+	}
+
+	finishBulk(outcomes: CleanupOutcome[]): string {
+		this.failed = outcomes.some((outcome) => !["finished", "absent"].includes(outcome.outcome));
+		this.finished = !this.failed; this.summary = this.counts(); this.clear();
+		writeCleanupDiagnostics(outcomes, this.options);
+		return this.render(false);
 	}
 
 	/** Reviewed local refs are not projected as owned branches. */
@@ -204,8 +235,8 @@ export class FinishOutput {
 		this.update();
 	}
 
-	removedWorktree(): void {
-		for (const asset of this.assets) if (asset.id === "worktree" || asset.id.startsWith("artifact:")) asset.state = "Removed";
+	removedWorktree(slug?: string): void {
+		for (const asset of this.assets) if ((!slug || asset.slug === slug) && (asset.id === "worktree" || asset.id.startsWith("artifact:"))) asset.state = "Removed";
 		this.current = undefined;
 		this.update();
 	}
@@ -263,6 +294,7 @@ export class FinishOutput {
 	}
 
 	private update(): void {
+		if (!this.assets.length) return;
 		if (!process.stdout.isTTY || process.env.TERM === "dumb" || this.options.verbose) return;
 		this.clear();
 		if ((process.stdout.columns || 80) < 24) {
