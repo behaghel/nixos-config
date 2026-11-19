@@ -3,7 +3,8 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { captureProcesses, rootKey } from "./batch.ts";
 import { assertPrimaryCheckout, git } from "./git.ts";
 import { inspectActiveOperation, metadataPath, readMetadata, readMetadataInventory, sessionDirectory, withOperationLock, writeMetadata } from "./sessions.ts";
-import { CliError, confirm, writeCommandResult } from "./runtime.ts";
+import { CliError, confirm, writeCommandResult, formatLines, formatStateTable, cleanupDiagnostic, resourceResult, type InspectionProgress } from "./runtime.ts";
+import type { PresentationOptions } from "./types.ts";
 
 // A local engagement signal, not an operation lease or cleanup acknowledgement.
 export function touchActivity(root: string, slug: string): number {
@@ -50,28 +51,34 @@ function inspectReconciliation(root: string, slug: string) {
 	};
 }
 
-function describe(plan: ReturnType<typeof inspectReconciliation>): string {
-	return `Activity reconciliation for ${plan.metadata.slug}\n  worktree: ${plan.metadata.worktreePath}\n${plan.operations.map((operation) =>
-		`  ${operation.id}: pid ${operation.pid}, host ${operation.hostname}, started ${operation.startedAt}: ${operation.state}\n`).join("")}${plan.blockers.map((blocker) => `  blocked: ${blocker}\n`).join("")}` +
-		"Only the listed activity records will be acknowledged as interrupted, not completed. Original records are retained in acknowledgement history; lastWorkAt is unchanged.\n" +
-		"PID/cwd observations do not establish that detached jobs or side effects completed. A live PID may be reused and remains blocked. No worktree or branch will be removed; cleanup still requires its own safety checks and approval.\n";
+function describe(plan: ReturnType<typeof inspectReconciliation>, options: PresentationOptions, applied = false): string {
+	if (!plan.operations.length) return resourceResult(plan.metadata.slug, "Unchanged", "No unsettled activity records", options, applied ? [] : ["0 proposed acknowledgements · Nothing changed"]);
+	return formatLines([`Activity reconciliation · ${plan.metadata.slug}`, `Worktree: ${plan.metadata.worktreePath}`,
+		"Only the listed records are acknowledged as interrupted, not completed. Original evidence is retained; lastWorkAt is unchanged.",
+		"PID/cwd observations do not prove side effects completed. No worktrees or branches removed; cleanup needs separate approval.",
+		...plan.blockers.map((blocker) => `Blocked: ${cleanupDiagnostic(blocker)}`), ""].map(cleanupDiagnostic)) +
+		formatStateTable(["OPERATION", "STATE", "EVIDENCE"], plan.operations.map((operation) => [operation.id,
+			applied ? "Interrupted" : plan.executionSupported ? "Would acknowledge" : "Preserved",
+			`pid ${operation.pid}; host ${operation.hostname}; started ${operation.startedAt}; observed ${operation.state}`]), options, (_row, column) => column === 1 ? applied ? 33 : plan.executionSupported ? 36 : 31 : undefined) +
+		formatLines([applied ? `${plan.operations.length} interrupted operation(s) acknowledged · no successful completion recorded` : `${plan.executionSupported ? plan.operations.length : 0} proposed acknowledgements · Nothing changed`]);
 }
 
-export function reconcileActivity(root: string, slug: string, dryRun: boolean, json: boolean): number {
+export function reconcileActivity(root: string, slug: string, dryRun: boolean, json: boolean, options: PresentationOptions = {}, progress?: InspectionProgress): number {
 	const plan = inspectReconciliation(root, slug);
+	progress?.flush();
 	if (dryRun) {
 		writeCommandResult({ version: 1, command: "activity reconcile", dryRun: true, slug,
 			worktreePath: plan.metadata.worktreePath, operations: plan.operations, blockers: plan.blockers,
 			processEvidence: plan.processEvidence, executionSupported: plan.executionSupported,
-			acknowledgementOnly: true, resourcesRemoved: false }, json, `${describe(plan)}No metadata changed.\n`);
+			acknowledgementOnly: true, resourcesRemoved: false }, json, describe(plan, options));
 		return 0;
 	}
 	if (!plan.operations.length) {
-		process.stdout.write(`No unsettled activity records for ${slug}; no metadata changed.\n`);
+		process.stdout.write(resourceResult(slug, "Unchanged", `No unsettled activity records for ${slug}; no metadata changed.`, options));
 		return 0;
 	}
 	if (!process.stdin.isTTY) throw new CliError("Activity reconciliation requires terminal confirmation. Inspect first with activity reconcile --dry-run --json; --yes and --force are not supported.");
-	process.stderr.write(describe(plan));
+	process.stdout.write(describe(plan, options));
 	if (!plan.executionSupported) throw new CliError("Activity reconciliation blocked; no metadata changed.");
 	if (!confirm("Acknowledge these operations as interrupted, not completed? [y/N]")) throw new CliError("Reconciliation cancelled; no metadata changed.");
 	return withOperationLock(root, "activity reconciliation", () => {
@@ -82,7 +89,7 @@ export function reconcileActivity(root: string, slug: string, dryRun: boolean, j
 			...(current.metadata.acknowledgedInterruptions ?? []),
 			...(current.metadata.activeOperations ?? []).map((operation) => ({ ...operation, outcome: "interrupted" as const, acknowledgedAt })),
 		] });
-		process.stdout.write(`Acknowledged ${current.operations.length} interrupted operation(s) for ${slug}. Original evidence retained, no successful completion recorded. No worktrees or branches removed.\n`);
+		process.stdout.write(describe(current, options, true));
 		return 0;
 	});
 }

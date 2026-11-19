@@ -269,7 +269,10 @@ export function refreshMetadataRemote(
 	if (metadata.pr?.mode === "review") assertReviewSource(root, metadata.pr.sourceRemote ?? metadata.remote, metadata.pr);
 	for (const remote of sessionRemotes(metadata)) {
 		const fetch = run("git", ["fetch", "--prune", remote], root);
-		if (fetch.status !== 0) throw new CliError(`Failed to fetch remote ${remote}.`);
+		if (fetch.status !== 0) {
+			const failure = new CliError(`Failed to fetch remote ${remote}.`);
+			failure.cause = fetch; throw failure;
+		}
 	}
 	return remoteDefaultBranch(root, metadata.remote);
 }

@@ -48,6 +48,10 @@ import {
 	styleText,
 	runPhase,
 	writeCommandResult,
+	resourceResult,
+	cleanupDiagnostic,
+	displayText,
+	type InspectionProgress,
 	run,
 } from "./runtime.ts";
 import type { AgentSessionConfig, SessionMetadata, BranchOwnership, ProgressReporter, PullRequestSelection, PullRequestMetadata, PresentationOptions } from "./types.ts";
@@ -90,6 +94,7 @@ function executeConfigured(
 	const [executable, ...args] = command;
 	if (!executable) return 0;
 	const result = run(executable, args, cwd, stdio, environment);
+	if (stdio === "inherit" && result.errorCode) process.stderr.write(`Configured command could not start: ${cleanupDiagnostic(result.errorCode)}\n`);
 	if (stdio !== "inherit" && result.status !== 0) {
 		const diagnostic = [result.stdout, result.stderr].filter(Boolean).join("\n");
 		throw new CliError(`Configured command exited with status ${result.status}.${diagnostic ? `\n${diagnostic}` : ""}`);
@@ -102,8 +107,11 @@ function launchAgent(
 	config: AgentSessionConfig,
 	metadata: SessionMetadata,
 	additionalArguments: string[] = [],
+	options: PresentationOptions = {},
+	warnings: string[] = [],
 ): number {
-	process.stderr.write(`Launching agent in ${metadata.worktreePath}\n`);
+	process.stderr.write(`${styleText(displayText(cleanupDiagnostic(`Launching · ${metadata.slug} · ${metadata.branch} · ${metadata.worktreePath}`)), 36, options.color, process.stderr.isTTY)}\n`);
+	for (const warning of warnings) process.stderr.write(`${cleanupDiagnostic(warning)}\n`);
 	const agentStatus = withSessionActivity(root, metadata.slug, () => executeConfigured(
 		[...config.agent_command, ...additionalArguments],
 		metadata.worktreePath,
@@ -119,7 +127,7 @@ function launchAgent(
 function prepareLaunch(
 	root: string,
 	slug: string,
-): { config: AgentSessionConfig; metadata: SessionMetadata } {
+): { config: AgentSessionConfig; metadata: SessionMetadata; warnings: string[] } {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
 	const config = loadConfig(root);
@@ -133,18 +141,10 @@ function prepareLaunch(
 			status.problem ?? `Managed session ${slug} is unusable.`,
 		);
 	}
-	if (!status.clean) {
-		process.stderr.write(
-			`Warning: session ${slug} is dirty; work is preserved.\n`,
-		);
-	}
-	if (!status.fresh) {
-		process.stderr.write(
-			`Warning: session ${slug} has not integrated the latest ${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}.\n`,
-		);
-	}
-	process.stderr.write(`Launching ${metadata.branch}\n`);
-	return { config, metadata };
+	const warnings = [];
+	if (!status.clean) warnings.push(`Warning: session ${slug} is dirty; work is preserved.`);
+	if (!status.fresh) warnings.push(`Warning: session ${slug} has not integrated the latest ${metadata.remote}/${sessionBaseBranch(metadata, defaultBranch)}.`);
+	return { config, metadata, warnings };
 }
 
 export function launch(
@@ -152,15 +152,15 @@ export function launch(
 	slug: string,
 	operation = "launch",
 	additionalArguments: string[] = [],
+	options: PresentationOptions = {},
 ): number {
-	const prepared = withOperationLock(root, operation, () =>
-		prepareLaunch(root, slug),
-	);
-	return launchAgent(root, prepared.config, prepared.metadata, additionalArguments);
+	const prepared = withPreparation(operation, slug, false, options, (report) => runPhase(report, "inspect-launch", () =>
+		withOperationLock(root, operation, () => prepareLaunch(root, slug))));
+	return launchAgent(root, prepared.config, prepared.metadata, additionalArguments, options, prepared.warnings);
 }
 
-export function resume(root: string, slug: string): number {
-	const prepared = withOperationLock(root, "resume", () => {
+export function resume(root: string, slug: string, options: PresentationOptions = {}): number {
+	const prepared = withPreparation("resume", slug, false, options, (report) => runPhase(report, "inspect-resume", () => withOperationLock(root, "resume", () => {
 		const creator = readMetadata(root, slug).creatorConversation;
 		if (!creator) return { ...prepareLaunch(root, slug), args: ["--continue"] };
 		const parents = readMetadataInventory(root).filter((record) => record.sessionId === creator.parentSessionId);
@@ -181,8 +181,8 @@ export function resume(root: string, slug: string): number {
 			throw new CliError("Creator conversation changed during resume preparation; no substitute conversation was launched.");
 		}
 		return { ...target, args: ["--session", creator.sessionFile] };
-	});
-	return launchAgent(root, prepared.config, prepared.metadata, prepared.args);
+	})));
+	return launchAgent(root, prepared.config, prepared.metadata, prepared.args, options, prepared.warnings);
 }
 
 export function runInSession(root: string, slug: string, command: string[]): number {
@@ -197,7 +197,7 @@ export function runInSession(root: string, slug: string, command: string[]): num
 	return result.status ?? (result.signal ? 128 + constants.signals[result.signal] : 1);
 }
 
-export function createBranch(root: string, slug: string, name: string, json: boolean): void {
+export function createBranch(root: string, slug: string, name: string, json: boolean, options: PresentationOptions = {}, progress?: InspectionProgress): void {
 	withOperationLock(root, "branch-create", () => {
 		const cwd = sessionDirectory(root, slug);
 		const metadata = readMetadata(root, slug);
@@ -220,12 +220,13 @@ export function createBranch(root: string, slug: string, name: string, json: boo
 			// Preserve the ref on uncertain recording, never delete concurrent work.
 			throw new CliError(`Branch ${name} was created but ownership recording failed; preserved as unclaimed. ${String(error)}`);
 		}
+		progress?.flush();
 		writeCommandResult({ version: 1, command: "branch", action: "create", slug, branch }, json,
-			`Created session-owned branch ${name} at ${branch.creationCommit}. Current branch unchanged; switch explicitly when needed.\n`);
+			resourceResult(slug, "Created", `Session-owned branch: ${name}`, options, ["Current branch unchanged; switch explicitly when needed.", ...(options.verbose ? [`Creation commit: ${branch.creationCommit}`, `Ownership record: ${metadataPath(root, slug)}`] : [])]));
 	});
 }
 
-function repairUnlocked(root: string, slug: string): void {
+function repairUnlocked(root: string, slug: string, options: PresentationOptions, progress?: InspectionProgress): SessionMetadata {
 	validateSlug(slug);
 	assertPrimaryCheckout(root);
 	const config = loadConfig(root);
@@ -242,7 +243,7 @@ function repairUnlocked(root: string, slug: string): void {
 		throw new CliError("Primary checkout must be on a branch.");
 	}
 	const remote = upstreamRemote(root, primaryBranch);
-	process.stderr.write(`Inspecting ${remote} before repairing ${slug}...\n`);
+	if (options.verbose) { progress?.flush(); process.stderr.write(`Inspecting ${remote} before repairing ${slug}...\n`); }
 	const metadata: SessionMetadata = {
 		version: 1,
 		slug,
@@ -254,13 +255,14 @@ function repairUnlocked(root: string, slug: string): void {
 		conversation: null,
 	};
 	writeMetadata(root, metadata);
-	process.stdout.write(
-		`Session metadata repaired: ${slug}\nWorktree: ${worktree.worktreePath}\n`,
-	);
+	return metadata;
 }
 
-export function repair(root: string, slug: string): void {
-	withOperationLock(root, "repair", () => repairUnlocked(root, slug));
+export function repair(root: string, slug: string, options: PresentationOptions = {}, progress?: InspectionProgress): void {
+	const metadata = withOperationLock(root, "repair", () => repairUnlocked(root, slug, options, progress));
+	progress?.flush();
+	process.stdout.write(resourceResult(slug, "Repaired", metadata.worktreePath, options,
+		["Session metadata repaired; legacy ownership still needs explicit review.", ...(options.verbose ? [`Branch: ${metadata.branch}`, `Remote: ${metadata.remote}`, `Record: ${metadataPath(root, slug)}`] : [])]));
 }
 
 function previewCreate(
@@ -643,9 +645,9 @@ export function create(
 		writeCommandResult(
 			{ version: 1, command: "create", dryRun: true, plan },
 			json,
-			selection === undefined
-				? `Would create ${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.\n`
-				: `Would prepare PR #${selection.number} at ${String(plan.worktreePath)}. ${selection.mode === "independent" ? `Independent branch ${String(plan.branch)} requested; PR identity and head are unresolved` : "PR identity, branch and head are unresolved"}; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.\n`,
+			resourceResult(slug, selection ? "Would prepare" : "Would create", selection === undefined
+				? `${String(plan.branch)} at ${String(plan.worktreePath)} from ${String(plan.base)}.`
+				: `Would prepare PR #${selection.number} at ${String(plan.worktreePath)}. ${selection.mode === "independent" ? `Independent branch ${String(plan.branch)} requested; PR identity and head are unresolved` : "PR identity, branch and head are unresolved"}; offline preview uses cached ${String(plan.remote)}/${String(plan.defaultBranch)} for the primary-checkout guard. Execution requires trust.`, options, ["Nothing changed"]),
 		);
 		return 0;
 	}
@@ -668,7 +670,7 @@ export function start(
 		prepareSession(root, slug, report, false, selection, trustPr, options.verbose),
 	));
 	if (launchConfiguredAgent) {
-		return launchAgent(root, prepared.config, prepared.metadata);
+		return launchAgent(root, prepared.config, prepared.metadata, [], options);
 	}
 	reportCreated(prepared.metadata, false, prepared.reused, options);
 	return 0;

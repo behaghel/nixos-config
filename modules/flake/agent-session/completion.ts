@@ -11,9 +11,12 @@ import {
 const prOptions = ["--pr", "--trust-pr", "-c", "--create-branch"];
 const presentationOptions = ["--color=auto", "--color=always", "--color=never", "--verbose"];
 const commandOptions: Record<string, string[]> = {
-	branch: ["create", "--json"],
-	activity: ["touch", "reconcile", "--dry-run", "--json"],
-	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json"],
+	branch: ["create", "--json", ...presentationOptions],
+	activity: ["touch", "reconcile", "--dry-run", "--json", ...presentationOptions],
+	ownership: ["--root", "--parent", "--dry-run", "--expected", "--yes", "--json", ...presentationOptions],
+	launch: presentationOptions,
+	resume: presentationOptions,
+	repair: presentationOptions,
 	create: ["--dry-run", "--json", ...prOptions, ...presentationOptions],
 	start: ["--no-agent", ...prOptions, ...presentationOptions],
 	list: ["--inspect", "--json", "--refresh", ...presentationOptions],
@@ -22,7 +25,7 @@ const commandOptions: Record<string, string[]> = {
 	finish: ["--all", "--branches", "--keep-branch", "--delete-branches", "--expected", "--force", "--yes", "--dry-run", "--json", ...presentationOptions],
 	"global-list": ["--inspect", "--json", "--refresh", "--worktree", ...presentationOptions],
 	"global-batch": ["finish", "--inactive-for", "--exclude", "--keep-branch", "--dry-run", "--expected", "--yes", "--json", ...presentationOptions],
-	"global-finish": ["--all", "--gone", "--keep-branch", "--delete-branches", "--force", "--yes", "--dry-run", "--json"],
+	"global-finish": ["--all", "--gone", "--keep-branch", "--delete-branches", "--force", "--yes", "--dry-run", "--json", ...presentationOptions],
 };
 
 export function completionCandidates(scope: string): string[] {

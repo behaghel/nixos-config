@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { CliError, styleText, withInspection } from "./runtime.ts";
+import { CliError, styleText, withInspection, cleanupDiagnostic } from "./runtime.ts";
 import { primaryRoot, repositoryRoot } from "./git.ts";
 import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, createBranch, runInSession, launch, resume, start, repair } from "./lifecycle.ts";
@@ -19,6 +19,7 @@ import {
 	parseActivityArguments,
 	parseOwnershipArguments,
 	parseStartArguments,
+	parseSessionPresentation,
 	parseFinishArguments,
 	parseListArguments,
 	parseBatchArguments,
@@ -30,9 +31,13 @@ import {
 import { completionCandidates, completionScript } from "./completion.ts";
 
 export function main(args: string[]): number {
+	let humanError = true;
 	try {
 		const invocation = parseInvocation(args);
 		const { command, args: rest } = invocation;
+		const protocol = ["run", "cd", "completion", "__complete"].includes(command) || command === "activity" && rest[1] === "touch";
+		const json = ["create", "branch", "ownership", "activity", "list", "doctor", "finish", "batch"].includes(command) && rest.includes("--json");
+		humanError = !protocol && !json;
 		if (command === "cd") {
 			const slug = resolveSessionTarget(parseRequiredSlug(command, rest));
 			process.stdout.write(`${sessionDirectory(primaryRoot(repositoryRoot()), slug)}\n`);
@@ -46,20 +51,28 @@ export function main(args: string[]): number {
 		}
 		if (command === "activity") {
 			const options = parseActivityArguments(rest);
-			const invocationRoot = repositoryRoot();
-			const root = primaryRoot(invocationRoot), slug = resolveSessionTarget(options.slug, invocationRoot);
-			return options.action === "touch" ? touchActivity(root, slug)
-				: reconcileActivity(root, slug, options.dryRun, options.json);
+			if (options.action === "touch") {
+				const invocationRoot = repositoryRoot();
+				return touchActivity(primaryRoot(invocationRoot), resolveSessionTarget(options.slug, invocationRoot));
+			}
+			return withInspection("Inspecting activity reconciliation", options.json, options, (progress) => {
+				const invocationRoot = repositoryRoot();
+				return reconcileActivity(primaryRoot(invocationRoot), resolveSessionTarget(options.slug, invocationRoot), options.dryRun, options.json, options, progress);
+			});
 		}
 		if (command === "ownership") {
 			const options = parseOwnershipArguments(rest);
-			mapOwnership(primaryRoot(repositoryRoot()), { ...options, slug: resolveSessionTarget(options.slug) });
-			return 0;
+			return withInspection(options.dryRun ? "Inspecting ownership mapping" : "Mapping reviewed ownership", options.json, options, (progress) => {
+				mapOwnership(primaryRoot(repositoryRoot()), { ...options, slug: resolveSessionTarget(options.slug) }, progress);
+				return 0;
+			});
 		}
 		if (command === "branch") {
 			const options = parseBranchArguments(rest);
-			createBranch(primaryRoot(repositoryRoot()), resolveSessionTarget(options.slug), options.name, options.json);
-			return 0;
+			return withInspection("Creating session-owned branch", options.json, options, (progress) => {
+				createBranch(primaryRoot(repositoryRoot()), resolveSessionTarget(options.slug), options.name, options.json, options, progress);
+				return 0;
+			});
 		}
 		if (command === "create") {
 			const options = parseCreateArguments(rest);
@@ -94,8 +107,9 @@ export function main(args: string[]): number {
 			return 0;
 		}
 		if (command === "launch") {
-			const slug = resolveSessionTarget(parseRequiredSlug("launch", rest));
-			return launch(primaryRoot(repositoryRoot()), slug);
+			const options = parseSessionPresentation("launch", rest);
+			const slug = resolveSessionTarget(options.slug);
+			return launch(primaryRoot(repositoryRoot()), slug, "launch", [], options);
 		}
 		if (command === "start") {
 			const options = parseStartArguments(rest);
@@ -103,8 +117,8 @@ export function main(args: string[]): number {
 			return start(root, options.slug, options.launchConfiguredAgent, options.pr, options.trustPr, { color: options.color, verbose: options.verbose });
 		}
 		if (command === "resume") {
-			const slug = resolveSessionTarget(parseRequiredSlug("resume", rest));
-			return resume(primaryRoot(repositoryRoot()), slug);
+			const options = parseSessionPresentation("resume", rest);
+			return resume(primaryRoot(repositoryRoot()), resolveSessionTarget(options.slug), options);
 		}
 		if (command === "batch") {
 			const options = parseBatchArguments(rest);
@@ -134,9 +148,11 @@ export function main(args: string[]): number {
 			return withInspection("Checking session health", options.json, options, (progress) => doctor(options.slug, options.json, options, progress));
 		}
 		if (command === "repair") {
-			const slug = parseRequiredSlug("repair", rest);
-			repair(primaryRoot(repositoryRoot()), slug);
-			return 0;
+			const options = parseSessionPresentation("repair", rest);
+			return withInspection("Repairing session metadata", false, options, (progress) => {
+				repair(primaryRoot(repositoryRoot()), options.slug, options, progress);
+				return 0;
+			});
 		}
 		if (command === "finish") {
 			const options = parseFinishArguments(rest);
@@ -182,13 +198,14 @@ export function main(args: string[]): number {
 		);
 	} catch (error) {
 		if (error instanceof CliError) {
-			const [headline, ...details] = error.message.split("\n");
-			const message = error.color === undefined ? error.message
+			const diagnostic = humanError ? cleanupDiagnostic(error.message) : error.message;
+			const [headline, ...details] = diagnostic.split("\n");
+			const message = error.color === undefined ? diagnostic
 				: [styleText(headline, 31, error.color, process.stderr.isTTY), ...details].join("\n");
 			process.stderr.write(`${message}\n`);
 			return error.exitCode;
 		}
-		process.stderr.write(`${String(error)}\n`);
+		process.stderr.write(`${humanError ? cleanupDiagnostic(String(error)) : String(error)}\n`);
 		return 1;
 	}
 }

@@ -4,7 +4,7 @@ import { git, assertPrimaryCheckout } from "./git.ts";
 import { rootKey } from "./batch.ts";
 import { inspectExactResource, snapshotExactResources, sharedBranchClaims } from "./inspection.ts";
 import { branchCreationMessage, metadataPath, withOperationLock, writeMetadata } from "./sessions.ts";
-import { CliError, writeCommandResult } from "./runtime.ts";
+import { CliError, writeCommandResult, resourceResult, type InspectionProgress } from "./runtime.ts";
 import type { BranchOwnership, OwnershipOptions } from "./types.ts";
 
 interface MappingPlan {
@@ -106,12 +106,22 @@ function decode(options: OwnershipOptions): MappingPlan {
 	} catch (error) { throw new CliError(`Invalid ownership receipt; obtain a fresh preview. ${String(error)}`, 64); }
 }
 
-export function mapOwnership(root: string, options: OwnershipOptions): void {
+function describeMapping(plan: MappingPlan, options: OwnershipOptions, preview: boolean): string {
+	return resourceResult(plan.slug, preview ? "Would map" : "Mapped", `${plan.worktreePath}; parent: ${plan.parentSlug ?? "explicit root"}`, options, [
+		`Initial branch: ${plan.currentBranch}; ${plan.branch ? "retain reviewed ownership; append a reflog review marker" : "borrowed; preserved, not owned"}.`,
+		"Worktrees, files, commits and branch refs preserved. No retirement authorized.",
+		...(options.verbose ? [`Session identity: ${plan.sessionId}`, `Parent identity: ${plan.parentSessionId ?? "none"}`, ...(plan.branch ? [`Creation commit: ${plan.branch.creationCommit}`] : [])] : []),
+		...(preview ? ["Nothing changed"] : []),
+	]);
+}
+
+export function mapOwnership(root: string, options: OwnershipOptions, progress?: InspectionProgress): void {
 	if (options.dryRun) {
 		const { plan } = inspectMapping(root, options);
+		progress?.flush();
 		writeCommandResult({ version: 1, command: "ownership", dryRun: true, plan, receipt: encode(plan),
 			resourcesRemoved: false, refsModified: false, reflogWillBeModified: plan.branch !== null }, options.json,
-			`Would map ${plan.slug} at ${plan.worktreePath} to session ${plan.sessionId}.\nParent: ${plan.parentSlug ?? "explicit root"} (${plan.parentSessionId ?? "none"}).\nInitial branch: ${plan.currentBranch} (${plan.branch ? "retain recorded ownership; append review marker to its reflog" : "borrowed; preserved, not owned"}).\nNo resources changed.\nReceipt: ${encode(plan)}\n`);
+			describeMapping(plan, options, true));
 		return;
 	}
 	const approved = decode(options);
@@ -135,8 +145,9 @@ export function mapOwnership(root: string, options: OwnershipOptions): void {
 		} catch (error) {
 			throw new CliError(`Ownership metadata update could not be confirmed; inspect status before retrying. A review marker alone grants no mapping. ${String(error)}`);
 		}
+		progress?.flush();
 		writeCommandResult({ version: 1, command: "ownership", dryRun: false, plan, resourcesRemoved: false,
 			refsModified: false, reflogModified: plan.branch !== null }, options.json,
-			`Mapped legacy session ${plan.slug}; parent: ${plan.parentSlug ?? "explicit root"}. Worktrees, files, commits and branch refs preserved. No retirement authorized.\n`);
+			describeMapping(plan, options, false));
 	});
 }

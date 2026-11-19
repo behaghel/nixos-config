@@ -79,7 +79,7 @@ export interface SessionMetadata {
 	pr?: PullRequestMetadata;
 }
 
-export interface OwnershipOptions {
+export interface OwnershipOptions extends PresentationOptions {
 	slug: string;
 	parent: string | null;
 	dryRun: boolean;

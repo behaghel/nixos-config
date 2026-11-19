@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { FinishOutput, type CleanupScope } from "./finish-output.ts";
-import { BatchOutput, cleanupDiagnostic, type CleanupOutcome } from "./batch-output.ts";
+import { BatchOutput, cleanupDiagnostic, cleanupReason, type CleanupOutcome } from "./batch-output.ts";
 import { CleanupPreview, type CleanupProposal } from "./cleanup-preview.ts";
 import { inspectTreeBranches, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
-import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Target, type Outcome } from "./batch.ts";
+import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Candidate, type Target, type Outcome } from "./batch.ts";
 import { existsSync, lstatSync, unlinkSync } from "node:fs";
 import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, artifactSummary, type IgnoredDataInspection } from "./artifacts.ts";
@@ -466,9 +466,11 @@ function selectSessionTree(root: string, slug: string) {
 	if (!target) throw new CliError(`No managed session: ${slug}`);
 	const byId = new Map<string, SessionMetadata>();
 	const skipped: string[] = [];
+	const ancestryIssues: { slug: string; problem: string }[] = [];
 	for (const record of records) {
 		if (!record.sessionId) {
 			skipped.push(`${record.slug}: unknown ancestry; explicit reviewed ownership mapping required; preserved.`);
+			ancestryIssues.push({ slug: record.slug, problem: "Unknown ancestry; explicit reviewed ownership mapping required; preserved." });
 			continue;
 		}
 		if (byId.has(record.sessionId)) throw new CliError("Duplicate session identity; recursive ownership is unresolved. No resources changed.");
@@ -488,6 +490,7 @@ function selectSessionTree(root: string, slug: string) {
 			if (!parent) {
 				unresolved.add(record.sessionId!);
 				skipped.push(`${record.slug}: unresolved parent ${current.parentSessionId}; preserved.`);
+				ancestryIssues.push({ slug: record.slug, problem: `Unresolved parent ${current.parentSessionId}; preserved.` });
 				break;
 			}
 			current = parent;
@@ -504,18 +507,86 @@ function selectSessionTree(root: string, slug: string) {
 	visit(target);
 	const selectedSlugs = new Set(selected.map((record) => record.slug));
 	const sharedBranches = sharedBranchClaims(records).filter((branch) => branch.claims.some((claim) => selectedSlugs.has(claim.slug)));
-	return { target, selected, records, skipped, sharedBranches };
+	return { target, selected, records, skipped, sharedBranches, ancestryIssues };
+}
+
+interface TreePreviewObserver {
+	start(slugs: string[], ancestryIssues: { slug: string; problem: string }[]): void;
+	checking(slug: string): void;
+	planned(plan: Record<string, unknown>): void;
+	failed(slug: string, problem: string): void;
+	complete(candidate: Candidate): void;
+}
+
+function treePreviewProposal(slug: string, plan?: Record<string, unknown>, candidate?: Candidate): CleanupProposal {
+	const ignored = plan?.ignoredData as IgnoredDataInspection | undefined;
+	const unresolved = plan?.unresolvedBranches as string[] | undefined;
+	const shared = plan?.sharedBranches as { name: string; claims: { slug: string }[] }[] | undefined;
+	const remove = candidate ? Boolean(candidate.snapshot && plan) : Boolean(plan && ["ready", "stale"].includes(String(plan.state)) && plan.clean === true && ignored?.safe !== false && !unresolved?.length && !shared?.length);
+	const reason = candidate ? candidate.reason === "eligible" ? plan ? "Checks passed; branches preserved" : "Scope inspection incomplete"
+		: ({ "unresolved-ownership": "Ownership needs review", "shared-branch-claims": "Shared branch claims" }[candidate.reason] ?? cleanupReason(candidate.reason))
+		: !plan ? "Scope inspection incomplete" : plan.clean === false ? "Uncommitted changes" : shared?.length ? "Shared branch claims" : unresolved?.length ? "Ownership needs review"
+		: ignored?.safe === false ? "Ignored data needs review" : remove ? "Apply checks branch safety" : "Binding needs inspection";
+	const path = plan?.worktreePath ?? candidate?.worktreePath;
+	return { slug, remove, reason, details: [
+		...(path ? [String(path)] : []),
+		...(plan ? [`Recorded owned branches: ${(plan.ownedBranches as string[]).join(", ") || "none"}`] : []),
+		...(unresolved?.length ? [`Unresolved branches preserved: ${unresolved.join(", ")}`] : []),
+		...(shared?.map((branch) => `Shared branch preserved: ${branch.name}; claimants: ${branch.claims.map((claim) => claim.slug).join(", ")}`) ?? []),
+		...(ignored?.approvedArtifacts.map((path) => `Artifact scope: ${path}; preview performs no disposal`) ?? []),
+		...(ignored && !ignored.safe ? [ignoredDataProblem(ignored)] : []),
+		...(candidate?.blockers.map((blocker) => blocker.problem ?? cleanupReason(blocker.reason)) ?? []),
+		...(candidate?.git?.changes?.map((change) => `${change.status}: ${change.path}`) ?? []),
+	] };
 }
 
 export function finishSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, dryRun: boolean, json: boolean, expected?: string, options: PresentationOptions = {}): number {
 	if (expected && !dryRun) return withInspection("Checking approved recursive cleanup", json, options,
 		(progress) => applySessionTree(root, invocationRoot, slug, expected, json, undefined, options, progress));
 	if (!dryRun && !process.stdin.isTTY) throw new CliError("Recursive finish requires a terminal, or --keep-branch --expected <tree-receipt> --yes after a dry-run preview.");
-	if (dryRun) {
-		const preview = previewSessionTree(root, invocationRoot, slug, keepBranch, json);
-		writeCommandResult(preview.value, json, preview.text);
+	if (dryRun && json) {
+		const preview = previewSessionTree(root, invocationRoot, slug, keepBranch, true);
+		writeCommandResult(preview.value, true, preview.text);
 		return 0;
 	}
+	if (dryRun) return withInspection("Inspecting recursive cleanup preview", false, options, (progress) => {
+		if (options.verbose) progress.flush();
+		const nativeReport = progressReporter("finish", false);
+		const report: ProgressReporter = options.verbose ? (phase, status, detail) => nativeReport(phase, status, detail === undefined ? undefined : cleanupDiagnostic(detail)) : () => {};
+		let display: CleanupPreview | undefined;
+		const plans = new Map<string, Record<string, unknown>>(), results = new Map<string, CleanupProposal>(), problems = new Map<string, string>();
+		const inspectedSlugs = new Set<string>();
+		const complete = (proposal: CleanupProposal) => {
+			if (problems.has(proposal.slug)) proposal.details.push(problems.get(proposal.slug)!);
+			results.set(proposal.slug, proposal); display?.complete(proposal);
+		};
+		const observer: TreePreviewObserver = {
+			start(slugs, ancestryIssues) {
+				progress.flush(); display = new CleanupPreview(slugs, options, `recursive cleanup · ${slug}`, [
+					keepBranch ? "Branches preserved; all selected resources must pass before apply" : "Branch deletion requested; apply rechecks all guards; no automated deletion receipt",
+					...(ancestryIssues.length ? ["Unresolved ancestry remains outside the resolved tree selection"] : []),
+				]); display.start();
+				for (const issue of ancestryIssues) complete({ slug: issue.slug, remove: false, reason: "Ownership needs review", details: [issue.problem] });
+			},
+			checking(name) { inspectedSlugs.add(name); display?.checking(name); },
+			planned(plan) { plans.set(String(plan.slug), plan); if (!keepBranch) complete(treePreviewProposal(String(plan.slug), plan)); },
+			failed(name, problem) { problems.set(name, problem); complete({ slug: name, remove: false, reason: problem.startsWith("Non-forced cleanup blocked.") ? "Activity blocks cleanup" : "Scope inspection incomplete", details: [] }); },
+			complete(candidate) { complete(treePreviewProposal(candidate.slug, plans.get(candidate.slug), candidate)); },
+		};
+		try {
+			const preview = previewSessionTree(root, invocationRoot, slug, keepBranch, false, report, observer);
+			const blocked = keepBranch ? !preview.value.executionSupported : [...inspectedSlugs].some((name) => !results.get(name)?.remove);
+			if (blocked) for (const proposal of results.values()) {
+				if (proposal.remove) { proposal.remove = false; proposal.reason = "Recursive scope blocked"; display?.complete(proposal); }
+			}
+			process.stdout.write(display?.finish() ?? "");
+			return 0;
+		} catch (error) {
+			display?.abort();
+			const failure = new CliError(cleanupDiagnostic(error instanceof Error ? error.message : String(error)), error instanceof CliError ? error.exitCode : 1);
+			failure.cause = error; failure.color = options.color; throw failure;
+		}
+	});
 	return withInspection("Inspecting recursive cleanup", false, options, (progress) => {
 		const report: ProgressReporter = options.verbose ? progressReporter("finish", false) : () => {};
 		if (options.verbose) progress.flush();
@@ -537,11 +608,13 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 	});
 }
 
-function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, json: boolean, reporter?: ProgressReporter) {
-	const { target, selected, skipped, sharedBranches } = selectSessionTree(root, slug);
+function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, json: boolean, reporter?: ProgressReporter, observer?: TreePreviewObserver) {
+	const { target, selected, skipped, sharedBranches, ancestryIssues } = selectSessionTree(root, slug);
+	observer?.start([...selected.map((record) => record.slug), ...ancestryIssues.map((issue) => issue.slug)], ancestryIssues);
 	const plans: Record<string, unknown>[] = [];
 	const report = reporter ?? progressReporter("finish", json);
 	for (const record of selected) {
+		observer?.checking(record.slug);
 		try {
 			const plan = previewFinish(root, invocationRoot, record.slug, false, keepBranch, report);
 			const branchSets = sessionBranchSets(record);
@@ -553,7 +626,9 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 			plans.push({ ...inspection, sessionId: record.sessionId, parentSessionId: record.parentSessionId,
 				ownedBranches, unresolvedBranches, branchOwnership: record.branches ? "recorded" : "legacy-initial-only",
 				sharedBranches: shared });
+			observer?.planned(plans[plans.length - 1]);
 		} catch (error) {
+			observer?.failed(record.slug, error instanceof Error ? error.message : String(error));
 			skipped.push(`${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`);
 		}
 	}
@@ -568,6 +643,7 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 	const context = keepBranch ? snapshotExactResources(root) : undefined;
 	const processes = keepBranch ? captureProcesses() : undefined;
 	const candidates = keepBranch ? selected.map((record) => {
+		observer?.checking(record.slug);
 		const candidate = inspectCandidate(root, invocationRoot, record.slug,
 			treeInspectionOptions, Date.parse(observedAt), processes, report, context, false);
 		if (record.version !== 3) {
@@ -584,6 +660,7 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 			candidate.problem = [candidate.problem, problem].filter(Boolean).join("; ");
 			delete candidate.snapshot;
 		}
+		observer?.complete(candidate);
 		return candidate;
 	}) : [];
 	const executable = keepBranch && !sharedBranches.length && selected.length > 0 && selected.every((record) => record.version === 3) &&
