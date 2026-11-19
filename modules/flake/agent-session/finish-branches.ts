@@ -6,12 +6,21 @@ import { sessionBaseBranch } from "./inspection.ts";
 import { artifactSummary } from "./artifacts.ts";
 import { CliError, progressReporter, run, writeCommandResult, withInspection, type InspectionProgress } from "./runtime.ts";
 import { FinishOutput } from "./finish-output.ts";
+import { CleanupPreview } from "./cleanup-preview.ts";
+import { cleanupReason, cleanupDiagnostic } from "./batch-output.ts";
 import type { PresentationOptions, ProgressReporter } from "./types.ts";
 
 const hash = (value: unknown) => createHash("sha256").update(JSON.stringify(value)).digest("hex");
 const limitation = "Retained checkout history does not establish ownership and may be incomplete after reflog expiry. Review the listed current local refs; no descendants or remote refs are selected.";
 
-function inspectHistory(root: string, invocationRoot: string, slug: string, json: boolean, reporter?: ProgressReporter) {
+interface ReviewedBranch { name: string; revision: string; baseRef: string; baseRevision: string; sources: string[]; reason?: string }
+interface HistoryObserver {
+	start(metadata: ReturnType<typeof readMetadata>, candidate: ReturnType<typeof inspectCandidate>, names: string[]): void;
+	checking(name: string): void;
+	complete(branch: ReviewedBranch): void;
+}
+
+function inspectHistory(root: string, invocationRoot: string, slug: string, json: boolean, reporter?: ProgressReporter, observer?: HistoryObserver) {
 	assertPrimaryCheckout(root);
 	const metadata = readMetadata(root, slug);
 	const report = reporter ?? progressReporter("finish --branches", json);
@@ -43,7 +52,10 @@ function inspectHistory(root: string, invocationRoot: string, slug: string, json
 	const base = run("git", ["rev-parse", "--verify", baseRef], root);
 	const protectedNames = [git(root, ["branch", "--show-current"]), metadata.defaultBranch, sessionBaseBranch(metadata)];
 	const others = readMetadataInventory(root).filter((record) => record.slug !== slug);
-	const branches = [...evidence].sort(([a], [b]) => a.localeCompare(b)).map(([name, sources]) => {
+	const entries = [...evidence].sort(([a], [b]) => a.localeCompare(b));
+	observer?.start(metadata, candidate, entries.map(([name]) => name));
+	const branches = entries.map(([name, sources]) => {
+		observer?.checking(name);
 		const tip = run("git", ["rev-parse", "--verify", `refs/heads/${name}`], root);
 		let reason: string | undefined;
 		if (tip.status !== 0) reason = "local branch absent or unreadable";
@@ -52,7 +64,8 @@ function inspectHistory(root: string, invocationRoot: string, slug: string, json
 		else if (branchCheckedOutElsewhere(root, name, new Set([metadata.worktreePath]))) reason = "checked out in another worktree";
 		else if (base.status !== 0) reason = `local merge base unavailable: ${baseRef}`;
 		else if (run("git", ["merge-base", "--is-ancestor", tip.stdout, base.stdout], root).status !== 0) reason = `unmerged into ${baseRef}`;
-		return { name, revision: tip.status === 0 ? tip.stdout : "", baseRef, baseRevision: base.status === 0 ? base.stdout : "", sources, ...(reason ? { reason } : {}) };
+		const branch = { name, revision: tip.status === 0 ? tip.stdout : "", baseRef, baseRevision: base.status === 0 ? base.stdout : "", sources, ...(reason ? { reason } : {}) };
+		observer?.complete(branch); return branch;
 	});
 	const rootIdentity = rootKey(root);
 	return { metadata, candidate, branches, rootIdentity,
@@ -80,15 +93,42 @@ export function finishWorktreeBranches(root: string, invocationRoot: string, slu
 	if (!dryRun && !process.stdin.isTTY) throw new CliError("finish --branches requires a terminal for explicit approval; use --dry-run to inspect without removal.");
 	if (!dryRun) return withInspection("Inspecting reviewed branch cleanup", false, options,
 		(progress) => applyHistory(root, invocationRoot, slug, keepBranch, options, progress));
-	const plan = inspectHistory(root, invocationRoot, slug, json);
-	if (dryRun) {
+	if (json) {
+		const plan = inspectHistory(root, invocationRoot, slug, true);
 		writeCommandResult({ version: 1, command: "finish", mode: "worktree-branches", dryRun: true, slug,
 			worktreePath: plan.metadata.worktreePath, branches: plan.branches, historyComplete: false, limitation,
-			executionSupported: Boolean(plan.candidate.snapshot), inspection: plan.candidate, remoteAssetsModified: false }, json,
-			`${describe(plan, !keepBranch)}No resources changed.\n`);
+			executionSupported: Boolean(plan.candidate.snapshot), inspection: plan.candidate, remoteAssetsModified: false }, true, "");
 		return 0;
 	}
-	return 0;
+	return withInspection("Inspecting reviewed branch preview", false, options, (progress) => {
+		if (options.verbose) progress.flush();
+		const nativeReport = progressReporter("finish --branches", false);
+		const report: ProgressReporter = options.verbose ? (phase, status, detail) => nativeReport(phase, status, detail === undefined ? undefined : cleanupDiagnostic(detail)) : () => {};
+		let display: CleanupPreview | undefined, removable = false;
+		const branchLabel = (name: string) => `Reviewed branch · ${name}`;
+		const observer: HistoryObserver = {
+			start(metadata, candidate, names) {
+				progress.flush(); removable = Boolean(candidate.snapshot);
+				const artifacts = candidate.ignoredData?.approvedArtifacts ?? [];
+				display = new CleanupPreview([`Worktree · ${slug}`, ...names.map(branchLabel), ...artifacts.map((path) => `Artifact · ${path}`), `Session record · ${slug}`], options, `reviewed branch cleanup · ${slug}`, [limitation]);
+				display.start();
+				display.complete({ slug: `Worktree · ${slug}`, remove: removable, reason: removable ? "Scope checks passed" : cleanupReason(candidate.reason), details: [metadata.worktreePath, ...candidate.blockers.map((blocker) => blocker.problem ?? cleanupReason(blocker.reason))] });
+				for (const path of artifacts) display.complete({ slug: `Artifact · ${path}`, remove: removable, reason: removable ? "Reviewed artifact scope" : "Worktree cleanup blocked", details: [path, "Preview performs no disposal; link targets are preserved"] });
+				display.complete({ slug: `Session record · ${slug}`, remove: removable, reason: removable ? "Recorded binding" : "Worktree cleanup blocked", details: options.verbose ? [metadataPath(root, slug)] : [] });
+			},
+			checking(name) { display?.checking(branchLabel(name)); },
+			complete(branch) {
+				const reason = branch.reason?.startsWith("protected") ? "Protected branch" : branch.reason?.includes("shared branch") ? "Shared branch preserved" : branch.reason?.startsWith("checked out") ? "Checked out elsewhere"
+					: branch.reason?.startsWith("unmerged") ? "Unmerged branch" : branch.reason ? "Branch needs inspection" : !removable ? "Worktree cleanup blocked" : keepBranch ? "Deletion not requested" : "Eligible reviewed local ref";
+				display?.complete({ slug: branchLabel(branch.name), remove: removable && !keepBranch && !branch.reason, action: "Would delete", reason,
+					details: [`${branch.name} @ ${branch.revision || "unknown"}`, branch.reason ?? `Merged into ${branch.baseRef} @ ${branch.baseRevision}`, `Evidence: ${branch.sources.join(", ")}`] });
+			},
+		};
+		try {
+			inspectHistory(root, invocationRoot, slug, false, report, observer);
+			process.stdout.write(display?.finish() ?? ""); return 0;
+		} catch (error) { display?.abort(); throw error; }
+	});
 }
 
 function applyHistory(root: string, invocationRoot: string, slug: string, keepBranch: boolean, options: PresentationOptions, progress: InspectionProgress): number {

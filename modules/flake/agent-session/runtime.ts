@@ -13,6 +13,32 @@ export class CliError extends Error {
 	}
 }
 
+// Presentation-only sanitization; backend and JSON evidence remain original.
+export function cleanupDiagnostic(text: string): string {
+	return stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, " ")
+		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@")
+		.replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s]+/gi, "$1[redacted]");
+}
+
+function visibleFailure(error: unknown, options: PresentationOptions): CliError {
+	let message = error instanceof Error ? error.message : String(error);
+	const cause = error instanceof Error ? error.cause : undefined;
+	if (cause && !(cause instanceof Error) && typeof cause === "object") {
+		for (const key of ["stdout", "stderr", "errorCode"]) {
+			const detail = (cause as Record<string, unknown>)[key];
+			if (typeof detail === "string" && detail && !message.includes(detail)) message += `\n${detail}`;
+		}
+	}
+	const failure = new CliError(cleanupDiagnostic(message), error instanceof CliError ? error.exitCode : 1);
+	failure.cause = error; failure.color = options.color ?? "auto"; return failure;
+}
+
+export function resourceResult(slug: string, state: string, detail: string, options: PresentationOptions, notes: string[] = []): string {
+	const safe = (value: string) => displayText(cleanupDiagnostic(value));
+	return formatStateTable(["SESSION", "STATE", "DETAIL"], [[safe(slug), safe(state), safe(detail)]], options,
+		(_row, column) => column === 1 ? state.startsWith("Would") ? 36 : state === "Unchanged" ? 2 : state === "Interrupted" ? 33 : 32 : undefined) + (notes.length ? formatLines(notes.map(safe)) : "");
+}
+
 // Node makes terminal stdin nonblocking, so synchronous readSync can fail with
 // EAGAIN. Let a child of the same runtime read asynchronously while the parent
 // waits synchronously, keeping the existing operation lock held throughout.
@@ -222,9 +248,7 @@ export function withInspection<T>(label: string, json: boolean, options: Present
 	try { return operation(progress); }
 	catch (error) {
 		if (json) throw error;
-		const failure = error instanceof CliError ? error : new CliError(String(error));
-		failure.color = options.color ?? "auto";
-		throw failure;
+		throw visibleFailure(error, options);
 	} finally { progress.flush(); }
 }
 
@@ -268,9 +292,7 @@ export function withPreparation<T>(command: string, slug: string, json: boolean,
 	try { return operation(report); }
 	catch (error) {
 		if (json) throw error;
-		const failure = error instanceof CliError ? error : new CliError(String(error));
-		failure.color = options.color ?? "auto";
-		throw failure;
+		throw visibleFailure(error, options);
 	} finally { report.flush?.(); }
 }
 

@@ -1,5 +1,5 @@
-import { stripVTControlCharacters } from "node:util";
-import { displayText, formatLines, formatStateTable, styleText } from "./runtime.ts";
+import { displayText, formatLines, formatStateTable, styleText, cleanupDiagnostic } from "./runtime.ts";
+export { cleanupDiagnostic } from "./runtime.ts";
 import type { Outcome } from "./batch.ts";
 import type { PresentationOptions } from "./types.ts";
 
@@ -27,14 +27,6 @@ const outcomeState = (outcome: CleanupOutcome) => outcome.reason === "earlier-ta
 const pendingReasons = ["Not processed", "Revalidating approved scope", "Native worktree removal"];
 const reason = (value: string) => reasons[value] ?? displayText(value.replace(/-/g, " "));
 export const cleanupReason = reason;
-
-// Keep native wording except terminal instructions and credential values. The
-// original backend evidence and JSON envelope are not changed by presentation.
-export function cleanupDiagnostic(text: string): string {
-	return stripVTControlCharacters(text).replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, " ")
-		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1[redacted]@")
-		.replace(/(Authorization:\s*(?:Bearer|Basic)\s+)[^\s]+/gi, "$1[redacted]");
-}
 
 export function writeCleanupDiagnostics(outcomes: CleanupOutcome[], options: PresentationOptions): void {
 	const evidence = new Map<string, CleanupOutcome[]>();

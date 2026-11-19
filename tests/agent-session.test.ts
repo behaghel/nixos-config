@@ -1754,8 +1754,9 @@ describe("worktree branch history finish", () => {
 			expect(plan.branches.map((branch: { name: string }) => branch.name).sort().join(",")).toBe("agent/human,feat/one,feat/two");
 			expect(plan.historyComplete).toBe(false);
 			const text = runCli(fixture.checkout, [...fixture.args, "--dry-run"], fixture.environment);
-			expect(text.stdout).toContain("  preserve: agent/human @");
-			expect(text.stdout).toContain("deletion not requested");
+			expect(text.stdout).toContain("Reviewed branch · agent/human");
+			expect(text.stdout).toContain("Would preserve");
+			expect(text.stdout).toContain("Deletion not requested");
 			expect(readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8")).toBe(old);
 			expect(existsSync(fixture.session.worktreePath)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
@@ -6383,7 +6384,7 @@ describe("agent-session create and start", () => {
 			expect(result.status).toBe(0);
 			expect(result.stderr.includes("STARTED")).toBe(false);
 			expect(result.stderr.includes("COMPLETED")).toBe(false);
-			expect(result.stderr).toContain("Launching agent in");
+			expect(result.stderr).toContain("Launching · git-hygiene · agent/git-hygiene");
 			expect(readFileSync(agentCwd, "utf8").trim()).toBe(worktree);
 			expect(git(worktree, "branch", "--show-current")).toBe(
 				"agent/git-hygiene",
@@ -8248,7 +8249,8 @@ describe("agent-session status, launch, and resume", () => {
 			const result = runCli(worktree, ["git-hygiene", "launch"]);
 
 			expect(result.status).toBe(0);
-			expect(result.stderr).toContain("Launching agent/git-hygiene");
+			expect(result.stderr).toContain("Launching · git-hygiene · agent/git-hygiene");
+			expect((result.stderr.match(/Launching/g) ?? []).length).toBe(1);
 			expect(result.stderr).toContain("dirty");
 			expect(result.stderr).toContain("latest origin/master");
 			expect(readFileSync(join(worktree, "unfinished.txt"), "utf8")).toBe(
@@ -9390,6 +9392,122 @@ const original = fs.readFileSync; fs.readFileSync = (file, ...args) => { if (Str
 		} finally {
 			rmSync(fixture.root, { recursive: true, force: true });
 		}
+	});
+});
+
+describe("remaining command presentation", () => {
+	function setup() {
+		const fixture = createRepositoryFixture();
+		const agent = join(fixture.root, "agent");
+		writeFileSync(agent, "#!/bin/sh\nprintf 'child stdout\\n'\nprintf '\\033[35mchild stderr\\033[0m\\n' >&2\nexit 7\n", { mode: 0o755 });
+		writeConfig(fixture.checkout, agent);
+		const created = runCli(fixture.checkout, ["human", "create", "--json"]);
+		if (created.status !== 0) throw new Error(created.stderr);
+		return { ...fixture, session: JSON.parse(created.stdout).session };
+	}
+
+	it("uses shared state summaries and presentation flags across metadata commands without changing JSON or protocols", () => {
+		const fixture = setup();
+		try {
+			const legacy = JSON.parse(runCli(fixture.checkout, ["legacy", "create", "--json"]).stdout).session;
+			legacy.version = 1; delete legacy.sessionId; delete legacy.parentSessionId; delete legacy.branches;
+			writeFileSync(sessionMetadataPath(fixture.checkout, "legacy"), JSON.stringify(legacy));
+			git(fixture.checkout, "worktree", "add", "-b", "agent/recover", join(fixture.worktrees, "recover"));
+			for (const args of [
+				["uncreated", "create", "--dry-run"],
+				["human", "branch", "create", "feat/presentation"],
+				["legacy", "ownership", "--root", "--dry-run"],
+				["human", "activity", "reconcile", "--dry-run"],
+				["recover", "repair"],
+			]) {
+				const result = runCli(fixture.checkout, [...args, "--color=always", "--verbose"], { NO_COLOR: "1" });
+				if (result.status !== 0) throw new Error(`${args.join(" ")}: ${result.stderr}`);
+				expect(result.stdout).toContain("STATE"); expect(/\u001b\[[0-9;]*m/.test(result.stdout)).toBe(true);
+				expect(/\u001b\[\d+A/.test(result.stdout + result.stderr)).toBe(false);
+				expect(result.stdout.includes("ownership-v1.")).toBe(false);
+				if (args.includes("--dry-run")) expect(result.stdout).toContain("Nothing changed");
+			}
+			for (const args of [["human", "branch", "create", "feat/protocol"], ["legacy", "ownership", "--root", "--dry-run"], ["human", "activity", "reconcile", "--dry-run"]]) {
+				const result = runCli(fixture.checkout, [...args, "--json", "--color=always", "--verbose"]);
+				expect(result.status).toBe(0); expect(JSON.parse(result.stdout).version).toBe(1); expect(result.stderr).toBe("");
+				expect((result.stdout + result.stderr).includes("\u001b")).toBe(false);
+			}
+			for (const command of ["branch", "ownership", "activity", "repair", "launch", "resume", "global-finish"]) expect(runCli(fixture.checkout, ["__complete", `options:${command}`]).stdout).toContain("--verbose");
+			const touch = runCli(fixture.checkout, ["human", "activity", "touch"]);
+			expect(touch.status).toBe(0); expect(touch.stdout + touch.stderr).toBe("");
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("treats shared summary details as data rather than terminal instructions or credential output", () => {
+		const runtime = resolve("modules/flake/agent-session/runtime.ts");
+		const script = `import {resourceResult} from ${JSON.stringify(runtime)}; process.stdout.write(resourceResult('fixture', 'Created', 'safe detail', {color: 'never'}, ['\\u001b[2Jnative note https://demo:secret@example.invalid/path']));`;
+		const result = spawnSync("node", ["--input-type=module", "-e", script], { encoding: "utf8" });
+		expect(result.status).toBe(0); expect(result.stdout.includes("\u001b")).toBe(false); expect(result.stdout.includes("secret")).toBe(false);
+		expect(result.stdout).toContain("native note https://[redacted]@example.invalid/path");
+	});
+
+	it("redacts human-owned argument errors while keeping protected JSON diagnostics original", () => {
+		const fixture = setup();
+		try {
+			const option = "--bad=https://demo:secret@example.invalid/path";
+			const human = runCli(fixture.checkout, ["human", "launch", option]);
+			expect(human.status).toBe(64); expect(human.stderr.includes("secret")).toBe(false); expect(human.stderr).toContain("https://[redacted]@example.invalid/path");
+			const json = runCli(fixture.checkout, ["fresh", "create", option, "--json"]);
+			expect(json.status).toBe(64); expect(json.stderr).toContain(option);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("retains native preparation failure evidence while leaving child streams and credentials untouched at their boundary", () => {
+		const fixture = setup();
+		try {
+			const bin = join(fixture.root, "bin"); mkdirSync(bin);
+			const executable = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+			writeFileSync(join(bin, "git"), `#!/bin/sh\nif [ "$1" = fetch ]; then printf 'fixture native fetch stdout\\n'; printf 'fatal: fixture denied https://demo:secret@example.invalid/path\\n' >&2; exit 1; fi\nexec ${tomlString(executable)} "$@"\n`, { mode: 0o755 });
+			const result = runCli(fixture.checkout, ["human", "launch", "--color=never"], { PATH: `${bin}:${process.env.PATH}` });
+			expect(result.status).toBe(1); expect(result.stderr).toContain("fixture native fetch stdout");
+			expect(result.stderr).toContain("fatal: fixture denied https://[redacted]@example.invalid/path");
+			expect((result.stdout + result.stderr).includes("secret")).toBe(false); expect(result.stdout.includes("child stdout")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps created-but-unrecorded branch evidence uncertain rather than claiming no changes", () => {
+		const fixture = setup();
+		try {
+			const preload = join(fixture.root, "record-error.mjs");
+			writeFileSync(preload, `import fs from 'node:fs'; import {syncBuiltinESMExports} from 'node:module';
+const original = fs.renameSync; fs.renameSync = (from, to) => { if (String(to).endsWith('/agent-session/sessions/human.json')) throw new Error('fixture metadata EIO'); return original(from, to); }; syncBuiltinESMExports();`);
+			const result = runCli(fixture.checkout, ["human", "branch", "create", "feat/unclaimed", "--color=never"], { NODE_OPTIONS: `--import=${preload}` });
+			expect(result.status).toBe(1); expect(result.stderr).toContain("was created but ownership recording failed; preserved as unclaimed");
+			expect(result.stderr).toContain("fixture metadata EIO"); expect(result.stdout.includes("Created")).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", "feat/unclaimed")).toContain("feat/unclaimed");
+			expect(JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "human"), "utf8")).branches.some((branch: {name: string}) => branch.name === "feat/unclaimed")).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("keeps launch and resume handoffs compact without changing child streams or exit status", () => {
+		const fixture = setup();
+		try {
+			for (const command of ["launch", "resume"]) {
+				const result = runCli(fixture.checkout, ["human", command, "--color=never"]);
+				expect(result.status).toBe(7); expect(result.stdout).toContain("child stdout\n"); expect(result.stderr).toContain("\u001b[35mchild stderr\u001b[0m\n");
+				expect((result.stderr.match(/Launching/g) ?? []).length).toBe(1);
+				expect(result.stderr.includes("STARTED")).toBe(false); expect(existsSync(fixture.session.worktreePath)).toBe(true);
+			}
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("shows read-only historical assets as proposals without inferring ownership or changing refs", () => {
+		const fixture = setup();
+		try {
+			git(fixture.session.worktreePath, "switch", "-c", "feat/reviewed-history");
+			const refs = git(fixture.checkout, "for-each-ref", "--format=%(refname):%(objectname)");
+			const args = ["human", "finish", "--branches", "--dry-run", "--delete-branches"];
+			const human = runCli(fixture.checkout, [...args, "--color=never"]), json = runCli(fixture.checkout, [...args, "--json"]);
+			expect(human.status).toBe(0);
+			for (const text of ["Reviewed branch", "Would delete", "feat/reviewed-history", "does not establish ownership", "Nothing changed"]) expect(human.stdout).toContain(text);
+			expect(human.stderr.includes("STARTED")).toBe(false); expect(JSON.parse(json.stdout).mode).toBe("worktree-branches");
+			expect(git(fixture.checkout, "for-each-ref", "--format=%(refname):%(objectname)")).toBe(refs); expect(existsSync(fixture.session.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	});
 });
 

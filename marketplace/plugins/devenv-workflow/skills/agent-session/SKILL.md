@@ -119,6 +119,20 @@ Only explicitly configured ignored local settings may be linked into new
 worktrees. Never copy credentials, private Pi histories, `.pi/npm/`, runtime state
 or generated agent configuration. Read local-link policy; do not invent links.
 
+## Shared human output
+
+On providers advertising shared presentation flags, launch/resume, repair, branch
+creation, ownership mapping and activity reconciliation support colour and verbose
+controls, as do cleanup previews/apply. Verify installed usage and completion
+support first. These controls add no JSON interface, consent or mutation authority.
+Ownership previews keep full receipts in existing JSON rather than human output.
+Reconciliation still reviews exact records and acknowledges interruption only after
+its existing approval/rechecks; a state table is never permission to acknowledge.
+Launch/resume hand off once and leave child streams/exit behaviour untouched.
+`run`, `cd`, completion and successful silent `activity touch` retain their existing
+boundaries; touch takes no presentation flags. Personal colour settings do not
+supply repair, mapping, reconciliation, retirement or force authority.
+
 ## Create session-owned branches explicitly
 
 After verifying that the installed CLI supports `branch create`, use
@@ -331,6 +345,12 @@ refs only; it never fetches. Proposed removals do not prove apply-time guard
 eligibility. Previews never write approval state or authorize cleanup; JSON
 schema, selected-plan filtering and progress events remain unchanged. Verify the
 installed interface before assuming these flags apply to another preview selector.
+
+Providers advertising historical preview presentation flags show read-only live
+reviewed-asset proposals/counts with the checkout-history limitation visible.
+`Reviewed branch` never means owned branch. Eligible requested refs say `Would
+delete`; protected/shared/unmerged refs remain preserved. No approval, fetch,
+mutation, ownership mapping or automated deletion authority is introduced.
 
 On versions supporting historical branch review, a human operator can run
 `as <task-slug> finish --branches`. It selects one recorded worktree and candidate

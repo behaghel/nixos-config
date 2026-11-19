@@ -6,6 +6,7 @@ import { cleanupDiagnostic } from "./batch-output.ts";
 export interface CleanupProposal {
 	slug: string;
 	remove: boolean;
+	action?: "Would delete";
 	reason: string;
 	details: string[];
 }
@@ -29,7 +30,7 @@ export class CleanupPreview {
 
 	private state(slug: string): string {
 		const result = this.results.get(slug);
-		return result ? result.remove ? "Would remove" : "Would preserve" : this.current === slug ? "Checking" : "Waiting";
+		return result ? result.remove ? result.action ?? "Would remove" : "Would preserve" : this.current === slug ? "Checking" : "Waiting";
 	}
 
 	private render(final: boolean): string {

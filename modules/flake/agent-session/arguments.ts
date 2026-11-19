@@ -126,7 +126,8 @@ function unknownOption(
 	);
 }
 
-export function parseOwnershipArguments(args: string[]): OwnershipOptions {
+export function parseOwnershipArguments(input: string[]): OwnershipOptions {
+	const { args, color, verbose } = presentationArguments(input);
 	const [slug, ...tail] = args;
 	let parent: string | null | undefined, expected: string | undefined;
 	let dryRun = false, json = false, yes = false;
@@ -149,25 +150,28 @@ export function parseOwnershipArguments(args: string[]): OwnershipOptions {
 	if (!slug || parent === undefined) throw argumentError("Use: agent-session <slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json].");
 	if (dryRun && (expected || yes)) throw argumentError("Ownership preview does not accept approval flags.");
 	if (!dryRun && (!expected || !yes)) throw argumentError("Ownership mapping requires a reviewed --expected receipt and --yes.");
-	return { slug, parent, dryRun, json, yes, expected };
+	return { slug, parent, dryRun, json, yes, expected, color, verbose };
 }
 
-export function parseActivityArguments(args: string[]): { slug: string; action: "touch" | "reconcile"; dryRun: boolean; json: boolean } {
-	const [slug, action, ...options] = args;
-	if (slug && action === "touch" && options.length === 0) return { slug, action, dryRun: false, json: false };
+export function parseActivityArguments(input: string[]): PresentationOptions & { slug: string; action: "touch" | "reconcile"; dryRun: boolean; json: boolean } {
+	const [slug, action, ...tail] = input;
+	if (slug && action === "touch" && tail.length === 0) return { slug, action, dryRun: false, json: false };
+	if (action === "touch") throw argumentError("activity touch takes no presentation or approval flags.");
+	const { args: options, color, verbose } = presentationArguments(tail);
 	if (!slug || action !== "reconcile" || options.some((option) => !["--dry-run", "--json"].includes(option)) ||
 		(options.includes("--json") && !options.includes("--dry-run"))) {
 		throw argumentError("Use: agent-session <slug> activity touch, or agent-session <slug> activity reconcile [--dry-run [--json]]. Reconciliation requires terminal confirmation; --yes and --force are not supported.");
 	}
-	return { slug, action, dryRun: options.includes("--dry-run"), json: options.includes("--json") };
+	return { slug, action, dryRun: options.includes("--dry-run"), json: options.includes("--json"), color, verbose };
 }
 
-export function parseBranchArguments(args: string[]): { slug: string; name: string; json: boolean } {
+export function parseBranchArguments(input: string[]): PresentationOptions & { slug: string; name: string; json: boolean } {
+	const { args, color, verbose } = presentationArguments(input);
 	const [slug, action, name, ...options] = args;
 	if (!slug || action !== "create" || !name || options.some((option) => option !== "--json") || options.length > 1) {
 		throw argumentError("Use: agent-session <task-slug> branch create <name> [--json]. Creates without switching; plain Git branches are not adopted.");
 	}
-	return { slug, name, json: options.includes("--json") };
+	return { slug, name, json: options.includes("--json"), color, verbose };
 }
 
 function presentationArguments(input: string[]): PresentationOptions & { args: string[] } {
@@ -182,6 +186,11 @@ function presentationArguments(input: string[]): PresentationOptions & { args: s
 		return false;
 	});
 	return { args, color: personalColor(color, args.includes("--json")), verbose };
+}
+
+export function parseSessionPresentation(command: string, input: string[]): PresentationOptions & { slug: string } {
+	const { args, color, verbose } = presentationArguments(input);
+	return { slug: parseRequiredSlug(command, args), color, verbose };
 }
 
 export function parseCreateArguments(input: string[]): PresentationOptions & {
@@ -320,8 +329,8 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 		}
 	}
 	const presentedApply = !dryRun && Boolean(slug ? all || branches : all || gone);
-	const presentedPreview = dryRun && (all || !slug && gone);
-	if ((all || branches || gone) && !presentedApply && !presentedPreview && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a single-session selector, recursive/bulk apply or preview, or historical apply.");
+	const presentedPreview = dryRun && (all || branches || !slug && gone);
+	if ((all || branches || gone) && !presentedApply && !presentedPreview && input.some((argument) => argument === "--verbose" || argument.startsWith("--color="))) throw argumentError("Presentation flags require a supported cleanup selector.");
 	if (branches && (!slug || all || gone || force || yes || expected || (json && !dryRun))) throw argumentError("finish --branches requires one slug, terminal confirmation (or --dry-run), and no --all, --gone, --force, --yes or --expected.");
 	if ((!slug && !all && !gone) || (gone && (Boolean(slug) || all))) {
 		throw argumentError(
@@ -461,19 +470,19 @@ function usage(): string {
 		"  as <task-slug> cd (shell integration required)",
 		"  agent-session <task-slug> cd (print the worktree path)",
 		"  agent-session <task-slug> run <command> [args...]",
-		"  agent-session <task-slug> branch create <name> [--json] (create and record ownership without switching)",
-		"  agent-session <task-slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json] (explicitly reviewed legacy mapping)",
+		"  agent-session <task-slug> branch create <name> [--json] [--color=auto|always|never] [--verbose] (create and record ownership without switching)",
+		"  agent-session <task-slug> ownership (--root | --parent <slug>) (--dry-run | --expected <receipt> --yes) [--json] [--color=auto|always|never] [--verbose] (explicitly reviewed legacy mapping)",
 		"  agent-session <task-slug> create [--dry-run] [--json] [--color=auto|always|never] [--verbose] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
-		"  agent-session <task-slug> launch",
+		"  agent-session <task-slug> launch [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> start [--no-agent] [--color=auto|always|never] [--verbose] [--pr <number-or-url> [--trust-pr] [-c|--create-branch]]",
-		"  agent-session <task-slug> resume (recorded creator conversation in parent, otherwise latest own conversation)",
+		"  agent-session <task-slug> resume [--color=auto|always|never] [--verbose] (recorded creator conversation in parent, otherwise latest own conversation)",
 		"  agent-session <task-slug> list --inspect [--json] [--refresh] [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> activity touch (record current engagement, without changing operation records)",
-		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] (review and acknowledge interrupted operations, never mark completion)",
-		"  agent-session <task-slug> repair",
+		"  agent-session <task-slug> activity reconcile [--dry-run [--json]] [--color=auto|always|never] [--verbose] (review and acknowledge interrupted operations, never mark completion)",
+		"  agent-session <task-slug> repair [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> finish [--keep-branch|--delete-branches] [--expected <receipt>] [--force] [--yes] [--dry-run [--json]] [--color=auto|always|never] [--verbose]",
 		"  agent-session <task-slug> finish --branches [--keep-branch|--delete-branches] [--color=auto|always|never] [--verbose] (review branches used in this worktree and reuse the asset plan; no descendants)",
-		"  agent-session <task-slug> finish --branches --dry-run [--keep-branch|--delete-branches] [--json] (read-only branch-history review)",
+		"  agent-session <task-slug> finish --branches --dry-run [--keep-branch|--delete-branches] [--json] [--color=auto|always|never] [--verbose] (read-only reviewed-asset proposal table)",
 		"  agent-session <task-slug> finish --all [--keep-branch|--delete-branches] [--color=auto|always|never] [--verbose] (review recorded descendants, confirm once and reuse the asset plan; branches preserved by default)",
 		"  agent-session <task-slug> finish --all --dry-run [--keep-branch|--delete-branches] [--json] [--color=auto|always|never] [--verbose] (read-only proposal table; recorded descendants before their parent)",
 		"  agent-session <task-slug> finish --all --keep-branch --expected <tree-receipt> --yes [--json] [--color=auto|always|never] [--verbose] (guarded branch-preserving recursive cleanup; state output)",
