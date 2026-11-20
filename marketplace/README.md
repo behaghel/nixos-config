@@ -44,6 +44,7 @@ pi install /absolute/path/to/nixos-config/marketplace/plugins/devenv-workflow
 pi install /absolute/path/to/nixos-config/marketplace/plugins/spec-driven
 pi install /absolute/path/to/nixos-config/marketplace/plugins/spec-tdd
 pi install /absolute/path/to/nixos-config/marketplace/plugins/ux-stories
+pi install /absolute/path/to/nixos-config/marketplace/plugins/session-reflection
 ```
 
 Local packages load in place, without copying or dependency installation. Keep
@@ -79,6 +80,7 @@ Repository-local skills in `.agents/skills/` remain separate from this catalogue
 | `emacs` | Live metadata inspection and approval-gated Elisp evaluation | `emacs-live` |
 | `spec-driven` | Specification collection/verification, coverage tool | `spec-collector`, `spec-verifier` |
 | `spec-tdd` | Iterative delivery guidance, `/tdd-*` | `tdd-planner` |
+| `session-reflection` | On-demand `/reflect:all`, `/reflect:efficiency`, `/reflect:quality`, `/reflect:arch` | `session-reflection` |
 | `ux-stories` | Graphical UX workflow, `/story-*` | `story-writer` |
 
 Each plugin's `package.json` declares its Pi extensions and skills. Commands are
