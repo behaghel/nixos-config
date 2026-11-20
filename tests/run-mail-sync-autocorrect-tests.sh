@@ -73,4 +73,46 @@ export PASS_KEYCHAIN_BIN="$(nix build --no-link --print-out-paths --impure --exp
     pkgs = flake.inputs.nixpkgs.legacyPackages.${system};
   }")/bin/pass-keychain"
 
-exec bats "$@" tests/mail-sync-autocorrect.bats tests/mail-keychain.bats
+# Exercise both platform branches with native executables and fake GPG.  The
+# Linux fixture substitutes coreutils for util-linux; tests bypass file locking.
+platform_expr=$(cat <<'EOF'
+let
+  flake = builtins.getFlake ("git+file://" + toString ./.);
+  pkgs = flake.inputs.nixpkgs.legacyPackages.${builtins.currentSystem};
+  gpg = pkgs.symlinkJoin {
+    name = "mail-sync-test-gpg";
+    paths = [
+      (pkgs.writeShellScriptBin "gpgconf" ''
+        printf 'gpgconf %s\n' "$*" >>"$MAIL_SYNC_GPG_LOG"
+      '')
+      (pkgs.writeShellScriptBin "gpg-connect-agent" ''
+        printf 'gpg-connect-agent %s\n' "$*" >>"$MAIL_SYNC_GPG_LOG"
+        if [ "$1" = "scd serialno" ]; then
+          [ "$MAIL_SYNC_TEST_CARD" = 1 ] || exit 1
+          printf 'S SERIALNO synthetic\n'
+        fi
+      '')
+    ];
+  };
+  makeSync = isDarwin: (import ./modules/home/mail/sync.nix {
+    pkgs = pkgs // {
+      stdenv = pkgs.stdenv // { inherit isDarwin; };
+      util-linux = pkgs.coreutils;
+    };
+    lib = pkgs.lib;
+    config = {
+      programs.gpg = { package = gpg; expectSmartcard = true; };
+      home.homeDirectory = "/tmp/mail-sync-platform-tests";
+    };
+    maildir = "/tmp/mail-sync-platform-tests/mail";
+    stampFile = "/tmp/mail-sync-platform-tests/stamp";
+    statusFile = "/tmp/mail-sync-platform-tests/status.json";
+  }).mailSyncScript;
+in { darwin = makeSync true; linux = makeSync false; inherit gpg; }
+EOF
+)
+export MAIL_SYNC_DARWIN_BIN="$(nix build --no-link --print-out-paths --impure --expr "($platform_expr).darwin")/bin/mail-sync-run"
+export MAIL_SYNC_LINUX_BIN="$(nix build --no-link --print-out-paths --impure --expr "($platform_expr).linux")/bin/mail-sync-run"
+export MAIL_SYNC_TEST_GPG_DIR="$(nix build --no-link --print-out-paths --impure --expr "($platform_expr).gpg")/bin"
+
+exec bats "$@" tests/mail-sync-autocorrect.bats tests/mail-keychain.bats tests/mail-sync-smartcard.bats

@@ -12,6 +12,8 @@ On macOS, `hub.mail.keychainPassEntries` declares exact `pass` keys that Home Ma
 
 The synchronization is one-way from Password Store to Keychain. Activation fails if a declared value cannot be decrypted or stored, and does not print secret values. Scheduled macOS mail processes read Keychain without invoking GPG or requiring a YubiKey. Linux continues to read `pass` through the bounded mail credential cache.
 
+The macOS sync job neither starts nor contacts GPG and does not require a card-presence check. Linux retains GPG preparation and the smartcard check when `programs.gpg.expectSmartcard` is enabled.
+
 Adding or rotating a mail secret requires updating `pass` and running Home Manager activation on each macOS machine.
 
 ## Mailbox scope
