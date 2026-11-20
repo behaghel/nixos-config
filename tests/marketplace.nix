@@ -36,7 +36,7 @@ let
   catalogueChecks =
     lib.concatMapStrings
       (name: assert' "plugin exists: ${name}" (builtins.elem name pluginNames))
-      [ "devenv-workflow" "domain-tree" "spec-driven" "spec-tdd" "ux-stories" ]
+      [ "devenv-workflow" "domain-tree" "session-reflection" "spec-driven" "spec-tdd" "ux-stories" ]
     + lib.concatMapStrings validatePlugin pluginNames
     + assert' "standalone grill-me skill exists"
       (builtins.pathExists (marketplaceDir + "/skills/grill-me/SKILL.md"))
@@ -119,6 +119,7 @@ let
     node ${lib.escapeShellArg (toString ./spec-driven-modes.test.mjs)}
     node ${lib.escapeShellArg (toString ./agent-session-skill.test.mjs)} ${lib.escapeShellArg (toString ../.)}
     node --test ${marketplaceDir}/plugins/devenv-workflow/test/session-activity.test.mjs
+    node --test ${marketplaceDir}/plugins/session-reflection/test/extension.test.mjs
     echo ok > "$out"
   '';
 

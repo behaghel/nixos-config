@@ -1,0 +1,19 @@
+{
+  "name": "@behaghel/pi-session-reflection",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "On-demand coding-session reflection on efficiency, quality, and architecture, with approval-gated issue drafting.",
+  "keywords": ["pi-package", "reflection", "skills"],
+  "files": ["pi", "skills", "README.md"],
+  "scripts": {
+    "test": "node --test test/*.test.mjs"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./pi/extension.ts"],
+    "skills": ["./skills"]
+  }
+}
