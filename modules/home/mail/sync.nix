@@ -4,9 +4,10 @@ let
   expectSmartcard = config.programs.gpg.expectSmartcard;
   isDarwin = pkgs.stdenv.isDarwin;
   runtimeInputs =
-    [ pkgs.isync pkgs.mu pkgs.pass pkgs.coreutils pkgs.gawk config.programs.gpg.package ]
-    ++ lib.optionals (!isDarwin) [ pkgs.util-linux ];
-  smartcardGuard = lib.optionalString expectSmartcard ''
+    [ pkgs.isync pkgs.mu pkgs.coreutils pkgs.gawk ]
+    ++ lib.optionals (!isDarwin) [ pkgs.pass config.programs.gpg.package pkgs.util-linux ];
+  # macOS credentials come from Keychain, not the smartcard-backed pass store.
+  smartcardGuard = lib.optionalString (!isDarwin && expectSmartcard) ''
     if [ "''${MAIL_SYNC_SKIP_SMARTCARD:-0}" != 1 ]; then
       if ! ${gpgBin}/gpg-connect-agent 'scd serialno' /bye 2>/dev/null | grep -q '^S SERIALNO'; then
         if [ "$VERBOSE" = 1 ] || [ "''${MAIL_SYNC_DEBUG-}" = 1 ]; then
@@ -149,13 +150,15 @@ EOF
       echo "mail-sync: using mbsync: $MBSYNC_BIN" >&2
       if command -v ldd >/dev/null 2>&1; then ldd "$MBSYNC_BIN" >&2 || true; fi
     fi
-    # Ensure gpg-agent is up and associated with a UI session; improves pinentry reliability under launchd
-    if command -v gpgconf >/dev/null 2>&1; then
-      gpgconf --launch gpg-agent || true
-    fi
-    if command -v gpg-connect-agent >/dev/null 2>&1; then
-      gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
-    fi
+    ${lib.optionalString (!isDarwin) ''
+      # Prepare GPG only where mail credentials use pass rather than Keychain.
+      if command -v gpgconf >/dev/null 2>&1; then
+        gpgconf --launch gpg-agent || true
+      fi
+      if command -v gpg-connect-agent >/dev/null 2>&1; then
+        gpg-connect-agent updatestartuptty /bye >/dev/null 2>&1 || true
+      fi
+    ''}
     last_attempt=$(date +%s)
     last_success=0
     [ -f "$STAMP_FILE" ] && last_success=$(cat "$STAMP_FILE" 2>/dev/null || echo 0)
