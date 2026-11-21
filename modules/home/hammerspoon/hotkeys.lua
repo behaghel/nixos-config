@@ -6,7 +6,6 @@ function M.setup()
     t = { name = "Ghostty" },
     e = { name = "Emacs" }, -- Handled below by native app activation.
     f = { name = "Firefox" },
-    v = { name = "VLC" },
     s = { name = "Slack" },
   }
 

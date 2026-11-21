@@ -66,6 +66,7 @@
     '';
     checks.file-associations = import ../../tests/file-associations.nix { inherit pkgs lib inputs; };
     checks.marketplace = import ../../tests/marketplace.nix { inherit pkgs lib; };
+    checks.hammerspoon = import ../../tests/hammerspoon.nix { inherit pkgs; };
     checks.opencode-model-config-modes = import ../../tests/opencode-model-config-modes.nix { inherit pkgs lib inputs; };
     checks.opencode-context7 = import ../../tests/opencode-context7.nix { inherit pkgs lib inputs; };
     checks.pi-module = import ../../tests/pi-module.nix { inherit pkgs lib inputs; };
