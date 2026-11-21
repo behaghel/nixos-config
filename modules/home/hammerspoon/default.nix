@@ -10,11 +10,17 @@ in
       ".hammerspoon/init.lua".source = ./init.lua;
       ".hammerspoon/hotkeys.lua".source = ./hotkeys.lua;
       ".hammerspoon/fellow.lua".source = ./fellow.lua;
+      ".hammerspoon/vpn.lua".source = ./vpn.lua;
       ".hammerspoon/windows.lua".source = ./windows.lua;
       ".hammerspoon/mail.lua".source = ./mail.lua;
       ".hammerspoon/draw.lua".source = ./draw.lua;
       ".hammerspoon/settings.lua".text = ''
         return {
+          vpn = {
+            profile = "1. ie.vrff.io (Ireland)",
+            passEntry = "veriff/google.com",
+            passCommand = ${builtins.toJSON "${pkgs.pass}/bin/pass"},
+          },
           mail = {
             statusFile = ${builtins.toJSON mailStatusFile},
             logFile = ${builtins.toJSON "${config.home.homeDirectory}/Library/Logs/mail-sync.log"},
