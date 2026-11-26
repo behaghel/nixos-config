@@ -247,6 +247,27 @@ stops later deletions. Failure after native removal is reported as partial or
 uncertain; no automatic rollback, force fallback or replay authorization is
 implied. Inspect interrupted cleanup before taking further action.
 
+## Finish one session
+
+Run `as <slug> finish` from another worktree to see the named session’s assets
+and their readiness. A ready selection finishes without a prompt, even in a
+pipe: it removes the worktree, deletes verified session-owned local branches
+that are merged into their base, and archives the session record. No remote
+assets are modified. The archive is outside `as list` and does not reserve the
+slug; normal Git branch-name collision checks still apply when creating a
+session.
+
+If `finish` detects an interrupted operation, a terminal lets you acknowledge
+it in place, review the refreshed plan and separately confirm cleanup. A live
+or unverifiable operation blocks cleanup; stop the work and recheck. Without a
+terminal, unresolved decisions are reported without applying cleanup.
+
+In personal `agent-session/config.json` (under `$XDG_CONFIG_HOME`, or
+`~/.config`), set `branches` to `preserve` to keep branches or `records` to
+`delete` to remove finished records instead of archiving them. These settings do
+not waive ownership, merge, activity or artifact checks. Explicit receipt-based
+and other flagged finish modes retain their own contracts below.
+
 ## Session-tree ownership and guarded finish
 
 ```sh

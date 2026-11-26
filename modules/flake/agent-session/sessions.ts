@@ -1,5 +1,6 @@
 import {
 	existsSync,
+	linkSync,
 	lstatSync,
 	mkdirSync,
 	readdirSync,
@@ -7,6 +8,7 @@ import {
 	realpathSync,
 	renameSync,
 	rmSync,
+	unlinkSync,
 	writeFileSync,
 } from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
@@ -186,6 +188,22 @@ export function writeMetadata(root: string, metadata: SessionMetadata): void {
 		renameSync(temporaryState, statePath);
 	} finally {
 		rmSync(temporaryState, { force: true });
+	}
+}
+
+// Called under the lifecycle lock, only after native worktree removal.
+export function archiveMetadata(root: string, metadata: SessionMetadata): void {
+	const directory = join(dirname(sessionsDirectory(root)), "archive");
+	mkdirSync(directory, { recursive: true });
+	if (!lstatSync(directory).isDirectory()) throw new CliError("Session archive must be a directory, not a link.");
+	const destination = join(directory, `${metadata.sessionId ?? randomUUID()}.json`);
+	const temporary = join(directory, `.archive-${randomUUID()}.tmp`);
+	writeFileSync(temporary, `${JSON.stringify({ ...metadata, finishedAt: new Date().toISOString() }, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+	try {
+		linkSync(temporary, destination); // Never replace an earlier archive.
+		unlinkSync(metadataPath(root, metadata.slug));
+	} finally {
+		unlinkSync(temporary);
 	}
 }
 

@@ -272,6 +272,13 @@ A handwritten or redirected hook config is not automatically approved. `.pi/npm`
 other client state and unrelated ignored files remain project-specific; do not
 expand policy or infer authority from ignored status merely to clear a refusal.
 
+On versions whose usage advertises scoped plain named finish, `as <slug> finish`
+may apply a ready default selection without a prompt, even in a pipe. Do not
+invoke it as a preview or use its default branch selection as approval. Use the
+read-only/receipt path below for agent-operated retirement. A human can use the
+plain command to review and acknowledge a verified interruption in place,
+without combining that acknowledgment with cleanup consent.
+
 On versions supporting inline terminal approval, a human operator can run
 `as <task-slug> finish --keep-branch`, review the exact target/artifact/branch
 summary and confirm once. The CLI binds and rechecks that scope internally;

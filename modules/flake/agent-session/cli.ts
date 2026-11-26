@@ -5,7 +5,7 @@ import { sessionDirectory, resolveSessionTarget } from "./sessions.ts";
 import { create, createBranch, runInSession, launch, resume, start, repair } from "./lifecycle.ts";
 import { showInventory, showStatus, showExactStatus } from "./inspection.ts";
 import { doctor } from "./doctor.ts";
-import { finish, finishBulk, finishSessionTree } from "./finish.ts";
+import { finish, finishBulk, finishScopedSession, finishSessionTree } from "./finish.ts";
 import { finishWorktreeBranches } from "./finish-branches.ts";
 import { batchFinish } from "./batch.ts";
 import { reconcileActivity, touchActivity } from "./activity.ts";
@@ -159,7 +159,9 @@ export function main(args: string[]): number {
 			if (invocation.global && options.slug) throw legacySessionSyntax(command);
 			const invocationRoot = repositoryRoot();
 			const root = primaryRoot(invocationRoot);
-			if (options.branches) {
+			if (options.scopedReview) {
+				return finishScopedSession(root, invocationRoot, resolveSessionTarget(options.slug!, invocationRoot), options);
+			} else if (options.branches) {
 				return finishWorktreeBranches(root, invocationRoot, resolveSessionTarget(options.slug!, invocationRoot), options.keepBranch, options.dryRun, options.json, options);
 			} else if (options.slug && options.all) {
 				return finishSessionTree(root, invocationRoot, resolveSessionTarget(options.slug, invocationRoot),

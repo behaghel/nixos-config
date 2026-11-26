@@ -271,6 +271,7 @@ export function parseStartArguments(input: string[]): PresentationOptions & {
 
 export function parseFinishArguments(input: string[]): PresentationOptions & {
 	slug?: string;
+	scopedReview: boolean;
 	yes: boolean;
 	force: boolean;
 	keepBranch: boolean;
@@ -337,8 +338,9 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 			"Choose a finish selector: <task-slug> [--all], --all, or --gone.",
 		);
 	}
+	const scopedReview = Boolean(slug && args.length === 1);
 	const automated = yes || expected !== undefined;
-	const usePersonal = !automated && Boolean(slug) && (dryRun || Boolean(process.stdin.isTTY));
+	const usePersonal = !scopedReview && !automated && Boolean(slug) && (dryRun || Boolean(process.stdin.isTTY));
 	const keepBranch = explicitKeep || (!explicitDelete && (!usePersonal || personalBranches() === "preserve"));
 	if (yes && !explicitKeep && !explicitDelete) throw argumentError("Automated finish requires an explicit branch disposition: --keep-branch or --delete-branches.");
 	if (slug && all && force) throw argumentError("Session-scoped --all does not accept --force.");
@@ -354,7 +356,7 @@ export function parseFinishArguments(input: string[]): PresentationOptions & {
 		throw argumentError(
 			"finish --expected requires one slug, --keep-branch and non-forced cleanup.",
 		);
-	return { slug, yes, force, keepBranch, deleteBranches: explicitDelete && !explicitKeep, all, branches, gone, dryRun, json, expected, color, verbose };
+	return { slug, scopedReview, yes, force, keepBranch, deleteBranches: explicitDelete && !explicitKeep, all, branches, gone, dryRun, json, expected, color, verbose };
 }
 
 export function parseBatchArguments(args: string[]): BatchFinishOptions {
@@ -500,6 +502,7 @@ function usage(): string {
 		"",
 		"Personal colour and interactive branch defaults: $XDG_CONFIG_HOME/agent-session/config.json (fallback ~/.config/agent-session/config.json).",
 		"Personal keys: color=auto|always|never; branches=preserve|delete (reviewed interactive cleanup and previews only).",
-		"Branches default to preserve; --keep-branch wins. Automated finish --yes requires an explicit branch flag. JSON ignores colour preferences.",
+		"Plain named finish archives the record and deletes verified merged owned branches by default; blocked or risky assets require review.",
+		"Flagged cleanup modes default to preserving branches; --keep-branch wins. Automated finish --yes requires an explicit branch flag. JSON ignores colour preferences.",
 	].join("\n");
 }

@@ -108,11 +108,10 @@ migration error, while inspection JSON payload shapes remain unchanged.
   interactive cleanup and choose colour behaviour. It is XDG-aware, does not
   load project-level overrides, and cannot enable force, grant consent, change
   eligibility or weaken safety checks. Explicit branch flags override it.
-- AC-12: Read-only previews can reflect effective personal branch preferences,
-  but automated cleanup does not inherit them and states its branch disposition
-  explicitly. Existing JSON schemas, approval receipts and supported automated
-  cleanup protocols retain their meanings; no new noninteractive branch-deletion
-  authority is introduced by this work.
+- AC-12: Read-only previews can reflect effective personal branch preferences.
+  Receipt- and `--yes`-based cleanup retain their explicit branch dispositions
+  and existing JSON and receipt contracts. Plain named `finish` uses the
+  scoped defaults below.
 - AC-13: `--dry-run` remains read-only without confirmation. Ordinary human output
   omits raw receipt tokens and copy-a-receipt instructions; structured previews
   retain the complete receipts required by supported automation.
@@ -148,6 +147,25 @@ migration error, while inspection JSON payload shapes remain unchanged.
   resources and recorded operations without acknowledging or killing anything.
   The probe does not claim to detect remote work or editors whose cwd is elsewhere.
 
+### Plain named finish
+
+- `as <slug> finish` shows a readiness table for the named session, not a
+  repository-wide ancestry inventory. Human recursive output also omits
+  unrelated unknown ancestry; structured diagnostics remain available in JSON.
+- The plain command retires the worktree with or without a terminal when the
+  default selection is ready. It deletes verified, exclusively owned and merged
+  local branches, preserves borrowed or unverified branches, and leaves remote
+  assets alone. Personal `branches: preserve` keeps local branches.
+- Finished records are archived by session identity, marked with a finish time,
+  and omitted from active inventory and ownership claims. Personal `records:
+  delete` opts out of archiving. An archive does not reserve the slug or grant
+  any authority over later sessions or refs.
+- The terminal review can acknowledge a verified interruption, using the same
+  evidence, consent and rechecks as standalone reconciliation. Acknowledgment
+  does not authorize cleanup; `finish` rechecks readiness and asks separately.
+  Live or uncertain activity can be rechecked, not overridden. Local artifact
+  disposal and ambiguous branch decisions do not run automatically.
+
 ## Invariants
 
 - Existing JSON envelopes, fields, receipts and structured progress events remain
@@ -159,8 +177,10 @@ migration error, while inspection JSON payload shapes remain unchanged.
 - A personal default is a request to include eligible branches in a proposal,
   never consent or evidence of ownership. Historical branch review retains its
   own explicitly reviewed selection and eligibility rules.
-- No automatic force fallback, repair, migration, retirement or remote mutation
-  is introduced. Partial and uncertain outcomes retain their original evidence.
+- No automatic force fallback, repair, migration or remote mutation is
+  introduced. Only a requested plain named finish can retire a ready selection
+  without separate confirmation. Partial and uncertain outcomes retain their
+  original evidence.
 - Human presentation changes do not impose arbitrary JSON support on commands
   which do not currently offer it, or turn interactive-only operations into
   automated ones.

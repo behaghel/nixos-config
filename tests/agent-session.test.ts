@@ -2080,12 +2080,86 @@ describe("interrupted activity reconciliation", () => {
 		const bin = join(fixture.root, "bin"); mkdirSync(bin);
 		const lsof = join(bin, "lsof");
 		writeFileSync(lsof, "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
-		const environment = { PATH: `${bin}:${process.env.PATH}` };
+		const environment = { PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: join(fixture.root, "personal-config") };
 		const args = ["human", "activity", "reconcile"];
 		const preview = () => runCli(fixture.checkout, [...args, "--dry-run", "--json"], environment);
 		const terminal = (answer: string, mutation = "") => runFixtureOnTerminal(fixture, ["node", cliScript, ...args], answer, mutation, environment, metadata.worktreePath);
 		return { ...fixture, metadata, operation, record, lsof, environment, args, preview, terminal };
 	}
+
+	it("plain finish reviews and acknowledges only the selected interruption before archiving", () => {
+		const fixture = setup();
+		try {
+			const other = JSON.parse(runCli(fixture.checkout, ["unrelated-legacy", "create", "--json"]).stdout).session;
+			const { sessionId, parentSessionId, branches, ...legacy } = other;
+			writeFileSync(sessionMetadataPath(fixture.checkout, legacy.slug), JSON.stringify({ ...legacy, version: 1 }));
+			const args = ["human", "finish"];
+			const blocked = runCli(fixture.checkout, args, fixture.environment);
+			expect(blocked.status).toBe(1);
+			expect(blocked.stdout).toContain("Interrupted operation");
+			expect(blocked.stdout).not.toContain(legacy.slug);
+			const recursive = runCli(fixture.checkout, ["human", "finish", "--all", "--dry-run"], fixture.environment);
+			expect(recursive.status).toBe(0);
+			expect(recursive.stdout).not.toContain(legacy.slug);
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+			const done = runFixtureOnTerminal(fixture, ["node", cliScript, ...args], ["y\n", "y\n"], "", fixture.environment);
+			if (done.status !== 0) throw new Error(done.output);
+			expect(done.output).toContain("Acknowledge");
+			expect(done.output).toContain("Ready");
+			expect(done.output).not.toContain(legacy.slug);
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(false);
+			const archived = JSON.parse(readFileSync(join(dirname(dirname(fixture.record)), "archive", `${fixture.metadata.sessionId}.json`), "utf8"));
+			expect(archived.finishedAt).toBeTruthy();
+			expect(archived.acknowledgedInterruptions[0].outcome).toBe("interrupted");
+			expect(runCli(fixture.checkout, ["list", "--json"], fixture.environment).stdout).not.toContain('"slug": "human"');
+			expect(git(fixture.checkout, "branch", "--list", fixture.metadata.branch)).toBe("");
+			const replacement = runCli(fixture.checkout, ["human", "create", "--json"], fixture.environment);
+			expect(replacement.status).toBe(0);
+			expect(JSON.parse(replacement.stdout).session.sessionId).not.toBe(fixture.metadata.sessionId);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000);
+
+	it("plain finish retires a clean worktree without a terminal", () => {
+		const fixture = setup();
+		try {
+			writeFileSync(fixture.record, JSON.stringify({ ...fixture.metadata, activeOperations: [] }));
+			const done = runCli(fixture.checkout, ["human", "finish"], fixture.environment);
+			if (done.status !== 0) throw new Error(done.stdout + done.stderr);
+			expect(done.stdout).toContain("Archived");
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(false);
+			expect(existsSync(fixture.record)).toBe(false);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("plain finish respects branch and record preferences without a terminal", () => {
+		const fixture = setup();
+		try {
+			writeFileSync(fixture.record, JSON.stringify({ ...fixture.metadata, activeOperations: [] }));
+			const directory = join(fixture.environment.XDG_CONFIG_HOME, "agent-session");
+			mkdirSync(directory, { recursive: true });
+			writeFileSync(join(directory, "config.json"), JSON.stringify({ branches: "preserve", records: "delete" }));
+			const result = runCli(fixture.checkout, ["human", "finish"], fixture.environment);
+			if (result.status !== 0) throw new Error(result.stdout + result.stderr);
+			expect(result.stdout).toContain("Deleted session record");
+			expect(existsSync(join(dirname(dirname(fixture.record)), "archive"))).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", fixture.metadata.branch)).toContain(fixture.metadata.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
+
+	it("plain finish never offers to acknowledge a live operation", () => {
+		const fixture = setup();
+		try {
+			const live = JSON.stringify({ ...fixture.metadata, activeOperations: [{ ...fixture.operation, pid: process.pid }] });
+			writeFileSync(fixture.record, live);
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "human", "finish"], "n\n", "", fixture.environment);
+			expect(result.status).toBe(1);
+			expect(result.output).toContain("Operation live");
+			expect(result.output).toContain("Recheck readiness?");
+			expect(result.output).not.toContain("Acknowledge");
+			expect(readFileSync(fixture.record, "utf8")).toBe(live);
+			expect(existsSync(fixture.metadata.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	});
 
 	it("reports interrupted activity in doctor without mutating the session", () => {
 		const fixture = setup();
