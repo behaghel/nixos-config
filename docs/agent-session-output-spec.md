@@ -152,6 +152,13 @@ migration error, while inspection JSON payload shapes remain unchanged.
 - `as <slug> finish` shows a readiness table for the named session, not a
   repository-wide ancestry inventory. Human recursive output also omits
   unrelated unknown ancestry; structured diagnostics remain available in JSON.
+- At a terminal, confirmed direct children start collapsed and unselected. The
+  operator can select children, review their assets and blockers, and recheck or
+  deselect a blocked child. Final confirmation names the sessions to finish and
+  the direct children to keep. The command revalidates the selection before any
+  removal, then finishes selected children before the parent. Unselected children
+  retain their records and recorded parent identity. A non-interactive run never
+  selects children.
 - The plain command retires the worktree with or without a terminal when the
   default selection is ready. It deletes verified, exclusively owned and merged
   local branches, preserves borrowed or unverified branches, and leaves remote
