@@ -250,12 +250,18 @@ implied. Inspect interrupted cleanup before taking further action.
 ## Finish one session
 
 Run `as <slug> finish` from another worktree to see the named session’s assets
-and their readiness. A ready selection finishes without a prompt, even in a
-pipe: it removes the worktree, deletes verified session-owned local branches
+and their readiness. When no review is needed, a ready session finishes without
+a prompt, even in a pipe: it removes the worktree, deletes verified session-owned local branches
 that are merged into their base, and archives the session record. No remote
 assets are modified. The archive is outside `as list` and does not reserve the
 slug; normal Git branch-name collision checks still apply when creating a
 session.
+
+At a terminal, confirmed direct children appear collapsed and unselected.
+Open **Review child sessions** to select children and check their readiness. If
+one is blocked, recheck it or deselect it to proceed with the rest. The final
+prompt lists which sessions finish and which children stay. Without a terminal,
+children are never selected.
 
 If `finish` detects an interrupted operation, a terminal lets you acknowledge
 it in place, review the refreshed plan and separately confirm cleanup. A live

@@ -3319,6 +3319,73 @@ finally:
 	return JSON.parse(result.stdout);
 }
 
+describe("plain finish child selection", () => {
+	function setup() {
+		const fixture = createRepositoryFixture("agent-session-finish-children-");
+		writeConfig(fixture.checkout, createFakeAgent(fixture.root, join(fixture.root, "agent-log")));
+		const bin = join(fixture.root, "bin"); mkdirSync(bin);
+		writeFileSync(join(bin, "lsof"), "#!/bin/sh\nprintf 'p1\\000fcwd\\000n/\\000\\n'\n", { mode: 0o755 });
+		const environment = { PATH: `${bin}:${process.env.PATH}`, XDG_CONFIG_HOME: join(fixture.root, "personal-config") };
+		const create = (cwd: string, slug: string) => {
+			const result = runCli(cwd, [slug, "create", "--json"], { ...environment, AGENT_SESSION_CONFIG: runtimeConfigPath(fixture.checkout) });
+			if (result.status !== 0) throw new Error(result.stderr);
+			return JSON.parse(result.stdout).session;
+		};
+		try {
+			const parent = create(fixture.checkout, "parent");
+			const blocked = create(parent.worktreePath, "blocked-child");
+			const ready = create(parent.worktreePath, "ready-child");
+			const unrelated = create(fixture.checkout, "unrelated-root");
+			writeFileSync(join(blocked.worktreePath, "unfinished"), "keep this\n");
+			return { ...fixture, parent, blocked, ready, unrelated, environment };
+		} catch (error) { rmSync(fixture.root, { recursive: true, force: true }); throw error; }
+	}
+
+	it("starts collapsed, then lets the operator deselect a blocked child and finish the rest", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish"],
+				["y\n", "y\n", "y\n", "n\n", "y\n"], "", fixture.environment);
+			if (result.status !== 0) throw new Error(result.output);
+			const opening = result.output.split("Review child sessions?")[0];
+			expect(opening).toContain("2 unselected");
+			expect(opening).not.toContain("blocked-child");
+			expect(result.output).toContain("Uncommitted changes");
+			expect(result.output).toContain("Keep: blocked-child");
+			expect(result.output).not.toContain("unrelated-root");
+			expect(existsSync(fixture.parent.worktreePath)).toBe(false);
+			expect(existsSync(fixture.ready.worktreePath)).toBe(false);
+			expect(readFileSync(join(fixture.blocked.worktreePath, "unfinished"), "utf8")).toBe("keep this\n");
+			const record = JSON.parse(readFileSync(sessionMetadataPath(fixture.checkout, "blocked-child"), "utf8"));
+			expect(record.parentSessionId).toBe(fixture.parent.sessionId);
+			expect(runCli(fixture.checkout, ["blocked-child", "list", "--inspect", "--json"], fixture.environment).status).toBe(0);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000);
+
+	it("refuses the whole selection if a child changes during final confirmation", () => {
+		const fixture = setup();
+		try {
+			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish"],
+				["y\n", "n\n", "y\n", "y\n"], "head", fixture.environment, fixture.ready.worktreePath);
+			expect(result.status).toBe(1);
+			expect(result.output).toContain("scope changed for ready-child");
+			expect(result.output).toContain("No local assets removed.");
+			for (const session of [fixture.parent, fixture.ready, fixture.blocked]) expect(existsSync(session.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000);
+
+	it("leaves children untouched without a terminal", () => {
+		const fixture = setup();
+		try {
+			const result = runCli(fixture.checkout, ["parent", "finish"], fixture.environment);
+			if (result.status !== 0) throw new Error(result.stdout + result.stderr);
+			expect(result.stdout).not.toContain("blocked-child");
+			expect(existsSync(fixture.parent.worktreePath)).toBe(false);
+			for (const child of [fixture.ready, fixture.blocked, fixture.unrelated]) expect(existsSync(child.worktreePath)).toBe(true);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000);
+});
+
 function finishOnTerminal(fixture: ReturnType<typeof createRepositoryFixture>, args: string[], answer: string, mutation = "") {
 	return runFixtureOnTerminal(fixture, ["node", cliScript, ...args], answer, mutation);
 }

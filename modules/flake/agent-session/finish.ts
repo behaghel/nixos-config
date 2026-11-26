@@ -715,8 +715,108 @@ function inspectScopedFinish(root: string, invocationRoot: string, slug: string,
 		? "Session record is not a regular file owned by the current user."
 		: duplicateIdentity ? "Session identity is claimed by another record." : undefined;
 	const ready = Boolean(target && record && !recordProblem && !detached);
-	return { candidate, target, metadata, branches, unmerged, artifacts, ready, recordProblem,
+	const children = metadata?.sessionId && !duplicateIdentity && !context.problem ? [...context.recordsBySlug.values()]
+		.filter((entry) => entry.sessionId && entry.parentSessionId === metadata.sessionId)
+		.sort((a, b) => a.slug.localeCompare(b.slug)) : [];
+	return { candidate, target, metadata, branches, unmerged, artifacts, ready, recordProblem, children,
 		rootIdentity: ready ? JSON.stringify([rootKey(root), record!.dev.toString(), record!.ino.toString()]) : undefined };
+}
+
+type ScopedFinishPlan = ReturnType<typeof inspectScopedFinish>;
+type ScopedFinishDefaults = ReturnType<typeof scopedFinishDefaults>;
+
+function scopedFinishRows(plan: ScopedFinishPlan, defaults: ScopedFinishDefaults): string[][] {
+	const { candidate, metadata, branches, unmerged, artifacts } = plan;
+	const operations = candidate.processEvidence?.operations ?? [];
+	const blockers = candidate.blockers.filter((blocker) => !["live-operation", "uncertain-operation"].includes(blocker.reason))
+		.map((blocker) => blocker.reason === "live-cwd" ? `Processes using worktree: ${candidate.processEvidence?.pids.join(", ")}` : blocker.problem ?? cleanupReason(blocker.reason));
+	for (const operation of operations) blockers.push(`${operation.state === "interrupted" ? "Interrupted operation" : `Operation ${operation.state}`}: ${operation.id} (pid ${operation.pid}, ${operation.hostname})`);
+	if (candidate.git?.currentBranch === null) blockers.push("Detached HEAD; put the current commit on a branch before finishing.");
+	if (plan.recordProblem) blockers.push(plan.recordProblem);
+	const branchNames = new Set([...(candidate.git?.ownedBranches ?? []), ...(metadata?.branches?.map(({ name }) => name) ?? []),
+		...(candidate.git?.currentBranch ? [candidate.git.currentBranch] : [])]);
+	return [
+		["Worktree", plan.ready ? "Ready" : "Blocked", [candidate.worktreePath, ...blockers].filter(Boolean).join(" · ")],
+		...[...branchNames].map((name) => {
+			const branch = branches.find((entry) => entry.name === name);
+			return ["Local branch", branch && !branch.reason ? "Ready to delete" : branch && unmerged.includes(branch) ? "Needs approval" : "Preserve",
+				[name, branch?.reason ?? (branch ? `merged into ${branch.baseRef}` : defaults.keepBranches ? "personal preference"
+					: plan.ready ? "not verified as owned by this session" : "worktree not ready")].filter(Boolean).join(" · ")];
+		}),
+		...artifacts.map((path) => ["Local artifact", "Needs approval", path]),
+		...(metadata ? [["Session record", defaults.archiveRecord ? "Archive" : "Delete", metadata.slug]] : []),
+	];
+}
+
+function showScopedFinish(plan: ScopedFinishPlan, defaults: ScopedFinishDefaults, options: PresentationOptions, showChildren = false): void {
+	const rows = scopedFinishRows(plan, defaults);
+	if (showChildren && plan.children.length) rows.push(["Child sessions", `${plan.children.length} unselected`, "Collapsed; review to select"]);
+	const colors: Record<string, number> = { Blocked: 31, "Needs approval": 33, Preserve: 2 };
+	process.stdout.write(`Finish · ${plan.candidate.slug}\n\n` + formatStateTable(["ASSET", "STATE", "DETAIL"], rows.map((row) => row.map(cleanupDiagnostic)), options,
+		(row, column) => column === 1 ? (colors[rows[row]![1]!] ?? 36) : undefined));
+}
+
+function acknowledgeScopedInterruption(root: string, plan: ScopedFinishPlan, options: PresentationOptions): boolean {
+	const { candidate } = plan;
+	const operations = candidate.processEvidence?.operations ?? [];
+	if (plan.recordProblem || !operations.length || operations.some((operation) => operation.state !== "interrupted") ||
+		candidate.blockers.some((blocker) => ["live-cwd", "unknown-process-evidence", "invoking-worktree", "unresolved-resource"].includes(blocker.reason))) return false;
+	const reconciliation = inspectReconciliation(root, candidate.slug);
+	if (!reconciliation.executionSupported) return false;
+	if (JSON.stringify(reconciliation.metadata) !== JSON.stringify(plan.metadata)) {
+		throw new CliError("Session changed during activity review. No local assets removed.");
+	}
+	confirmReconciliation(root, candidate.slug, reconciliation, options);
+	return true;
+}
+
+function reviewFinishChildren(root: string, invocationRoot: string, parent: ScopedFinishPlan, defaults: ScopedFinishDefaults, options: PresentationOptions): ScopedFinishPlan[] {
+	if (!confirm("Review child sessions? [y/N]")) return [];
+	process.stdout.write(formatStateTable(["CHILD SESSION", "SELECTION"], parent.children.map(({ slug }) => [slug, "Unselected"]), options));
+	const chosen = parent.children.filter(({ slug }) => confirm(`Select child ${slug}? [y/N]`));
+	const selected: ScopedFinishPlan[] = [];
+	for (const child of chosen) {
+		for (;;) {
+			const plan = inspectScopedFinish(root, invocationRoot, child.slug, defaults);
+			if (plan.metadata?.sessionId !== child.sessionId || plan.metadata?.parentSessionId !== parent.metadata?.sessionId) {
+				throw new CliError(`Child ${child.slug} changed since selection. No local assets removed.`);
+			}
+			showScopedFinish(plan, defaults, options);
+			if (plan.ready) { selected.push(plan); break; }
+			if (acknowledgeScopedInterruption(root, plan, options)) continue;
+			if (!confirm(`Recheck ${child.slug}? No deselects it. [y/N]`)) break;
+		}
+	}
+	return selected;
+}
+
+// All selected scopes must still agree before the first native effect. Recheck
+// a target again just before its own effect: Git and unmanaged processes don't
+// take our lifecycle lock.
+function assertScopedFinishUnchanged(root: string, invocationRoot: string, plan: ScopedFinishPlan, defaults: ScopedFinishDefaults): void {
+	const current = inspectScopedFinish(root, invocationRoot, plan.candidate.slug, defaults);
+	if (!current.ready || current.target?.fingerprint !== plan.target?.fingerprint || current.rootIdentity !== plan.rootIdentity ||
+		JSON.stringify(current.branches) !== JSON.stringify(plan.branches) || JSON.stringify(defaults) !== JSON.stringify(scopedFinishDefaults())) {
+		throw new CliError(`Finish readiness or scope changed for ${plan.candidate.slug}; review it again.`);
+	}
+	for (const branch of plan.branches.filter((branch) => !branch.reason)) {
+		assertTreeBranchUnchanged(root, branch, new Set([plan.target!.worktreePath]));
+	}
+}
+
+function applyScopedFinish(root: string, plan: ScopedFinishPlan, defaults: ScopedFinishDefaults): void {
+	const { target, metadata, branches } = plan;
+	const slug = plan.candidate.slug;
+	assertNoWorktreeActivity(metadata!);
+	cleanupGit(root, ["worktree", "remove", target!.worktreePath], `Could not remove the local worktree for ${slug}.`);
+	try {
+		for (const branch of branches.filter((branch) => !branch.reason)) deleteTreeBranch(root, branch);
+		if (defaults.archiveRecord) archiveMetadata(root, metadata!);
+		else unlinkSync(metadataPath(root, slug));
+	} catch (error) {
+		throw new CliError(`Worktree for ${slug} removed, but finish did not complete: ${error instanceof Error ? error.message : String(error)}\nInspect the remaining local assets before retrying.`);
+	}
+	process.stdout.write(`Finished · ${slug}. ${defaults.archiveRecord ? "Archived session record." : "Deleted session record."} Remote assets unchanged.\n`);
 }
 
 export function finishScopedSession(root: string, invocationRoot: string, slug: string, options: PresentationOptions): number {
@@ -725,65 +825,36 @@ export function finishScopedSession(root: string, invocationRoot: string, slug: 
 	let reviewedInterruption = false;
 	for (;;) {
 		const plan = inspectScopedFinish(root, invocationRoot, slug, defaults);
-		const { candidate, target, metadata, branches, unmerged, artifacts } = plan;
-		const operations = candidate.processEvidence?.operations ?? [];
-		const blockers = candidate.blockers.filter((blocker) => !["live-operation", "uncertain-operation"].includes(blocker.reason))
-			.map((blocker) => blocker.reason === "live-cwd" ? `Processes using worktree: ${candidate.processEvidence?.pids.join(", ")}` : blocker.problem ?? cleanupReason(blocker.reason));
-		for (const operation of operations) blockers.push(`${operation.state === "interrupted" ? "Interrupted operation" : `Operation ${operation.state}`}: ${operation.id} (pid ${operation.pid}, ${operation.hostname})`);
-		if (candidate.git?.currentBranch === null) blockers.push("Detached HEAD; put the current commit on a branch before finishing.");
-		if (plan.recordProblem) blockers.push(plan.recordProblem);
-		const branchNames = new Set([...(candidate.git?.ownedBranches ?? []), ...(metadata?.branches?.map(({ name }) => name) ?? []),
-			...(candidate.git?.currentBranch ? [candidate.git.currentBranch] : [])]);
-		const rows = [
-			["Worktree", plan.ready ? "Ready" : "Blocked", [candidate.worktreePath, ...blockers].filter(Boolean).join(" · ")],
-			...[...branchNames].map((name) => {
-				const branch = branches.find((entry) => entry.name === name);
-				return ["Local branch", branch && !branch.reason ? "Ready to delete" : branch && unmerged.includes(branch) ? "Needs approval" : "Preserve",
-					[name, branch?.reason ?? (branch ? `merged into ${branch.baseRef}` : defaults.keepBranches ? "personal preference"
-						: plan.ready ? "not verified as owned by this session" : "worktree not ready")].filter(Boolean).join(" · ")];
-			}),
-			...artifacts.map((path) => ["Local artifact", "Needs approval", path]),
-			...(metadata ? [["Session record", defaults.archiveRecord ? "Archive" : "Delete", slug]] : []),
-		];
-		process.stdout.write(`Finish · ${slug}\n\n` + formatStateTable(["ASSET", "STATE", "DETAIL"], rows.map((row) => row.map(cleanupDiagnostic)), options,
-			(row, column) => column === 1 ? ({ Blocked: 31, "Needs approval": 33, Preserve: 2 }[rows[row]![1]!] ?? 36) : undefined));
-		if (!plan.ready || !target || !metadata) {
-			if (interactive && !plan.recordProblem && operations.length && operations.every((operation) => operation.state === "interrupted") &&
-				!candidate.blockers.some((blocker) => ["live-cwd", "unknown-process-evidence", "invoking-worktree", "unresolved-resource"].includes(blocker.reason))) {
-				const reconciliation = inspectReconciliation(root, slug);
-				if (reconciliation.executionSupported) {
-					confirmReconciliation(root, slug, reconciliation, options);
-					reviewedInterruption = true;
-					continue;
-				}
-			}
+		showScopedFinish(plan, defaults, options, interactive);
+		if (!plan.ready) {
+			if (interactive && acknowledgeScopedInterruption(root, plan, options)) { reviewedInterruption = true; continue; }
 			if (interactive && confirm("Recheck readiness? [y/N]")) continue;
 			throw new CliError("Finish blocked. No local assets removed.");
 		}
-		if ((unmerged.length || artifacts.length) && !interactive) throw new CliError("Confirmation required. Run finish in a terminal to review these assets.");
-		if (reviewedInterruption || unmerged.length || artifacts.length) {
-			const changes = ["remove the worktree", ...(unmerged.length ? [`keep ${unmerged.length} unmerged local branch(es)`] : []),
-				...(artifacts.length ? [`dispose of the ${artifacts.length} listed local artifact(s)`] : [])];
-			if (!confirm(`Finish: ${changes.join(", ")}? [y/N]`)) throw new CliError("Finish cancelled. No local assets removed.");
+		const unreviewed = plan.unmerged.length || plan.artifacts.length;
+		if (unreviewed && !interactive) throw new CliError("Confirmation required. Run finish in a terminal to review these assets.");
+		const reviewChildren = interactive && plan.children.length > 0;
+		const children = reviewChildren ? reviewFinishChildren(root, invocationRoot, plan, defaults, options) : [];
+		const selected = [...children, plan];
+		if (reviewedInterruption || unreviewed || reviewChildren) {
+			const keep = plan.children.filter((child) => !children.some((entry) => entry.metadata?.sessionId === child.sessionId));
+			process.stdout.write(`\nFinish: ${selected.map((entry) => entry.candidate.slug).join(", ")}\n`);
+			if (keep.length) process.stdout.write(`Keep: ${keep.map((child) => child.slug).join(", ")}\n`);
+			if (!confirm("Apply the listed cleanup? [y/N]")) throw new CliError("Finish cancelled. No local assets removed.");
 		}
 		return withOperationLock(root, "finish", () => {
-			const current = inspectScopedFinish(root, invocationRoot, slug, defaults);
-			if (!current.ready || current.target?.fingerprint !== target.fingerprint || current.rootIdentity !== plan.rootIdentity ||
-				JSON.stringify(current.branches) !== JSON.stringify(branches) || JSON.stringify(defaults) !== JSON.stringify(scopedFinishDefaults())) {
-				throw new CliError("Finish readiness or scope changed; review it again. No local assets removed.");
+			try { for (const entry of selected) assertScopedFinishUnchanged(root, invocationRoot, entry, defaults); }
+			catch (error) { throw new CliError(`${error instanceof Error ? error.message : String(error)} No local assets removed.`); }
+			for (const [index, entry] of selected.entries()) {
+				try {
+					if (selected.length > 1) assertScopedFinishUnchanged(root, invocationRoot, entry, defaults);
+					applyScopedFinish(root, entry, defaults);
+				} catch (error) {
+					const remaining = selected.slice(index + 1).map((pending) => pending.candidate.slug);
+					if (remaining.length) process.stderr.write(`Not attempted: ${remaining.join(", ")}\n`);
+					throw error;
+				}
 			}
-			const deletions = branches.filter((branch) => !branch.reason);
-			for (const branch of deletions) assertTreeBranchUnchanged(root, branch, new Set([target.worktreePath]));
-			assertNoWorktreeActivity(metadata);
-			cleanupGit(root, ["worktree", "remove", target.worktreePath], "Could not remove the local session worktree.");
-			try {
-				for (const branch of deletions) deleteTreeBranch(root, branch);
-				if (defaults.archiveRecord) archiveMetadata(root, metadata);
-				else unlinkSync(metadataPath(root, slug));
-			} catch (error) {
-				throw new CliError(`Worktree removed, but finish did not complete: ${error instanceof Error ? error.message : String(error)}\nInspect the remaining local assets before retrying.`);
-			}
-			process.stdout.write(`Finished · ${slug}. ${defaults.archiveRecord ? "Archived session record." : "Deleted session record."} Remote assets unchanged.\n`);
 			return 0;
 		});
 	}
