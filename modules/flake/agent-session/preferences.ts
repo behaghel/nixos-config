@@ -7,6 +7,7 @@ import type { ColorMode } from "./types.ts";
 export interface PersonalPreferences {
 	color?: ColorMode;
 	branches?: "preserve" | "delete";
+	records?: "archive" | "delete";
 }
 
 /** Personal defaults only; never consult project policy or supply consent. */
@@ -26,10 +27,11 @@ function readPreferences(scope: "all" | "branches" = "all"): PersonalPreferences
 	try { value = JSON.parse(contents); }
 	catch { throw new CliError(`Invalid JSON in personal preferences ${JSON.stringify(path)}.`, 64); }
 	if (value === null || typeof value !== "object" || Array.isArray(value) ||
-		Object.keys(value).some((key) => !["color", "branches"].includes(key)) ||
+		Object.keys(value).some((key) => !["color", "branches", "records"].includes(key)) ||
 		(scope !== "branches" && "color" in value && (typeof value.color !== "string" || !["auto", "always", "never"].includes(value.color))) ||
-		("branches" in value && (typeof value.branches !== "string" || !["preserve", "delete"].includes(value.branches)))) {
-		throw new CliError(`Invalid personal preferences ${JSON.stringify(path)}: expected optional color auto|always|never and branches preserve|delete; other settings are unsupported.`, 64);
+		("branches" in value && (typeof value.branches !== "string" || !["preserve", "delete"].includes(value.branches))) ||
+		("records" in value && (typeof value.records !== "string" || !["archive", "delete"].includes(value.records)))) {
+		throw new CliError(`Invalid personal preferences ${JSON.stringify(path)}: expected optional color auto|always|never, branches preserve|delete, and records archive|delete; other settings are unsupported.`, 64);
 	}
 	return value as PersonalPreferences;
 }
@@ -41,6 +43,11 @@ export function personalColor(explicit: ColorMode | undefined, json: boolean): C
 	const preferences = readPreferences();
 	// Only an explicit --color=always overrides NO_COLOR, not an ambient file.
 	return process.env.NO_COLOR ? "never" : preferences.color ?? "auto";
+}
+
+export function scopedFinishDefaults() {
+	const preferences = readPreferences("branches");
+	return { keepBranches: preferences.branches === "preserve", archiveRecord: preferences.records !== "delete" };
 }
 
 export function personalBranches(): "preserve" | "delete" {

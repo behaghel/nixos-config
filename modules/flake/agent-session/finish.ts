@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { FinishOutput, type CleanupScope } from "./finish-output.ts";
+import { confirmReconciliation, inspectReconciliation } from "./activity.ts";
+import { scopedFinishDefaults } from "./preferences.ts";
 import { BatchOutput, cleanupDiagnostic, cleanupReason, type CleanupOutcome } from "./batch-output.ts";
 import { CleanupPreview, type CleanupProposal } from "./cleanup-preview.ts";
 import { inspectTreeBranches, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
@@ -22,6 +24,7 @@ import {
 	readMetadataInventory,
 	assertConfiguredWorktreePath,
 	metadataPath,
+	archiveMetadata,
 	withOperationLock,
 	metadataSlugs,
 	sessionRecordExists,
@@ -41,6 +44,7 @@ import {
 import {
 	CliError,
 	confirm,
+	formatStateTable,
 	progressReporter,
 	runPhase,
 	writeCommandResult,
@@ -610,7 +614,11 @@ export function finishSessionTree(root: string, invocationRoot: string, slug: st
 
 function previewSessionTree(root: string, invocationRoot: string, slug: string, keepBranch: boolean, json: boolean, reporter?: ProgressReporter, observer?: TreePreviewObserver) {
 	const { target, selected, skipped, sharedBranches, ancestryIssues } = selectSessionTree(root, slug);
-	observer?.start([...selected.map((record) => record.slug), ...ancestryIssues.map((issue) => issue.slug)], ancestryIssues);
+	// Keep the structured diagnostics compatible, but don't present unrelated
+	// unknown ancestry as though it belonged to the user's selected tree.
+	const scopedIssues = ancestryIssues.filter((issue) => issue.slug === slug);
+	const scopedSkipped = scopedIssues.map((issue) => `${issue.slug}: ${issue.problem}`);
+	observer?.start([...selected.map((record) => record.slug), ...scopedIssues.map((issue) => issue.slug)], scopedIssues);
 	const plans: Record<string, unknown>[] = [];
 	const report = reporter ?? progressReporter("finish", json);
 	for (const record of selected) {
@@ -629,7 +637,9 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 			observer?.planned(plans[plans.length - 1]);
 		} catch (error) {
 			observer?.failed(record.slug, error instanceof Error ? error.message : String(error));
-			skipped.push(`${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`);
+			const problem = `${record.slug}: ${error instanceof Error ? error.message : String(error)}; preserved.`;
+			skipped.push(problem);
+			scopedSkipped.push(problem);
 		}
 	}
 	const resourceText = plans.map((plan) => {
@@ -669,7 +679,7 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 		observedAt, keepBranch: true, targets: candidates.map((candidate, index) => ({ ...candidate.snapshot!,
 			sessionId: selected[index]!.sessionId!, parentSessionId: selected[index]!.parentSessionId! })) }) : undefined;
 	const resources = candidates.map(({ snapshot, ...candidate }) => ({ ...candidate, ...(snapshot ? { fingerprint: snapshot.fingerprint } : {}) }));
-	const summary = `Selected tree for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}${resources.filter((resource) => resource.reason !== "eligible").map((resource) => `  ${resource.slug}: ${resource.problem ?? resource.reason}\n`).join("")}${skipped.length ? `Preserved/unresolved:\n${skipped.map((problem) => `  - ${problem}`).join("\n")}\n` : ""}`;
+	const summary = `Selected tree for ${slug}: ${plans.map((plan) => plan.slug).join(" -> ") || "no resolved resources"}.\n${resourceText}${resources.filter((resource) => resource.reason !== "eligible").map((resource) => `  ${resource.slug}: ${resource.problem ?? resource.reason}\n`).join("")}${scopedSkipped.length ? `Preserved/unresolved:\n${scopedSkipped.map((problem) => `  - ${problem}`).join("\n")}\n` : ""}`;
 	return {
 		value: { version: 1, command: "finish", mode: "session-all", dryRun: true,
 			slug, sessionId: target.sessionId ?? null, executionSupported: executable, plans, skipped, resources, sharedBranches,
@@ -677,6 +687,106 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 		token, summary,
 		text: `Recursive preview only. ${summary}No resources changed.\n`,
 	};
+}
+
+function inspectScopedFinish(root: string, invocationRoot: string, slug: string, defaults: ReturnType<typeof scopedFinishDefaults>) {
+	assertPrimaryCheckout(root);
+	ensureClean(root);
+	const context = snapshotExactResources(root);
+	const candidate = inspectCandidate(root, invocationRoot, slug, treeInspectionOptions,
+		Date.now(), undefined, undefined, context, false, "worktree-history");
+	const target = candidate.snapshot;
+	const metadata = context.recordsBySlug.get(slug);
+	const branchClaims = sharedBranchClaims([...context.recordsBySlug.values()]);
+	const shared = new Set(branchClaims.filter(({ claims }) => claims.some((claim) => claim.slug === slug)).map(({ name }) => name));
+	const branches = target && !defaults.keepBranches ? inspectTreeBranches(root, [target]).map((branch) => {
+		const reason = metadata?.version !== 3 ? "legacy ownership is not verified"
+			: shared.has(branch.name) ? "shared ownership claim" : branch.reason;
+		return { ...branch, reason };
+	}) : [];
+	const unmerged = branches.filter((branch) => branch.reason?.startsWith("unmerged into "));
+	const artifacts = candidate.ignoredData?.approvedArtifacts ?? [];
+	const detached = candidate.git?.currentBranch === null;
+	// A detached tip can become unreachable even though the checkout is clean.
+	const record = metadata ? lstatSync(metadataPath(root, slug), { bigint: true }) : undefined;
+	const duplicateIdentity = metadata?.sessionId && [...context.recordsBySlug.values()].some((entry) =>
+		entry.slug !== slug && entry.sessionId === metadata.sessionId);
+	const recordProblem = record && (!record.isFile() || !process.getuid || record.uid !== BigInt(process.getuid()))
+		? "Session record is not a regular file owned by the current user."
+		: duplicateIdentity ? "Session identity is claimed by another record." : undefined;
+	const ready = Boolean(target && record && !recordProblem && !detached);
+	return { candidate, target, metadata, branches, unmerged, artifacts, ready, recordProblem,
+		rootIdentity: ready ? JSON.stringify([rootKey(root), record!.dev.toString(), record!.ino.toString()]) : undefined };
+}
+
+export function finishScopedSession(root: string, invocationRoot: string, slug: string, options: PresentationOptions): number {
+	const defaults = scopedFinishDefaults();
+	const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+	let reviewedInterruption = false;
+	for (;;) {
+		const plan = inspectScopedFinish(root, invocationRoot, slug, defaults);
+		const { candidate, target, metadata, branches, unmerged, artifacts } = plan;
+		const operations = candidate.processEvidence?.operations ?? [];
+		const blockers = candidate.blockers.filter((blocker) => !["live-operation", "uncertain-operation"].includes(blocker.reason))
+			.map((blocker) => blocker.reason === "live-cwd" ? `Processes using worktree: ${candidate.processEvidence?.pids.join(", ")}` : blocker.problem ?? cleanupReason(blocker.reason));
+		for (const operation of operations) blockers.push(`${operation.state === "interrupted" ? "Interrupted operation" : `Operation ${operation.state}`}: ${operation.id} (pid ${operation.pid}, ${operation.hostname})`);
+		if (candidate.git?.currentBranch === null) blockers.push("Detached HEAD; put the current commit on a branch before finishing.");
+		if (plan.recordProblem) blockers.push(plan.recordProblem);
+		const branchNames = new Set([...(candidate.git?.ownedBranches ?? []), ...(metadata?.branches?.map(({ name }) => name) ?? []),
+			...(candidate.git?.currentBranch ? [candidate.git.currentBranch] : [])]);
+		const rows = [
+			["Worktree", plan.ready ? "Ready" : "Blocked", [candidate.worktreePath, ...blockers].filter(Boolean).join(" · ")],
+			...[...branchNames].map((name) => {
+				const branch = branches.find((entry) => entry.name === name);
+				return ["Local branch", branch && !branch.reason ? "Ready to delete" : branch && unmerged.includes(branch) ? "Needs approval" : "Preserve",
+					[name, branch?.reason ?? (branch ? `merged into ${branch.baseRef}` : defaults.keepBranches ? "personal preference"
+						: plan.ready ? "not verified as owned by this session" : "worktree not ready")].filter(Boolean).join(" · ")];
+			}),
+			...artifacts.map((path) => ["Local artifact", "Needs approval", path]),
+			...(metadata ? [["Session record", defaults.archiveRecord ? "Archive" : "Delete", slug]] : []),
+		];
+		process.stdout.write(`Finish · ${slug}\n\n` + formatStateTable(["ASSET", "STATE", "DETAIL"], rows.map((row) => row.map(cleanupDiagnostic)), options,
+			(row, column) => column === 1 ? ({ Blocked: 31, "Needs approval": 33, Preserve: 2 }[rows[row]![1]!] ?? 36) : undefined));
+		if (!plan.ready || !target || !metadata) {
+			if (interactive && !plan.recordProblem && operations.length && operations.every((operation) => operation.state === "interrupted") &&
+				!candidate.blockers.some((blocker) => ["live-cwd", "unknown-process-evidence", "invoking-worktree", "unresolved-resource"].includes(blocker.reason))) {
+				const reconciliation = inspectReconciliation(root, slug);
+				if (reconciliation.executionSupported) {
+					confirmReconciliation(root, slug, reconciliation, options);
+					reviewedInterruption = true;
+					continue;
+				}
+			}
+			if (interactive && confirm("Recheck readiness? [y/N]")) continue;
+			throw new CliError("Finish blocked. No local assets removed.");
+		}
+		if ((unmerged.length || artifacts.length) && !interactive) throw new CliError("Confirmation required. Run finish in a terminal to review these assets.");
+		if (reviewedInterruption || unmerged.length || artifacts.length) {
+			const changes = ["remove the worktree", ...(unmerged.length ? [`keep ${unmerged.length} unmerged local branch(es)`] : []),
+				...(artifacts.length ? [`dispose of the ${artifacts.length} listed local artifact(s)`] : [])];
+			if (!confirm(`Finish: ${changes.join(", ")}? [y/N]`)) throw new CliError("Finish cancelled. No local assets removed.");
+		}
+		return withOperationLock(root, "finish", () => {
+			const current = inspectScopedFinish(root, invocationRoot, slug, defaults);
+			if (!current.ready || current.target?.fingerprint !== target.fingerprint || current.rootIdentity !== plan.rootIdentity ||
+				JSON.stringify(current.branches) !== JSON.stringify(branches) || JSON.stringify(defaults) !== JSON.stringify(scopedFinishDefaults())) {
+				throw new CliError("Finish readiness or scope changed; review it again. No local assets removed.");
+			}
+			const deletions = branches.filter((branch) => !branch.reason);
+			for (const branch of deletions) assertTreeBranchUnchanged(root, branch, new Set([target.worktreePath]));
+			assertNoWorktreeActivity(metadata);
+			cleanupGit(root, ["worktree", "remove", target.worktreePath], "Could not remove the local session worktree.");
+			try {
+				for (const branch of deletions) deleteTreeBranch(root, branch);
+				if (defaults.archiveRecord) archiveMetadata(root, metadata);
+				else unlinkSync(metadataPath(root, slug));
+			} catch (error) {
+				throw new CliError(`Worktree removed, but finish did not complete: ${error instanceof Error ? error.message : String(error)}\nInspect the remaining local assets before retrying.`);
+			}
+			process.stdout.write(`Finished · ${slug}. ${defaults.archiveRecord ? "Archived session record." : "Deleted session record."} Remote assets unchanged.\n`);
+			return 0;
+		});
+	}
 }
 
 interface TreeTarget extends Target { sessionId: string; parentSessionId: string | null }

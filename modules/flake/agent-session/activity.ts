@@ -21,7 +21,7 @@ function identity(path: string): string[] {
 	return [stat.dev.toString(), stat.ino.toString()];
 }
 
-function inspectReconciliation(root: string, slug: string) {
+export function inspectReconciliation(root: string, slug: string) {
 	assertPrimaryCheckout(root);
 	const metadata = readMetadata(root, slug);
 	const path = metadataPath(root, slug);
@@ -78,8 +78,16 @@ export function reconcileActivity(root: string, slug: string, dryRun: boolean, j
 		return 0;
 	}
 	if (!process.stdin.isTTY) throw new CliError("Activity reconciliation requires terminal confirmation. Inspect first with activity reconcile --dry-run --json; --yes and --force are not supported.");
+	if (!plan.executionSupported) {
+		process.stdout.write(describe(plan, options));
+		throw new CliError("Activity reconciliation blocked; no metadata changed.");
+	}
+	return confirmReconciliation(root, slug, plan, options);
+}
+
+export function confirmReconciliation(root: string, slug: string, plan: ReturnType<typeof inspectReconciliation>, options: PresentationOptions): number {
+	if (!process.stdin.isTTY || !plan.executionSupported) throw new CliError("Activity reconciliation requires eligible operations and terminal confirmation.");
 	process.stdout.write(describe(plan, options));
-	if (!plan.executionSupported) throw new CliError("Activity reconciliation blocked; no metadata changed.");
 	if (!confirm("Acknowledge these operations as interrupted, not completed? [y/N]")) throw new CliError("Reconciliation cancelled; no metadata changed.");
 	return withOperationLock(root, "activity reconciliation", () => {
 		const current = inspectReconciliation(root, slug);
