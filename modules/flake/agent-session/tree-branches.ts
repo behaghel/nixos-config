@@ -27,7 +27,11 @@ export function inspectTreeBranches(root: string, targets: Target[]): TreeBranch
 			else if ([primaryBranch, metadata.defaultBranch, sessionBaseBranch(metadata)].includes(name)) reason = "protected base branch";
 			else if (branchCheckedOutElsewhere(root, name, worktrees)) reason = "checked out outside the selected tree";
 			else if (base.status !== 0) reason = `local merge base unavailable: ${baseRef}`;
-			else if (run("git", ["merge-base", "--is-ancestor", revision, base.stdout], root).status !== 0) reason = `unmerged into ${baseRef}`;
+			else {
+				const merge = run("git", ["merge-base", "--is-ancestor", revision, base.stdout], root);
+				if (merge.status === 1) reason = `unmerged into ${baseRef}`;
+				else if (merge.status !== 0) reason = `merge status unavailable for ${baseRef}`;
+			}
 			branches.push({ name, revision, baseRef, baseRevision: base.stdout, metadata, ...(reason ? { reason } : {}) });
 		}
 	}
@@ -41,13 +45,13 @@ export function treeBranchSummary(branches: TreeBranch[], deleteEligible: boolea
 		: `  preserve: ${branch.name} (eligible for deletion; merged into ${branch.baseRef})\n`).join("");
 }
 
-export function deleteTreeBranch(root: string, branch: TreeBranch): void {
-	assertTreeBranchUnchanged(root, branch, new Set());
-	deleteBranchRef(root, branch);
+export function deleteTreeBranch(root: string, branch: TreeBranch, allowUnmerged = false): void {
+	assertTreeBranchUnchanged(root, branch, new Set(), allowUnmerged);
+	deleteBranchRef(root, branch, allowUnmerged);
 }
 
-export function assertTreeBranchUnchanged(root: string, branch: TreeBranch, allowedWorktrees: Set<string>): void {
-	assertBranchRefsUnchanged(root, branch, allowedWorktrees);
+export function assertTreeBranchUnchanged(root: string, branch: TreeBranch, allowedWorktrees: Set<string>, allowUnmerged = false): void {
+	assertBranchRefsUnchanged(root, branch, allowedWorktrees, allowUnmerged);
 	if (!sessionBranchSets(branch.metadata, root).owned.includes(branch.name)) throw new CliError(`Branch ownership evidence changed: ${branch.name}; preserved.`);
 	const claims = readMetadataInventory(root).filter((record) =>
 		(record.branches?.some((entry) => entry.name === branch.name) ?? record.branch === branch.name) && record.sessionId !== branch.metadata.sessionId);

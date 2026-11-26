@@ -3251,6 +3251,9 @@ try:
                 if mutation == 'artifact':
                     with open(os.path.join(worktree, '.cache', 'tasks.sqlite'), 'w') as data:
                         data.write('new data during confirmation')
+                elif mutation == 'dirty-content':
+                    with open(os.path.join(worktree, 'unfinished'), 'w') as data:
+                        data.write('modified')
                 elif mutation == 'unapproved':
                     with open(os.path.join(worktree, '.pre-commit-config.yaml'), 'w') as data:
                         data.write('retain unapproved data')
@@ -3337,7 +3340,7 @@ describe("plain finish child selection", () => {
 			const ready = create(parent.worktreePath, "ready-child");
 			const unrelated = create(fixture.checkout, "unrelated-root");
 			writeFileSync(join(blocked.worktreePath, "unfinished"), "keep this\n");
-			return { ...fixture, parent, blocked, ready, unrelated, environment };
+			return { ...fixture, parent, blocked, ready, unrelated, environment, create };
 		} catch (error) { rmSync(fixture.root, { recursive: true, force: true }); throw error; }
 	}
 
@@ -3345,7 +3348,7 @@ describe("plain finish child selection", () => {
 		const fixture = setup();
 		try {
 			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish"],
-				["y\n", "y\n", "y\n", "n\n", "y\n"], "", fixture.environment);
+				["n\n", "y\n", "y\n", "y\n", "n\n", "y\n"], "", fixture.environment);
 			if (result.status !== 0) throw new Error(result.output);
 			const opening = result.output.split("Review child sessions?")[0];
 			expect(opening).toContain("2 unselected");
@@ -3366,13 +3369,58 @@ describe("plain finish child selection", () => {
 		const fixture = setup();
 		try {
 			const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish"],
-				["y\n", "n\n", "y\n", "y\n"], "head", fixture.environment, fixture.ready.worktreePath);
+				["n\n", "y\n", "n\n", "y\n", "y\n"], "head", fixture.environment, fixture.ready.worktreePath);
 			expect(result.status).toBe(1);
 			expect(result.output).toContain("scope changed for ready-child");
 			expect(result.output).toContain("No local assets removed.");
 			for (const session of [fixture.parent, fixture.ready, fixture.blocked]) expect(existsSync(session.worktreePath)).toBe(true);
 		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
 	}, 90000);
+
+	it("keeps a dirty session untouched if discard is declined, and preserves an unmerged branch independently", () => {
+		const fixture = setup();
+		try {
+			const session = fixture.ready;
+			git(session.worktreePath, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Unmerged work");
+			writeFileSync(join(session.worktreePath, "unfinished"), "keep until approved");
+			const args = [session.slug, "finish"];
+			expect(runCli(fixture.checkout, args, fixture.environment).status).toBe(1);
+			const declined = runFixtureOnTerminal(fixture, ["node", cliScript, ...args], ["n\n", "n\n"], "", fixture.environment);
+			expect(declined.status).toBe(1);
+			expect(declined.output).not.toContain("Delete unmerged branch agent/ready-child at");
+			expect(existsSync(join(session.worktreePath, "unfinished"))).toBe(true);
+			const done = runFixtureOnTerminal(fixture, ["node", cliScript, ...args], ["n\n", "y\n", "n\n", "y\n"], "", fixture.environment);
+			if (done.status !== 0) throw new Error(done.output);
+			expect(done.output).toContain("Keep unmerged branch");
+			expect(existsSync(session.worktreePath)).toBe(false);
+			expect(git(fixture.checkout, "branch", "--list", session.branch)).toContain(session.branch);
+		} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+	}, 90000);
+
+	for (const mutation of ["", "head", "dirty-content"]) {
+		it(`finish all previews the cascade and ${mutation ? `rejects changed ${mutation}` : "keeps live descendants"}`, () => {
+			const fixture = setup();
+			try {
+				const grandchild = fixture.create(fixture.ready.worktreePath, "grandchild");
+				git(grandchild.worktreePath, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-m", "Unmerged work");
+				const tip = git(grandchild.worktreePath, "rev-parse", "HEAD");
+				const recordPath = sessionMetadataPath(fixture.checkout, fixture.blocked.slug);
+				writeFileSync(recordPath, JSON.stringify({ ...fixture.blocked, activeOperations: [{ id: "live-child", pid: process.pid, hostname: hostname(), startedAt: new Date().toISOString() }] }));
+				writeFileSync(join(fixture.parent.worktreePath, "unfinished"), "original");
+				const result = runFixtureOnTerminal(fixture, ["node", cliScript, "parent", "finish"], ["y\n", "n\n", "y\n"], mutation,
+					fixture.environment, mutation === "head" ? grandchild.worktreePath : fixture.parent.worktreePath);
+				expect(result.output).toContain("Discard");
+				expect(result.output).toContain("unfinished");
+				expect(result.output).toContain(tip);
+				expect(result.output).toContain("Operation live");
+				expect(result.output).not.toContain("unrelated-root");
+				expect(result.status).toBe(mutation ? 1 : 0);
+				for (const entry of [fixture.parent, fixture.ready, grandchild]) expect(existsSync(entry.worktreePath)).toBe(Boolean(mutation));
+				expect(existsSync(fixture.blocked.worktreePath)).toBe(true);
+				expect(git(fixture.checkout, "branch", "--list", grandchild.branch) !== "").toBe(Boolean(mutation));
+			} finally { rmSync(fixture.root, { recursive: true, force: true }); }
+		}, 90000);
+	}
 
 	it("leaves children untouched without a terminal", () => {
 		const fixture = setup();

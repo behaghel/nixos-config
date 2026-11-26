@@ -33,17 +33,17 @@ export function branchCheckedOutElsewhere(root: string, name: string, allowedWor
 	});
 }
 
-export function assertBranchRefsUnchanged(root: string, branch: BranchRef, allowedWorktrees: Set<string>): void {
+export function assertBranchRefsUnchanged(root: string, branch: BranchRef, allowedWorktrees: Set<string>, allowUnmerged = false): void {
 	if (git(root, ["rev-parse", "--verify", `refs/heads/${branch.name}`]) !== branch.revision ||
 		git(root, ["rev-parse", "--verify", branch.baseRef]) !== branch.baseRevision) throw new CliError(`Branch or merge base changed: ${branch.name}; preserved.`);
 	if (branchCheckedOutElsewhere(root, branch.name, allowedWorktrees)) throw new CliError(`Branch is checked out outside the approved scope: ${branch.name}; preserved.`);
-	if (run("git", ["merge-base", "--is-ancestor", branch.revision, branch.baseRevision], root).status !== 0) throw new CliError(`Branch is no longer safely merged: ${branch.name}; preserved.`);
+	if (!allowUnmerged && run("git", ["merge-base", "--is-ancestor", branch.revision, branch.baseRevision], root).status !== 0) throw new CliError(`Branch is no longer safely merged: ${branch.name}; preserved.`);
 }
 
 // Callers supply either verified ownership or explicit historical-branch
 // approval. Native ref mechanics never infer that authority from a reflog.
-export function deleteBranchRef(root: string, branch: BranchRef): void {
-	assertBranchRefsUnchanged(root, branch, new Set());
+export function deleteBranchRef(root: string, branch: BranchRef, allowUnmerged = false): void {
+	assertBranchRefsUnchanged(root, branch, new Set(), allowUnmerged);
 	const result = spawnSync("git", ["update-ref", "--stdin"], {
 		cwd: root, encoding: "utf8",
 		input: `start\nverify ${branch.baseRef} ${branch.baseRevision}\ndelete refs/heads/${branch.name} ${branch.revision}\nprepare\ncommit\n`,
