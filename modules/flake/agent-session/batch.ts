@@ -252,7 +252,7 @@ function metadataHash(root: string, slug: string, commonDirectory?: string): str
 }
 
 export function inspectCandidate(root: string, invocationRoot: string, slug: string, options: BatchFinishOptions,
-	now = Date.now(), processes?: ProcessSnapshot, report?: ProgressReporter, sharedContext?: ExactInspectionContext, requireInactivity = true, branchScope: "owned" | "worktree-history" = "owned"): Candidate {
+	now = Date.now(), processes?: ProcessSnapshot, report?: ProgressReporter, sharedContext?: ExactInspectionContext, requireInactivity = true, branchScope: "owned" | "worktree-history" = "owned", reviewDirty = false): Candidate {
 	const candidate: Candidate = { slug, reason: "eligible", blockers: [], inspectionComplete: true };
 	const block = (reason: string, problem?: string) => candidate.blockers.push({ reason, ...(problem ? { problem } : {}) });
 	const finish = () => {
@@ -316,7 +316,7 @@ export function inspectCandidate(root: string, invocationRoot: string, slug: str
 		candidate.processEvidence = { observedAt: activity.snapshot.observedAt, source: processes ? "preview-snapshot" : "apply-recheck", pids: activity.pids, operations: activity.operations, ...(activity.snapshot.problem ? { problem: activity.snapshot.problem } : {}) };
 		if (activity.snapshot.problem) candidate.inspectionComplete = false;
 		for (const blocker of activity.blockers) block(blocker.reason, blocker.problem);
-		if (!candidate.blockers.length) {
+		if (candidate.blockers.every(({ reason }) => reviewDirty && reason === "dirty")) {
 			const branches = Object.fromEntries([...new Set([...status.ownedBranches, status.currentBranch!])].sort()
 				.map((branch) => [branch, git(root, ["rev-parse", "--verify", `refs/heads/${branch}`])]));
 			const snapshot = { slug, worktreePath: metadata.worktreePath, metadataHash: metadataHash(root, slug, sharedContext?.commonDirectory), branches };

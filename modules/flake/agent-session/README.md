@@ -263,6 +263,14 @@ one is blocked, recheck it or deselect it to proceed with the rest. The final
 prompt lists which sessions finish and which children stay. Without a terminal,
 children are never selected.
 
+Use **Finish all** in the terminal review to expand confirmed descendants and
+approve the displayed cleanup together, including any listed discards. Blocked
+sessions stay untouched; you can recheck them or proceed with the others. In an
+individual review, dirty-worktree discard and deletion of verified owned,
+unmerged branches are separate, default-No choices. Declining to discard dirty
+work leaves that session alone. The final review lists changed paths and
+unmerged branch tips; changed evidence requires a fresh review.
+
 If `finish` detects an interrupted operation, a terminal lets you acknowledge
 it in place, review the refreshed plan and separately confirm cleanup. A live
 or unverifiable operation blocks cleanup; stop the work and recheck. Without a

@@ -6,11 +6,13 @@ import { BatchOutput, cleanupDiagnostic, cleanupReason, type CleanupOutcome } fr
 import { CleanupPreview, type CleanupProposal } from "./cleanup-preview.ts";
 import { inspectTreeBranches, assertTreeBranchUnchanged, deleteTreeBranch, type TreeBranch } from "./tree-branches.ts";
 import { captureProcesses, inspectCandidate, inspectWorktreeActivity, rootKey, journalStore, residualRecord, completeRemoval, type Candidate, type Target, type Outcome } from "./batch.ts";
-import { existsSync, lstatSync, unlinkSync } from "node:fs";
+import { existsSync, lstatSync, readlinkSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
 import { sessionCommand } from "./arguments.ts";
 import { inspectIgnoredData, ignoredDataProblem, artifactSummary, type IgnoredDataInspection } from "./artifacts.ts";
 import {
 	git,
+	gitRaw,
 	worktreeIsRegistered,
 	assertPrimaryCheckout,
 	ensureClean,
@@ -689,13 +691,45 @@ function previewSessionTree(root: string, invocationRoot: string, slug: string, 
 	};
 }
 
-function inspectScopedFinish(root: string, invocationRoot: string, slug: string, defaults: ReturnType<typeof scopedFinishDefaults>) {
+function dirtyFinishEvidence(worktree: string, changes: NonNullable<NonNullable<Candidate["git"]>["changes"]>): string {
+	const gitDirectory = git(worktree, ["rev-parse", "--absolute-git-dir"]);
+	if (["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer", "BISECT_START"].some((name) => existsSync(join(gitDirectory, name)))) {
+		throw new CliError("A Git operation is in progress; complete or abort it before discarding changes.");
+	}
+	const paths = [...new Set(changes.flatMap(({ path, originalPath }) => originalPath ? [path, originalPath] : [path]))].sort();
+	const files = paths.map((path) => {
+		const parts = path.split("/");
+		let current = worktree;
+		for (const [index, part] of parts.entries()) {
+			if (!part || part.includes("\uFFFD") || [".", "..", ".git"].includes(part.toLowerCase())) throw new CliError(`Cannot safely review changed path: ${path}`);
+			current = join(current, part);
+			let stat;
+			try { stat = lstatSync(current, { bigint: true }); }
+			catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return [path, "absent"]; throw error; }
+			if (index < parts.length - 1 && stat.isDirectory()) continue;
+			if (index === parts.length - 1) {
+				if (stat.isSymbolicLink()) return [path, "link", readlinkSync(current, { encoding: "buffer" }).toString("hex")];
+				if (stat.isFile()) return [path, stat.mode.toString(), git(worktree, ["hash-object", "--no-filters", "--", current])];
+			}
+			throw new CliError(`Cannot safely review changed path: ${path}`);
+		}
+	});
+	return createHash("sha256").update(JSON.stringify([changes, files, gitRaw(worktree, ["ls-files", "--stage", "-z"])])).digest("hex");
+}
+
+function inspectScopedFinish(root: string, invocationRoot: string, slug: string, defaults: ReturnType<typeof scopedFinishDefaults>, reviewDirty = false) {
 	assertPrimaryCheckout(root);
 	ensureClean(root);
 	const context = snapshotExactResources(root);
 	const candidate = inspectCandidate(root, invocationRoot, slug, treeInspectionOptions,
-		Date.now(), undefined, undefined, context, false, "worktree-history");
+		Date.now(), undefined, undefined, context, false, "worktree-history", reviewDirty);
 	const target = candidate.snapshot;
+	const changes = candidate.git?.changes ?? [];
+	let dirtyEvidence: string | undefined, dirtyProblem: string | undefined;
+	if (reviewDirty && target && changes.length) {
+		try { dirtyEvidence = dirtyFinishEvidence(target.worktreePath, changes); }
+		catch (error) { dirtyProblem = error instanceof Error ? error.message : String(error); }
+	}
 	const metadata = context.recordsBySlug.get(slug);
 	const branchClaims = sharedBranchClaims([...context.recordsBySlug.values()]);
 	const shared = new Set(branchClaims.filter(({ claims }) => claims.some((claim) => claim.slug === slug)).map(({ name }) => name));
@@ -714,11 +748,11 @@ function inspectScopedFinish(root: string, invocationRoot: string, slug: string,
 	const recordProblem = record && (!record.isFile() || !process.getuid || record.uid !== BigInt(process.getuid()))
 		? "Session record is not a regular file owned by the current user."
 		: duplicateIdentity ? "Session identity is claimed by another record." : undefined;
-	const ready = Boolean(target && record && !recordProblem && !detached);
+	const ready = Boolean(target && record && !recordProblem && !detached && !dirtyProblem);
 	const children = metadata?.sessionId && !duplicateIdentity && !context.problem ? [...context.recordsBySlug.values()]
 		.filter((entry) => entry.sessionId && entry.parentSessionId === metadata.sessionId)
 		.sort((a, b) => a.slug.localeCompare(b.slug)) : [];
-	return { candidate, target, metadata, branches, unmerged, artifacts, ready, recordProblem, children,
+	return { candidate, target, metadata, branches, unmerged, artifacts, ready, recordProblem, children, changes, dirtyEvidence, dirtyProblem,
 		rootIdentity: ready ? JSON.stringify([rootKey(root), record!.dev.toString(), record!.ino.toString()]) : undefined };
 }
 
@@ -733,14 +767,16 @@ function scopedFinishRows(plan: ScopedFinishPlan, defaults: ScopedFinishDefaults
 	for (const operation of operations) blockers.push(`${operation.state === "interrupted" ? "Interrupted operation" : `Operation ${operation.state}`}: ${operation.id} (pid ${operation.pid}, ${operation.hostname})`);
 	if (candidate.git?.currentBranch === null) blockers.push("Detached HEAD; put the current commit on a branch before finishing.");
 	if (plan.recordProblem) blockers.push(plan.recordProblem);
+	if (plan.dirtyProblem) blockers.push(plan.dirtyProblem);
 	const branchNames = new Set([...(candidate.git?.ownedBranches ?? []), ...(metadata?.branches?.map(({ name }) => name) ?? []),
 		...(candidate.git?.currentBranch ? [candidate.git.currentBranch] : [])]);
 	return [
-		["Worktree", plan.ready ? "Ready" : "Blocked", [candidate.worktreePath, ...blockers].filter(Boolean).join(" · ")],
+		["Worktree", plan.ready ? plan.dirtyEvidence ? "Needs approval" : "Ready" : "Blocked", [candidate.worktreePath, ...blockers].filter(Boolean).join(" · ")],
+		...plan.changes.map(({ path, originalPath, status }) => ["Local change", plan.dirtyEvidence ? "Discard if approved" : "Preserve", `${status} ${originalPath ? `${originalPath} → ` : ""}${path}`]),
 		...[...branchNames].map((name) => {
 			const branch = branches.find((entry) => entry.name === name);
 			return ["Local branch", branch && !branch.reason ? "Ready to delete" : branch && unmerged.includes(branch) ? "Needs approval" : "Preserve",
-				[name, branch?.reason ?? (branch ? `merged into ${branch.baseRef}` : defaults.keepBranches ? "personal preference"
+				[name, ...(branch && unmerged.includes(branch) ? [branch.revision] : []), branch?.reason ?? (branch ? `merged into ${branch.baseRef}` : defaults.keepBranches ? "personal preference"
 					: plan.ready ? "not verified as owned by this session" : "worktree not ready")].filter(Boolean).join(" · ")];
 		}),
 		...artifacts.map((path) => ["Local artifact", "Needs approval", path]),
@@ -750,7 +786,7 @@ function scopedFinishRows(plan: ScopedFinishPlan, defaults: ScopedFinishDefaults
 
 function showScopedFinish(plan: ScopedFinishPlan, defaults: ScopedFinishDefaults, options: PresentationOptions, showChildren = false): void {
 	const rows = scopedFinishRows(plan, defaults);
-	if (showChildren && plan.children.length) rows.push(["Child sessions", `${plan.children.length} unselected`, "Collapsed; review to select"]);
+	if (showChildren && plan.children.length) rows.push(["Child sessions", `${plan.children.length} unselected`, "Collapsed; review individually or choose Finish all"]);
 	const colors: Record<string, number> = { Blocked: 31, "Needs approval": 33, Preserve: 2 };
 	process.stdout.write(`Finish · ${plan.candidate.slug}\n\n` + formatStateTable(["ASSET", "STATE", "DETAIL"], rows.map((row) => row.map(cleanupDiagnostic)), options,
 		(row, column) => column === 1 ? (colors[rows[row]![1]!] ?? 36) : undefined));
@@ -770,19 +806,33 @@ function acknowledgeScopedInterruption(root: string, plan: ScopedFinishPlan, opt
 	return true;
 }
 
-function reviewFinishChildren(root: string, invocationRoot: string, parent: ScopedFinishPlan, defaults: ScopedFinishDefaults, options: PresentationOptions): ScopedFinishPlan[] {
+type ScopedSelection = { plan: ScopedFinishPlan; discard: boolean; deleteUnmerged: Set<string> };
+
+function approveScopedAssets(plan: ScopedFinishPlan): ScopedSelection | undefined {
+	const discard = Boolean(plan.dirtyEvidence);
+	if (discard && !confirm(`Discard the listed local changes in ${plan.candidate.slug}? [y/N]`)) return;
+	const deleteUnmerged = new Set(plan.unmerged.filter((branch) =>
+		confirm(`Delete unmerged branch ${branch.name} at ${branch.revision}? [y/N]`)).map((branch) => branch.name));
+	return { plan, discard, deleteUnmerged };
+}
+
+function reviewFinishChildren(root: string, invocationRoot: string, parent: ScopedFinishPlan, defaults: ScopedFinishDefaults, options: PresentationOptions): ScopedSelection[] {
 	if (!confirm("Review child sessions? [y/N]")) return [];
 	process.stdout.write(formatStateTable(["CHILD SESSION", "SELECTION"], parent.children.map(({ slug }) => [slug, "Unselected"]), options));
 	const chosen = parent.children.filter(({ slug }) => confirm(`Select child ${slug}? [y/N]`));
-	const selected: ScopedFinishPlan[] = [];
+	const selected: ScopedSelection[] = [];
 	for (const child of chosen) {
 		for (;;) {
-			const plan = inspectScopedFinish(root, invocationRoot, child.slug, defaults);
+			const plan = inspectScopedFinish(root, invocationRoot, child.slug, defaults, true);
 			if (plan.metadata?.sessionId !== child.sessionId || plan.metadata?.parentSessionId !== parent.metadata?.sessionId) {
 				throw new CliError(`Child ${child.slug} changed since selection. No local assets removed.`);
 			}
 			showScopedFinish(plan, defaults, options);
-			if (plan.ready) { selected.push(plan); break; }
+			if (plan.ready) {
+				const approved = approveScopedAssets(plan);
+				if (approved) selected.push(approved);
+				break;
+			}
 			if (acknowledgeScopedInterruption(root, plan, options)) continue;
 			if (!confirm(`Recheck ${child.slug}? No deselects it. [y/N]`)) break;
 		}
@@ -793,24 +843,26 @@ function reviewFinishChildren(root: string, invocationRoot: string, parent: Scop
 // All selected scopes must still agree before the first native effect. Recheck
 // a target again just before its own effect: Git and unmanaged processes don't
 // take our lifecycle lock.
-function assertScopedFinishUnchanged(root: string, invocationRoot: string, plan: ScopedFinishPlan, defaults: ScopedFinishDefaults): void {
-	const current = inspectScopedFinish(root, invocationRoot, plan.candidate.slug, defaults);
-	if (!current.ready || current.target?.fingerprint !== plan.target?.fingerprint || current.rootIdentity !== plan.rootIdentity ||
+function assertScopedFinishUnchanged(root: string, invocationRoot: string, selection: ScopedSelection, defaults: ScopedFinishDefaults): void {
+	const { plan, discard, deleteUnmerged } = selection;
+	const current = inspectScopedFinish(root, invocationRoot, plan.candidate.slug, defaults, discard);
+	if (!current.ready || current.dirtyEvidence !== plan.dirtyEvidence || current.target?.fingerprint !== plan.target?.fingerprint || current.rootIdentity !== plan.rootIdentity ||
 		JSON.stringify(current.branches) !== JSON.stringify(plan.branches) || JSON.stringify(defaults) !== JSON.stringify(scopedFinishDefaults())) {
 		throw new CliError(`Finish readiness or scope changed for ${plan.candidate.slug}; review it again.`);
 	}
-	for (const branch of plan.branches.filter((branch) => !branch.reason)) {
-		assertTreeBranchUnchanged(root, branch, new Set([plan.target!.worktreePath]));
+	for (const branch of plan.branches.filter((branch) => !branch.reason || deleteUnmerged.has(branch.name))) {
+		assertTreeBranchUnchanged(root, branch, new Set([plan.target!.worktreePath]), deleteUnmerged.has(branch.name));
 	}
 }
 
-function applyScopedFinish(root: string, plan: ScopedFinishPlan, defaults: ScopedFinishDefaults): void {
+function applyScopedFinish(root: string, selection: ScopedSelection, defaults: ScopedFinishDefaults): void {
+	const { plan, discard, deleteUnmerged } = selection;
 	const { target, metadata, branches } = plan;
 	const slug = plan.candidate.slug;
 	assertNoWorktreeActivity(metadata!);
-	cleanupGit(root, ["worktree", "remove", target!.worktreePath], `Could not remove the local worktree for ${slug}.`);
+	cleanupGit(root, ["worktree", "remove", ...(discard ? ["--force"] : []), target!.worktreePath], `Could not remove the local worktree for ${slug}.`);
 	try {
-		for (const branch of branches.filter((branch) => !branch.reason)) deleteTreeBranch(root, branch);
+		for (const branch of branches.filter((branch) => !branch.reason || deleteUnmerged.has(branch.name))) deleteTreeBranch(root, branch, deleteUnmerged.has(branch.name));
 		if (defaults.archiveRecord) archiveMetadata(root, metadata!);
 		else unlinkSync(metadataPath(root, slug));
 	} catch (error) {
@@ -819,44 +871,88 @@ function applyScopedFinish(root: string, plan: ScopedFinishPlan, defaults: Scope
 	process.stdout.write(`Finished · ${slug}. ${defaults.archiveRecord ? "Archived session record." : "Deleted session record."} Remote assets unchanged.\n`);
 }
 
+function applyScopedSelection(root: string, invocationRoot: string, selected: ScopedSelection[], defaults: ScopedFinishDefaults): number {
+	return withOperationLock(root, "finish", () => {
+		try { for (const entry of selected) assertScopedFinishUnchanged(root, invocationRoot, entry, defaults); }
+		catch (error) { throw new CliError(`${error instanceof Error ? error.message : String(error)} No local assets removed.`); }
+		for (const [index, entry] of selected.entries()) {
+			try {
+				if (selected.length > 1) assertScopedFinishUnchanged(root, invocationRoot, entry, defaults);
+				applyScopedFinish(root, entry, defaults);
+			} catch (error) {
+				const remaining = selected.slice(index + 1).map(({ plan }) => plan.candidate.slug);
+				if (remaining.length) process.stderr.write(`Not attempted: ${remaining.join(", ")}\n`);
+				throw error;
+			}
+		}
+		return 0;
+	});
+}
+
+function showScopedSelection(selected: ScopedSelection[], keep: string[], options: PresentationOptions): void {
+	process.stdout.write(`\nFinish: ${selected.map(({ plan }) => plan.candidate.slug).join(", ")}\n`);
+	if (keep.length) process.stdout.write(`Keep: ${keep.join(", ")}\n`);
+	const losses = selected.flatMap(({ plan, discard, deleteUnmerged }) => [
+		...(discard ? plan.changes.map(({ path, originalPath }) => [plan.candidate.slug, "Discard local change", originalPath ? `${originalPath} → ${path}` : path]) : []),
+		...plan.unmerged.map((branch) => [plan.candidate.slug, deleteUnmerged.has(branch.name) ? "Delete unmerged branch" : "Keep unmerged branch", `${branch.name} @ ${branch.revision}`]),
+		...plan.artifacts.map((path) => [plan.candidate.slug, "Remove local artifact", path]),
+	]);
+	if (losses.length) process.stdout.write(formatStateTable(["SESSION", "ACTION", "ASSET"], losses.map((row) => row.map(cleanupDiagnostic)), options));
+}
+
+function finishCascade(root: string, invocationRoot: string, parent: ScopedFinishPlan, defaults: ScopedFinishDefaults, options: PresentationOptions): number {
+	for (;;) {
+		const selected: ScopedSelection[] = [], keep: string[] = [];
+		const seen = new Set<string>();
+		const visit = (expected: SessionMetadata) => {
+			const plan = inspectScopedFinish(root, invocationRoot, expected.slug, defaults, true);
+			if (!expected.sessionId || seen.has(expected.sessionId) || plan.metadata?.sessionId !== expected.sessionId || plan.metadata.parentSessionId !== expected.parentSessionId) {
+				throw new CliError(`Cannot verify cascade identity for ${expected.slug}. No local assets removed.`);
+			}
+			seen.add(expected.sessionId);
+			for (const child of plan.children) visit(child);
+			showScopedFinish(plan, defaults, options);
+			if (plan.ready) selected.push({ plan, discard: Boolean(plan.dirtyEvidence), deleteUnmerged: new Set(plan.unmerged.map(({ name }) => name)) });
+			else keep.push(plan.candidate.slug);
+		};
+		visit(parent.metadata!);
+		if (keep.length && confirm("Recheck blocked sessions before confirming? [y/N]")) continue;
+		if (!selected.length) throw new CliError("Nothing can finish. No local assets removed.");
+		showScopedSelection(selected, keep, options);
+		if (!confirm("Apply the listed cascade, including discards? [y/N]")) throw new CliError("Finish cancelled. No local assets removed.");
+		return applyScopedSelection(root, invocationRoot, selected, defaults);
+	}
+}
+
 export function finishScopedSession(root: string, invocationRoot: string, slug: string, options: PresentationOptions): number {
 	const defaults = scopedFinishDefaults();
 	const interactive = Boolean(process.stdin.isTTY && process.stdout.isTTY);
 	let reviewedInterruption = false;
 	for (;;) {
-		const plan = inspectScopedFinish(root, invocationRoot, slug, defaults);
+		const plan = inspectScopedFinish(root, invocationRoot, slug, defaults, interactive);
 		showScopedFinish(plan, defaults, options, interactive);
+		const canReviewCascade = plan.children.length > 0 || (plan.ready && Boolean(plan.dirtyEvidence || plan.unmerged.length));
+		if (interactive && canReviewCascade && confirm("Review Finish all (including descendants)? [y/N]")) {
+			return finishCascade(root, invocationRoot, plan, defaults, options);
+		}
 		if (!plan.ready) {
 			if (interactive && acknowledgeScopedInterruption(root, plan, options)) { reviewedInterruption = true; continue; }
 			if (interactive && confirm("Recheck readiness? [y/N]")) continue;
 			throw new CliError("Finish blocked. No local assets removed.");
 		}
-		const unreviewed = plan.unmerged.length || plan.artifacts.length;
+		const unreviewed = plan.dirtyEvidence || plan.unmerged.length || plan.artifacts.length;
 		if (unreviewed && !interactive) throw new CliError("Confirmation required. Run finish in a terminal to review these assets.");
+		const own = interactive ? approveScopedAssets(plan) : { plan, discard: false, deleteUnmerged: new Set<string>() };
+		if (!own) throw new CliError("Finish cancelled. No local assets removed.");
 		const reviewChildren = interactive && plan.children.length > 0;
 		const children = reviewChildren ? reviewFinishChildren(root, invocationRoot, plan, defaults, options) : [];
-		const selected = [...children, plan];
+		const selected = [...children, own];
 		if (reviewedInterruption || unreviewed || reviewChildren) {
-			const keep = plan.children.filter((child) => !children.some((entry) => entry.metadata?.sessionId === child.sessionId));
-			process.stdout.write(`\nFinish: ${selected.map((entry) => entry.candidate.slug).join(", ")}\n`);
-			if (keep.length) process.stdout.write(`Keep: ${keep.map((child) => child.slug).join(", ")}\n`);
+			const keep = plan.children.filter((child) => !children.some(({ plan }) => plan.metadata?.sessionId === child.sessionId));
+			showScopedSelection(selected, keep.map(({ slug }) => slug), options);
 			if (!confirm("Apply the listed cleanup? [y/N]")) throw new CliError("Finish cancelled. No local assets removed.");
 		}
-		return withOperationLock(root, "finish", () => {
-			try { for (const entry of selected) assertScopedFinishUnchanged(root, invocationRoot, entry, defaults); }
-			catch (error) { throw new CliError(`${error instanceof Error ? error.message : String(error)} No local assets removed.`); }
-			for (const [index, entry] of selected.entries()) {
-				try {
-					if (selected.length > 1) assertScopedFinishUnchanged(root, invocationRoot, entry, defaults);
-					applyScopedFinish(root, entry, defaults);
-				} catch (error) {
-					const remaining = selected.slice(index + 1).map((pending) => pending.candidate.slug);
-					if (remaining.length) process.stderr.write(`Not attempted: ${remaining.join(", ")}\n`);
-					throw error;
-				}
-			}
-			return 0;
-		});
+		return applyScopedSelection(root, invocationRoot, selected, defaults);
 	}
 }
 

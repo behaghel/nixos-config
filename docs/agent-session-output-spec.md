@@ -159,6 +159,18 @@ migration error, while inspection JSON payload shapes remain unchanged.
   removal, then finishes selected children before the parent. Unselected children
   retain their records and recorded parent identity. A non-interactive run never
   selects children.
+- In terminal review, discarding listed uncommitted changes and deleting each
+  verified, exclusively owned unmerged branch are separate, default-No decisions.
+  Declining to discard dirty changes leaves that session untouched. Declining
+  branch deletion preserves that branch. Final confirmation lists approved
+  losses, including changed paths and unmerged branch tips.
+- **Finish all** expands the confirmed descendant tree, including grandchildren,
+  and previews its proposed discards and deletions. One final confirmation
+  approves the displayed selection. Blocked sessions stay untouched and can
+  be rechecked before confirmation; they do not prevent ready sessions from
+  finishing. Changes to any selected scope, dirty content or approved branch tip
+  before apply invalidate the plan. Unrelated sessions, unknown ancestry and
+  unverified branch claims never gain deletion authority.
 - The plain command retires the worktree with or without a terminal when the
   default selection is ready. It deletes verified, exclusively owned and merged
   local branches, preserves borrowed or unverified branches, and leaves remote
